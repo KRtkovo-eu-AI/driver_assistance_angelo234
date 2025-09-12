@@ -139,8 +139,6 @@ local function toggleAutoHeadlightSystem()
 end
 
 local function setAutopilotOn(on)
-  if not extra_utils.getPart("autopilot_angelo234") then return end
-
   if autopilot_system_on ~= on then
     autopilot_system_on = on
     autopilot_system.onToggled(autopilot_system_on, system_params)
@@ -148,8 +146,6 @@ local function setAutopilotOn(on)
 end
 
 local function toggleAutopilotSystem()
-  if not extra_utils.getPart("autopilot_angelo234") then return end
-
   autopilot_system_on = not autopilot_system_on
   autopilot_system.onToggled(autopilot_system_on, system_params)
 end
@@ -295,7 +291,7 @@ local function onUpdate(dt)
         end
 
         --Update Autopilot System
-        if extra_utils.getPart("autopilot_angelo234") and autopilot_system_on then
+        if autopilot_system_on then
           autopilot_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
         end
 
