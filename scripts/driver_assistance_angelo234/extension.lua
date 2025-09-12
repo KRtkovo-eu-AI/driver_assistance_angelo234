@@ -17,6 +17,7 @@ local fcm_system = require('scripts/driver_assistance_angelo234/forwardCollision
 local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollisionMitigationSystem')
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
+local lane_assist_system = require('scripts/driver_assistance_angelo234/laneAssistSystem')
 --local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 local first_update = true
@@ -260,6 +261,7 @@ local function onUpdate(dt)
   if extra_utils.getPart("acc_angelo234")
   or extra_utils.getPart("forward_collision_mitigation_angelo234")
   or extra_utils.getPart("reverse_collision_mitigation_angelo234")
+  or extra_utils.getPart("lane_assist_angelo234")
   then
     --Update at 120 Hz
     if other_systems_timer >= 1.0 / 120.0 then
@@ -286,11 +288,20 @@ local function onUpdate(dt)
           rcm_system.update(other_systems_timer * 2, my_veh, system_params, parking_lines_params, rev_aeb_params, beeper_params, rear_sensor_data)
         end
 
+        --Update Lane Assist System
+        if extra_utils.getPart("lane_assist_angelo234") then
+          lane_assist_system.update(other_systems_timer * 2, my_veh)
+        else
+          lane_assist_system.reset(my_veh)
+        end
+
         i = 0
       end
 
       other_systems_timer = 0
     end
+  else
+    lane_assist_system.reset(my_veh)
   end
 
   --Update at 10 Hz
