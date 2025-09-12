@@ -59,5 +59,10 @@ M.rev_cam_params = {
         parking_line_total_len = 0.2 + 0.6 + 1.0
     }
 }
-    
+
+M.autopilot_params = {
+    target_speed = 13.8,
+    lane_pid = {p = 0.5, i = 0.0, d = 0.05}
+}
+
 return M

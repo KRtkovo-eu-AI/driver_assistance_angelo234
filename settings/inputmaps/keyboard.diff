@@ -35,6 +35,10 @@
     {
       "action":"set_acc_speed",
       "control":"backslash"
+    },
+    {
+      "action":"toggle_autopilot",
+      "control":"numpadplus"
     }
   ],
   "devicetype":"keyboard",

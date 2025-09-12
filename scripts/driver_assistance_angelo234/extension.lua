@@ -17,6 +17,7 @@ local fcm_system = require('scripts/driver_assistance_angelo234/forwardCollision
 local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollisionMitigationSystem')
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
+local autopilot_system = require('scripts/driver_assistance_angelo234/autopilotSystem')
 --local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 local first_update = true
@@ -32,6 +33,7 @@ local rcm_system_on = true
 local auto_headlight_system_on = false
 local prev_auto_headlight_system_on = false
 local acc_system_on = false
+local autopilot_system_on = false
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -134,6 +136,22 @@ local function toggleAutoHeadlightSystem()
   ui_message("Auto Headlight Dimming switched " .. msg)
 
   ]]--
+end
+
+local function setAutopilotOn(on)
+  if not extra_utils.getPart("autopilot_angelo234") then return end
+
+  if autopilot_system_on ~= on then
+    autopilot_system_on = on
+    autopilot_system.onToggled(autopilot_system_on, system_params)
+  end
+end
+
+local function toggleAutopilotSystem()
+  if not extra_utils.getPart("autopilot_angelo234") then return end
+
+  autopilot_system_on = not autopilot_system_on
+  autopilot_system.onToggled(autopilot_system_on, system_params)
 end
 
 local function setACCSystemOn(on)
@@ -272,8 +290,13 @@ local function onUpdate(dt)
 
       elseif i == 1 then
         --Update Adaptive Cruise Control
-        if extra_utils.getPart("acc_angelo234") and acc_system_on then
+        if extra_utils.getPart("acc_angelo234") and acc_system_on and not autopilot_system_on then
           acc_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
+        end
+
+        --Update Autopilot System
+        if extra_utils.getPart("autopilot_angelo234") and autopilot_system_on then
+          autopilot_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
         end
 
         --Update Forward Collision Mitigation System
@@ -347,6 +370,8 @@ M.onHeadlightsOn = onHeadlightsOn
 M.toggleFCMSystem = toggleFCMSystem
 M.toggleRCMSystem = toggleRCMSystem
 M.toggleAutoHeadlightSystem = toggleAutoHeadlightSystem
+M.setAutopilotOn = setAutopilotOn
+M.toggleAutopilotSystem = toggleAutopilotSystem
 M.setACCSystemOn = setACCSystemOn
 M.toggleACCSystem = toggleACCSystem
 M.setACCSpeed = setACCSpeed
