@@ -11,6 +11,7 @@ local function reset(veh)
     veh:queueLuaCommand("electrics.values.steeringOverride = nil")
     override_active = false
   end
+  prev_wps = nil
 end
 
 local function update(dt, veh)
@@ -46,10 +47,10 @@ local function update(dt, veh)
   end
 
   local deviation = lat - lane_center
-  local margin = lane_width * 0.5 - 0.3
+  local margin = lane_width * 0.05
 
   if math.abs(deviation) > margin then
-    local steer = deviation > 0 and -0.2 or 0.2
+    local steer = math.min(math.max(-deviation / (lane_width * 0.5), -0.5), 0.5)
     veh:queueLuaCommand("electrics.values.steeringOverride = " .. steer)
     override_active = true
   else
