@@ -1,0 +1,36 @@
+name: Script Syntax Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lua-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.3
+      - name: Check Lua syntax
+        run: |
+          files="$(find . -name '*.lua')"
+          if [ -n "$files" ]; then
+            echo "$files" | xargs -n1 luac -p
+          else
+            echo "No Lua files to check."
+          fi
+  js-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Check JavaScript syntax
+        run: |
+          files="$(find . -name '*.js')"
+          if [ -n "$files" ]; then
+            echo "$files" | xargs -n1 node --check
+          else
+            echo "No JavaScript files to check."
+          fi
