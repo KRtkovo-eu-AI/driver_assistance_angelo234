@@ -10,8 +10,8 @@ local sin, cos = math.sin, math.cos
 -- maxDist: max scan distance
 -- hFov, vFov: horizontal and vertical field of view in radians
 -- hRes, vRes: number of rays horizontally and vertically
--- minDist: ignore hits closer than this distance from origin
-local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist)
+-- ignoreId: optional vehicle id to exclude from results
+local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, ignoreId)
   local points = {}
   dir = dir:normalized()
   up = up:normalized()
@@ -31,7 +31,10 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist)
       local dest = origin + rayDir * maxDist
       local hit = castRay(origin, dest)
       if hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
-        points[#points + 1] = origin + rayDir * hit.dist
+        local hitId = hit.objectId or hit.objectID or hit.cid or hit.obj
+        if not ignoreId or hitId ~= ignoreId then
+          points[#points + 1] = origin + rayDir * hit.dist
+        end
       end
     end
   end

@@ -261,6 +261,7 @@ local function updateVirtualLidar(dt, veh)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
+    local min_dist = veh:getSpawnAABBRadius() + 0.5
     local hits = virtual_lidar.scan(
       origin,
       dir,
@@ -270,7 +271,8 @@ local function updateVirtualLidar(dt, veh)
       math.rad(30),
       60,
       15,
-      1
+      min_dist,
+      veh:getID()
     )
     virtual_lidar_point_cloud = {}
     for i, p in ipairs(hits) do
