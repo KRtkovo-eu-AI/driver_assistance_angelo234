@@ -23,7 +23,7 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
-  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 15, 5)
+  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
   local groundThreshold = -0.3
   latest_point_cloud = {}
   for _, p in ipairs(scan) do

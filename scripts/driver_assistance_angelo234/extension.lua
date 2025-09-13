@@ -271,19 +271,22 @@ local function updateVirtualLidar(dt, veh)
       aeb_params.sensor_max_distance,
       math.rad(360),
       math.rad(30),
-      60,
-      15,
+      90,
+      20,
       min_dist,
       veh:getID()
     )
+    local groundThreshold = -0.3
     virtual_lidar_point_cloud = {}
-    for i, p in ipairs(hits) do
+    for _, p in ipairs(hits) do
       local rel = p - origin
-      virtual_lidar_point_cloud[i] = {
-        x = rel:dot(right),
-        y = rel:dot(dir),
-        z = rel:dot(up)
-      }
+      if rel:dot(up) >= groundThreshold then
+        virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
+          x = rel:dot(right),
+          y = rel:dot(dir),
+          z = rel:dot(up)
+        }
+      end
     end
     virtual_lidar_update_timer = 0
   else
