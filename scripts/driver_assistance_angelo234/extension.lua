@@ -276,14 +276,17 @@ local function updateVirtualLidar(dt, veh)
       min_dist,
       veh:getID()
     )
+    local groundThreshold = -0.3
     virtual_lidar_point_cloud = {}
-    for i, p in ipairs(hits) do
+    for _, p in ipairs(hits) do
       local rel = p - origin
-      virtual_lidar_point_cloud[i] = {
-        x = rel:dot(right),
-        y = rel:dot(dir),
-        z = rel:dot(up)
-      }
+      if rel:dot(up) >= groundThreshold then
+        virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
+          x = rel:dot(right),
+          y = rel:dot(dir),
+          z = rel:dot(up)
+        }
+      end
     end
     virtual_lidar_update_timer = 0
   else
@@ -370,7 +373,8 @@ local function onUpdate(dt)
               other_systems_timer * 2,
               my_veh,
               system_params,
-              aeb_params
+              aeb_params,
+              beeper_params
             )
           end
 
