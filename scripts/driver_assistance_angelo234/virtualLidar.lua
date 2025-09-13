@@ -32,21 +32,16 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       -- cast a general ray that reports detailed hit information so we can
       -- distinguish between obstructed and free paths
       local hit = castRay(origin, dest, true, true)
-      -- "castRay" returns nil when nothing is hit, otherwise a table that
-      -- always contains a distance. Rays that travel unobstructed return a
-      -- distance equal to the cast length and have no object identifier. To
-      -- avoid coloring free space, only keep results that report a valid object
-      -- id and fall within the desired distance range.
-      if hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
+      -- Only keep results that report a valid hit point and a positive
+      -- object identifier within the desired distance range so that free
+      -- space remains transparent in the point cloud.
+      if hit and hit.pt and hit.dist and hit.dist >= minDist and hit.dist <= maxDist then
         local hitId = hit.objectId or hit.objectID or hit.cid
         if not hitId and hit.obj and hit.obj.getID then
           hitId = hit.obj:getID()
         end
-        -- BeamNG returns an object id of 0 for terrain and unobstructed rays.
-        -- Treat those as free space by requiring a positive id so only
-        -- collisions with actual objects populate the point cloud.
         if type(hitId) == "number" and hitId > 0 and (not ignoreId or hitId ~= ignoreId) then
-          points[#points + 1] = origin + rayDir * hit.dist
+          points[#points + 1] = hit.pt
         end
       end
     end
