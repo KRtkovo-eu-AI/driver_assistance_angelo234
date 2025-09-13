@@ -15,7 +15,9 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist)
   local points = {}
   dir = dir:normalized()
   up = up:normalized()
-  local right = dir:cross(up)
+  -- BeamNG uses a left-handed coordinate system, so derive the horizontal
+  -- right vector by crossing up with forward instead of the other way around
+  local right = up:cross(dir)
   right = right:normalized()
   minDist = minDist or 0
 

@@ -259,7 +259,8 @@ local function updateVirtualLidar(dt, veh)
     dir = dir:normalized()
     up = up:normalized()
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
-    virtual_lidar_point_cloud = virtual_lidar.scan(
+    local right = up:cross(dir):normalized()
+    local hits = virtual_lidar.scan(
       origin,
       dir,
       up,
@@ -270,6 +271,15 @@ local function updateVirtualLidar(dt, veh)
       15,
       1
     )
+    virtual_lidar_point_cloud = {}
+    for i, p in ipairs(hits) do
+      local rel = p - origin
+      virtual_lidar_point_cloud[i] = {
+        x = rel:dot(right),
+        y = rel:dot(dir),
+        z = rel:dot(up)
+      }
+    end
     virtual_lidar_update_timer = 0
   else
     virtual_lidar_update_timer = virtual_lidar_update_timer + dt
@@ -423,11 +433,7 @@ local function onUpdate(dt)
 end
 
 local function getVirtualLidarPointCloud()
-  local simple = {}
-  for idx, p in ipairs(virtual_lidar_point_cloud) do
-    simple[idx] = {x = p.x, y = p.y, z = p.z}
-  end
-  return simple
+  return virtual_lidar_point_cloud
 end
 
 local function onInit()
