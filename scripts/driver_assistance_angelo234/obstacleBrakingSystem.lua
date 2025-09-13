@@ -137,11 +137,14 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
   local veh_props = extra_utils.getVehicleProperties(veh)
   if holdBrakes(veh, veh_props, aeb_params) then return end
 
-  local distance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
-  if not distance or veh_props.speed <= aeb_params.min_speed then return end
+  local forward_speed = veh_props.velocity:dot(veh_props.dir)
+  if forward_speed <= aeb_params.min_speed then return end
 
-  local time_before_braking = calculateTimeBeforeBraking(distance, veh_props.speed, system_params, aeb_params)
-  performEmergencyBraking(dt, veh, aeb_params, time_before_braking, veh_props.speed)
+  local distance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
+  if not distance then return end
+
+  local time_before_braking = calculateTimeBeforeBraking(distance, forward_speed, system_params, aeb_params)
+  performEmergencyBraking(dt, veh, aeb_params, time_before_braking, forward_speed)
   soundBeepers(dt, beeper_params)
 end
 
