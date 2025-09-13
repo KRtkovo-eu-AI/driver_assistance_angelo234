@@ -107,6 +107,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
     veh:queueLuaCommand("electrics.values.brakeOverride = 1")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
+    veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
     return
   end
 
@@ -115,6 +116,11 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
     veh:queueLuaCommand("electrics.values.brakeOverride = 1")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
+    if speed > aeb_params.apply_parking_brake_speed then
+      veh:queueLuaCommand("input.event('parkingbrake', 1, 2)")
+    else
+      veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
+    end
     if system_state ~= "braking" then
       ui_message("Obstacle Collision Mitigation Activated", 3)
     end
@@ -126,6 +132,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
         veh:queueLuaCommand("electrics.values.brakeOverride = nil")
         veh:queueLuaCommand("electrics.values.throttleOverride = nil")
         veh:queueLuaCommand("input.event('brake', 0, 1)")
+        veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
         system_state = "ready"
         release_brake_confidence_level = 0
       end
