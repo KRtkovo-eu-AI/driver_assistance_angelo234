@@ -1,6 +1,7 @@
 local M = {}
 
-local sin, cos, rad = math.sin, math.cos, math.rad
+-- luacheck: globals castRay
+local sin, cos = math.sin, math.cos
 
 -- Scans environment using ray casts and returns a table of 3D points
 -- origin: vec3 start position in world space

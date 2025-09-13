@@ -1,6 +1,7 @@
--- This Source Code Form is subject to the terms of the bCDDL, v. 1.1.
--- If a copy of the bCDDL was not distributed with this
--- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
+
+-- luacheck: globals veh_accs_angelo234 be FS ui_message electrics_values_angelo234 angular_speed_angelo234
+-- luacheck: globals input_throttle_angelo234 input_brake_angelo234 input_clutch_angelo234 input_parkingbrake_angelo234
+-- luacheck: globals gearbox_mode_angelo234 newExponentialSmoothing jsonDecode vec3 setExtensionUnloadMode
 
 --global table of all vehicles acceleration vectors
 --veh_accs_angelo234[id][1] = lateral (-x = right, +x = left)
@@ -31,8 +32,8 @@ local beeper_params = nil
 
 local fcm_system_on = true
 local rcm_system_on = true
-local auto_headlight_system_on = false
-local prev_auto_headlight_system_on = false
+-- local auto_headlight_system_on = false
+-- local prev_auto_headlight_system_on = false
 local acc_system_on = false
 local obstacle_aeb_system_on = true
 
@@ -76,7 +77,7 @@ local function onExtensionLoaded()
   init(0)
 end
 
-local function onVehicleSwitched(oid, nid, player)
+local function onVehicleSwitched(_oid, _nid, player)
   init(player)
 end
 
@@ -93,48 +94,24 @@ local function toggleFCMSystem()
   if not extra_utils.getPart("forward_collision_mitigation_angelo234") then return end
 
   fcm_system_on = not fcm_system_on
-
-  local msg = nil
-
-  if fcm_system_on then
-    msg = "ON"
-  else
-    msg = "OFF"
-  end
-
-  ui_message("Forward Collision Mitigation System switched " .. msg)
+  local state = fcm_system_on and "ON" or "OFF"
+  ui_message("Forward Collision Mitigation System switched " .. state)
 end
 
 local function toggleRCMSystem()
   if not extra_utils.getPart("reverse_collision_mitigation_angelo234") then return end
 
   rcm_system_on = not rcm_system_on
-
-  local msg = nil
-
-  if rcm_system_on then
-    msg = "ON"
-  else
-    msg = "OFF"
-  end
-
-  ui_message("Reverse Collision Mitigation System switched " .. msg)
+  local state = rcm_system_on and "ON" or "OFF"
+  ui_message("Reverse Collision Mitigation System switched " .. state)
 end
 
 local function toggleObstacleAEBSystem()
   if not extra_utils.getPart("obstacle_collision_mitigation_angelo234") then return end
 
   obstacle_aeb_system_on = not obstacle_aeb_system_on
-
-  local msg = nil
-
-  if obstacle_aeb_system_on then
-    msg = "ON"
-  else
-    msg = "OFF"
-  end
-
-  ui_message("Obstacle Collision Mitigation System switched " .. msg)
+  local state = obstacle_aeb_system_on and "ON" or "OFF"
+  ui_message("Obstacle Collision Mitigation System switched " .. state)
 end
 
 local function toggleAutoHeadlightSystem()
@@ -206,21 +183,42 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     local this_veh = be:getObject(i)
     local id = this_veh:getID()
 
-    this_veh:queueLuaCommand('obj:queueGameEngineLua("veh_accs_angelo234[' .. id .. '] = {" .. sensors.gx2 .. "," .. sensors.gy2 .. "," .. sensors.gz2 .. "}")')
+    local acc_cmd =
+      'obj:queueGameEngineLua("veh_accs_angelo234[' .. id .. '] = {" .. sensors.gx2 .. ",' ..
+      '" .. sensors.gy2 .. "," .. sensors.gz2 .. "}")'
+    this_veh:queueLuaCommand(acc_cmd)
   end
 
   --Get properties of my vehicle
-  my_veh:queueLuaCommand("if input.throttle ~= nil then obj:queueGameEngineLua('input_throttle_angelo234 = ' .. input.throttle ) end")
-  my_veh:queueLuaCommand("if input.brake ~= nil then obj:queueGameEngineLua('input_brake_angelo234 = ' .. input.brake ) end")
-  my_veh:queueLuaCommand("if input.clutch ~= nil then obj:queueGameEngineLua('input_clutch_angelo234 = ' .. input.clutch ) end")
-  my_veh:queueLuaCommand("if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. input.parkingbrake ) end")
+  local throttle_cmd =
+    "if input.throttle ~= nil then obj:queueGameEngineLua('input_throttle_angelo234 = ' .. input.throttle ) end"
+  my_veh:queueLuaCommand(throttle_cmd)
+  local brake_cmd =
+    "if input.brake ~= nil then obj:queueGameEngineLua('input_brake_angelo234 = ' .. input.brake ) end"
+  my_veh:queueLuaCommand(brake_cmd)
+  local clutch_cmd =
+    "if input.clutch ~= nil then obj:queueGameEngineLua('input_clutch_angelo234 = ' .. input.clutch ) end"
+  my_veh:queueLuaCommand(clutch_cmd)
+  local parking_cmd =
+    "if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. " ..
+    "input.parkingbrake ) end"
+  my_veh:queueLuaCommand(parking_cmd)
 
-  my_veh:queueLuaCommand('obj:queueGameEngineLua("electrics_values_angelo234 = (\'" .. jsonEncode(electrics.values) .. "\')")')
-  my_veh:queueLuaCommand("obj:queueGameEngineLua('angular_speed_angelo234 = ' .. obj:getYawAngularVelocity() )")
-  my_veh:queueLuaCommand("obj:queueGameEngineLua('rotation_angelo234 = ' .. vec3(obj:getRollPitchYaw()):__tostring() )")
+  local electrics_cmd =
+    'obj:queueGameEngineLua("electrics_values_angelo234 = (\'" .. jsonEncode(electrics.values) .. "\')")'
+  my_veh:queueLuaCommand(electrics_cmd)
+  local ang_cmd =
+    "obj:queueGameEngineLua('angular_speed_angelo234 = ' .. obj:getYawAngularVelocity() )"
+  my_veh:queueLuaCommand(ang_cmd)
+  local rot_cmd =
+    "obj:queueGameEngineLua('rotation_angelo234 = ' .. vec3(obj:getRollPitchYaw()):__tostring() )"
+  my_veh:queueLuaCommand(rot_cmd)
 
   --Gets whether gearbox is in arcade or realistic mode
-  my_veh:queueLuaCommand('if controller.mainController.onSerialize ~= nil then obj:queueGameEngineLua("gearbox_mode_angelo234 = (\'" .. jsonEncode(controller.mainController.onSerialize()) .. "\')") end')
+  local gear_cmd =
+    'if controller.mainController.onSerialize ~= nil then obj:queueGameEngineLua("gearbox_mode_angelo234 = (\'" .. ' ..
+    'jsonEncode(controller.mainController.onSerialize()) .. "\')") end'
+  my_veh:queueLuaCommand(gear_cmd)
 
   if electrics_values_angelo234 == nil then
     return false
@@ -233,7 +231,9 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     and input_brake_angelo234 ~= nil
     and input_clutch_angelo234 ~= nil
     and input_parkingbrake_angelo234 ~= nil
-    and gearbox_mode_angelo234 ~= nil and gearbox_mode_angelo234 ~= "null" and type(gearbox_mode_angelo234) ~= "table"
+    and gearbox_mode_angelo234 ~= nil
+    and gearbox_mode_angelo234 ~= "null"
+    and type(gearbox_mode_angelo234) ~= "table"
 end
 
 local yawSmooth = newExponentialSmoothing(10) --exponential smoothing for yaw rate
@@ -276,7 +276,7 @@ local function updateVirtualLidar(dt, veh)
   end
 end
 
-local i = 0
+local phase = 0
 
 local function onUpdate(dt)
   --p:start()
@@ -314,14 +314,24 @@ local function onUpdate(dt)
   then
     --Update at 120 Hz
     if other_systems_timer >= 1.0 / 120.0 then
-      if i == 0 then
+      if phase == 0 then
         --Get sensor data
-        front_sensor_data = sensor_system.pollFrontSensors(other_systems_timer * 2, veh_props, system_params, aeb_params)
-        rear_sensor_data = sensor_system.pollRearSensors(other_systems_timer * 2, veh_props, system_params, rev_aeb_params)
+        front_sensor_data = sensor_system.pollFrontSensors(
+          other_systems_timer * 2,
+          veh_props,
+          system_params,
+          aeb_params
+        )
+        rear_sensor_data = sensor_system.pollRearSensors(
+          other_systems_timer * 2,
+          veh_props,
+          system_params,
+          rev_aeb_params
+        )
 
-        i = 1
+        phase = 1
 
-      elseif i == 1 then
+      elseif phase == 1 then
         --Update Adaptive Cruise Control
         if extra_utils.getPart("acc_angelo234") and acc_system_on then
           acc_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
@@ -329,20 +339,40 @@ local function onUpdate(dt)
 
           --Update Forward Collision Mitigation System
           if extra_utils.getPart("forward_collision_mitigation_angelo234") and fcm_system_on then
-            fcm_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, beeper_params, front_sensor_data)
+            fcm_system.update(
+              other_systems_timer * 2,
+              my_veh,
+              system_params,
+              aeb_params,
+              beeper_params,
+              front_sensor_data
+            )
           end
 
           --Update Obstacle Collision Mitigation System
           if extra_utils.getPart("obstacle_collision_mitigation_angelo234") and obstacle_aeb_system_on then
-            obstacle_aeb_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params)
+            obstacle_aeb_system.update(
+              other_systems_timer * 2,
+              my_veh,
+              system_params,
+              aeb_params
+            )
           end
 
           --Update Reverse Collision Mitigation System
           if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
-            rcm_system.update(other_systems_timer * 2, my_veh, system_params, parking_lines_params, rev_aeb_params, beeper_params, rear_sensor_data)
+            rcm_system.update(
+              other_systems_timer * 2,
+              my_veh,
+              system_params,
+              parking_lines_params,
+              rev_aeb_params,
+              beeper_params,
+              rear_sensor_data
+            )
           end
 
-        i = 0
+        phase = 0
       end
 
       other_systems_timer = 0
@@ -394,8 +424,8 @@ end
 
 local function getVirtualLidarPointCloud()
   local simple = {}
-  for i, p in ipairs(virtual_lidar_point_cloud) do
-    simple[i] = {x = p.x, y = p.y, z = p.z}
+  for idx, p in ipairs(virtual_lidar_point_cloud) do
+    simple[idx] = {x = p.x, y = p.y, z = p.z}
   end
   return simple
 end
