@@ -259,7 +259,8 @@ local function updateVirtualLidar(dt, veh)
     dir = dir:normalized()
     up = up:normalized()
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
-    local right = up:cross(dir):normalized()
+    -- In BeamNG's left-handed system, forward × up yields the vehicle's right
+    local right = dir:cross(up):normalized()
     local hits = virtual_lidar.scan(
       origin,
       dir,
