@@ -1,4 +1,5 @@
 -- luacheck: globals vec3 ui_message gearbox_mode_angelo234 input_throttle_angelo234 input_brake_angelo234
+-- luacheck: globals castRay Engine
 
 local M = {}
 
@@ -13,9 +14,10 @@ local beeper_timer = 0
 
 local latest_point_cloud = {}
 
--- Ensure vehicle hazard lights are on; user will switch them off manually
 local function enableHazardLights(veh)
-  veh:queueLuaCommand("if electrics.values.warn_signal == 0 then electrics.toggle_warn_signal() end")
+  -- Force the hazard lights on rather than toggling. The driver can switch
+  -- them off manually after the AEB event has passed.
+  veh:queueLuaCommand("electrics.set_warn_signal(true)")
 end
 
 -- speed is in m/s and is used to relax slope filtering at lower speeds
@@ -66,25 +68,41 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
     local height = rel:dot(up)
 
     -- check forward obstacles
-    if forward > 0 then
-      if height >= groundThreshold and height <= roofClearance then
-        if forward > overhead_dist and height >= roofClearance - overhead_margin then
-          -- distant overhead object that can be ignored
-        else
-          local slope_height = height - height_allowance
-          if slope_height / forward > slopeThreshold and lateral <= half_width then
-            latest_point_cloud[#latest_point_cloud + 1] = p
-            best = best and math.min(best, forward) or forward
+      if forward > 0 then
+        if height >= groundThreshold and height <= roofClearance then
+          if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
+            local slope_height = height - height_allowance
+            if slope_height / forward > slopeThreshold and lateral <= half_width then
+              latest_point_cloud[#latest_point_cloud + 1] = p
+              best = best and math.min(best, forward) or forward
+            end
           end
         end
       end
-    end
 
     -- check potential side collisions near the vehicle
     if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
       local clearance = lateral - half_width
       if clearance >= 0 then
         side_best = side_best and math.min(side_best, clearance) or clearance
+      end
+    end
+  end
+
+  -- augment lidar with a longer range single-ray sensor for high-speed driving
+  local long_range = aeb_params.long_range_sensor_distance
+  if long_range and long_range > maxDistance then
+    local ray_dest = origin + dir * long_range
+    local hit = castRay(origin, ray_dest, true, true)
+    if hit then
+      local rel = hit.pt - origin
+      local forward = rel:dot(dir)
+      local height = rel:dot(up)
+      if forward > 0 and height >= groundThreshold and height <= roofClearance then
+        local slope_height = height - height_allowance
+        if slope_height / forward > slopeThreshold then
+          best = best and math.min(best, forward) or forward
+        end
       end
     end
   end
@@ -107,7 +125,8 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
   local extra_leeway = 0
   if speed_kmh > 60 then
     local clamped = math.min(speed_kmh, 150)
-    extra_leeway = ((clamped - 60) / 90) * (aeb_params.high_speed_braking_time_leeway or 1)
+    local exponent = (clamped - 60) / 30
+    extra_leeway = (aeb_params.high_speed_braking_time_leeway or 0.2) * (math.exp(exponent) - 1)
   end
   return ttc - time_to_brake - aeb_params.braking_time_leeway - extra_leeway
 end
