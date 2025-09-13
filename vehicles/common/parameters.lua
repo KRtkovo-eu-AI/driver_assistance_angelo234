@@ -9,7 +9,7 @@ M.min_steer_radius = 3.1
 M.fwd_aeb_params = {  
     min_speed = 0.75,
     brake_till_stop_speed = 5,
-    braking_time_leeway = 0.6,
+    braking_time_leeway = 1.0,
   
     vehicle_search_radius = 200,
     

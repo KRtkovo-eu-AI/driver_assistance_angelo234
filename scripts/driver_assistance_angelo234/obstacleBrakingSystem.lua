@@ -55,7 +55,7 @@ end
 local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_params)
   local acc = math.min(10, system_params.gravity) * system_params.fwd_friction_coeff
   local ttc = distance / speed
-  local time_to_brake = speed / (2 * acc)
+  local time_to_brake = speed / acc
   return ttc - time_to_brake - aeb_params.braking_time_leeway
 end
 
