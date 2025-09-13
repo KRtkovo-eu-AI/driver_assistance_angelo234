@@ -15,12 +15,36 @@ local latest_point_cloud = {}
 
 -- Keeps track of hazard light state so we only toggle when needed
 local hazard_lights_on = false
+local hazardBlinkTimer = 0
+local hazardBlinkState = false
 
 -- Enable or disable vehicle hazard lights
 local function setHazardLights(veh, state)
   if hazard_lights_on ~= state then
-    veh:queueLuaCommand("electrics.hazard = " .. (state and 1 or 0))
     hazard_lights_on = state
+    if state then
+      hazardBlinkTimer = 0
+      hazardBlinkState = true
+      veh:queueLuaCommand("electrics.values.signal_left = 1")
+      veh:queueLuaCommand("electrics.values.signal_right = 1")
+    else
+      veh:queueLuaCommand("electrics.values.signal_left = 0")
+      veh:queueLuaCommand("electrics.values.signal_right = 0")
+      hazardBlinkState = false
+    end
+  end
+end
+
+-- update flashing state of the hazard lights
+local function updateHazardLights(dt, veh)
+  if not hazard_lights_on then return end
+  hazardBlinkTimer = hazardBlinkTimer + dt
+  if hazardBlinkTimer >= 0.5 then
+    hazardBlinkTimer = hazardBlinkTimer - 0.5
+    hazardBlinkState = not hazardBlinkState
+    local val = hazardBlinkState and 1 or 0
+    veh:queueLuaCommand("electrics.values.signal_left = " .. val)
+    veh:queueLuaCommand("electrics.values.signal_right = " .. val)
   end
 end
 
@@ -39,28 +63,28 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
 
   -- ignore points below groundThreshold or above the vehicle roof to avoid
-  -- triggering on walkways or bridges that are safe to pass under
+  -- triggering on walkways or bridges that are safe to pass under. Also drop
+  -- points that follow a shallow slope upward which indicates the road surface
   local groundThreshold = -0.3
   local top_z = veh_props.bb:getCenter().z + veh_props.bb:getHalfExtents().z
-  local roofClearance = top_z - origin.z + 0.5
-  latest_point_cloud = {}
-  for _, p in ipairs(scan) do
-    local rel = p - origin
-    local height = rel:dot(up)
-    if height >= groundThreshold and height <= roofClearance then
-      latest_point_cloud[#latest_point_cloud + 1] = p
-    end
-  end
-
+  local roofClearance = top_z - origin.z + 0.25
+  local slopeThreshold = 0.1 -- allow up to ~6 deg road incline
   local right = dir:cross(up)
   local half_width = veh_props.bb:getHalfExtents().x + 0.25
 
+  latest_point_cloud = {}
   local best
-  for _, p in ipairs(latest_point_cloud) do
+  for _, p in ipairs(scan) do
     local rel = p - origin
     local forward = rel:dot(dir)
-    if forward > 0 and math.abs(rel:dot(right)) <= half_width then
-      best = best and math.min(best, forward) or forward
+    if forward > 0 then
+      local height = rel:dot(up)
+      if height >= groundThreshold and height <= roofClearance and height / forward > slopeThreshold then
+        if math.abs(rel:dot(right)) <= half_width then
+          latest_point_cloud[#latest_point_cloud + 1] = p
+          best = best and math.min(best, forward) or forward
+        end
+      end
     end
   end
 
@@ -174,6 +198,7 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
   local time_before_braking = calculateTimeBeforeBraking(distance, forward_speed, system_params, aeb_params)
   performEmergencyBraking(dt, veh, aeb_params, time_before_braking, forward_speed)
   soundBeepers(dt, beeper_params)
+  updateHazardLights(dt, veh)
 end
 
 M.update = update
