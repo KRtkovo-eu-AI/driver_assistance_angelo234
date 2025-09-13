@@ -32,7 +32,12 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       -- cast a general ray that reports detailed hit information so we can
       -- distinguish between obstructed and free paths
       local hit = castRay(origin, dest, true, true)
-      if hit and hit.hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
+      -- "castRay" returns nil when nothing is hit, otherwise a table that
+      -- always contains a distance. Earlier we incorrectly checked a non-
+      -- existent "hit" flag which caused all returns to be discarded and the
+      -- UI to receive an empty point cloud. Now we simply verify the result and
+      -- distance so valid hits are recorded.
+      if hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
         local hitId = hit.objectId or hit.objectID or hit.cid or hit.obj
         if not ignoreId or hitId ~= ignoreId then
           points[#points + 1] = origin + rayDir * hit.dist
