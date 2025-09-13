@@ -1,0 +1,19 @@
+{
+  "name": "UI App Template",
+  "author": "Template Author",
+  "version": "0.1.0",
+  "description": "Generic template for BeamNG UI apps.",
+  "directive": "uiAppTemplate",
+  "domElement": "<ui-app-template></ui-app-template>",
+  "css": {
+    "left": "500px",
+    "top": "100px",
+    "width": "auto",
+    "height": "auto",
+    "min-width": "200px",
+    "min-height": "50px"
+  },
+  "types": [
+    "ui.apps.categories.examples"
+  ]
+}
