@@ -61,5 +61,10 @@ M.rev_cam_params = {
         parking_line_total_len = 0.2 + 0.6 + 1.0
     }
 }
-    
+
+M.lane_assist_params = {
+    steer_kp = 1.0,
+}
+
 return M
+
