@@ -33,7 +33,7 @@ local function sense(veh)
   local up = veh_props.dir_up
   local forward = veh_props.dir
 
-  local min_lat, max_lat
+  local lats = {}
   local sum_vec = vec3()
   local count = 0
 
@@ -43,21 +43,29 @@ local function sense(veh)
     if fwd > 0 then
       local lat = rel:dot(right)
       local vert = rel:dot(up)
-      if math.abs(vert) < 0.3 then
-        min_lat = min_lat and math.min(min_lat, lat) or lat
-        max_lat = max_lat and math.max(max_lat, lat) or lat
+      if math.abs(vert) < 0.3 and math.abs(lat) < 5 then
+        lats[#lats + 1] = lat
         sum_vec = sum_vec + rel
         count = count + 1
       end
     end
   end
 
-  if not min_lat or not max_lat then return nil end
+  if #lats < 2 then return nil end
+  table.sort(lats)
+  local low_idx = math.max(1, math.floor(#lats * 0.1))
+  local high_idx = math.min(#lats, math.ceil(#lats * 0.9))
+  local min_lat = lats[low_idx]
+  local max_lat = lats[high_idx]
   local lane_width = max_lat - min_lat
   if lane_width <= 0 then return nil end
 
   local lane_center = 0.5 * (min_lat + max_lat)
   local lateral_offset = -lane_center
+
+  -- Smooth results to reduce jitter
+  M.prev_width = M.prev_width and (M.prev_width + (lane_width - M.prev_width) * 0.2) or lane_width
+  M.prev_offset = M.prev_offset and (M.prev_offset + (lateral_offset - M.prev_offset) * 0.2) or lateral_offset
 
   local road_dir
   if count > 0 then
@@ -67,8 +75,8 @@ local function sense(veh)
   end
 
   return {
-    lane_width = lane_width,
-    lateral_offset = lateral_offset,
+    lane_width = M.prev_width,
+    lateral_offset = M.prev_offset,
     road_dir = road_dir
   }
 end

@@ -63,7 +63,8 @@ M.rev_cam_params = {
 }
 
 M.lane_assist_params = {
-    steer_kp = 1.0,
+    steer_kp = 0.5,
+    steer_smoothing = 0.2,
 }
 
 return M
