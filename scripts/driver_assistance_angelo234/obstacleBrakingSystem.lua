@@ -102,7 +102,14 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
   local dist = math.max(0, distance - (aeb_params.braking_distance_leeway or 0) - speed_leeway)
   local ttc = dist / speed
   local time_to_brake = speed / acc
-  return ttc - time_to_brake - aeb_params.braking_time_leeway
+  -- add extra safety margin at higher speeds to begin braking earlier
+  local speed_kmh = speed * 3.6
+  local extra_leeway = 0
+  if speed_kmh > 60 then
+    local clamped = math.min(speed_kmh, 150)
+    extra_leeway = ((clamped - 60) / 90) * (aeb_params.high_speed_braking_time_leeway or 1)
+  end
+  return ttc - time_to_brake - aeb_params.braking_time_leeway - extra_leeway
 end
 
 local function soundBeepers(dt, beeper_params)
@@ -167,9 +174,9 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     end
     if system_state ~= "braking" then
       ui_message("Obstacle Collision Mitigation Activated", 3)
+      enableHazardLights(veh)
     end
     system_state = "braking"
-    enableHazardLights(veh)
   else
     if system_state == "braking" then
       release_brake_confidence_level = release_brake_confidence_level + dt
