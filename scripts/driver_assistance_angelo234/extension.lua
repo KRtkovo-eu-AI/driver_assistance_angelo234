@@ -258,9 +258,18 @@ local function updateVirtualLidar(dt, veh)
     dir.z = 0
     dir = dir:normalized()
     up = up:normalized()
-    local forward_offset = 1.5
-    local origin = vec3(pos.x + dir.x * forward_offset, pos.y + dir.y * forward_offset, pos.z + 0.5)
-    virtual_lidar_point_cloud = virtual_lidar.scan(origin, dir, up, aeb_params.sensor_max_distance, math.rad(30), math.rad(20), 15, 5)
+    local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+    virtual_lidar_point_cloud = virtual_lidar.scan(
+      origin,
+      dir,
+      up,
+      aeb_params.sensor_max_distance,
+      math.rad(360),
+      math.rad(30),
+      60,
+      15,
+      1
+    )
     virtual_lidar_update_timer = 0
   else
     virtual_lidar_update_timer = virtual_lidar_update_timer + dt
