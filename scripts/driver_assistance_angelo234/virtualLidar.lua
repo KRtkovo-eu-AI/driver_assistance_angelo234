@@ -1,6 +1,6 @@
 local M = {}
 
--- luacheck: globals castRay
+-- luacheck: globals castRay castRayStatic
 local sin, cos = math.sin, math.cos
 
 -- Scans environment using ray casts and returns a table of 3D points
@@ -28,21 +28,30 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       local vAng = -vFov * 0.5 + vFov * j / math.max(1, vRes - 1)
       local cv, sv = cos(vAng), sin(vAng)
       local rayDir = dir * (cv * ch) + right * (cv * sh) + up * sv
-      local dest = origin + rayDir * maxDist
-      -- cast a general ray that reports detailed hit information so we can
-      -- distinguish between obstructed and free paths
-      local hit = castRay(origin, dest, true, true)
-      -- Only record rays that intersect something before reaching the
-      -- maximum distance. This keeps unobstructed space transparent in the
-      -- UI while coloring any actual obstacles that the lidar detects.
-      if hit and hit.pt and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
-        local hitId = hit.objectId or hit.objectID or hit.cid
-        if not hitId and hit.obj and hit.obj.getID then
-          hitId = hit.obj:getID()
+      -- Perform both static and dynamic raycasts and keep the closest hit.
+      local staticDist = castRayStatic(origin, rayDir, maxDist)
+      local dynHit = castRay(origin, origin + rayDir * maxDist, true, true)
+
+      local dist, pt
+      if staticDist and staticDist < maxDist then
+        dist = staticDist
+        pt = origin + rayDir * staticDist
+      end
+      if dynHit and dynHit.dist and dynHit.dist < maxDist then
+        local hitId = dynHit.objectId or dynHit.objectID or dynHit.cid
+        if not hitId and dynHit.obj and dynHit.obj.getID then
+          hitId = dynHit.obj:getID()
         end
         if not ignoreId or hitId ~= ignoreId then
-          points[#points + 1] = hit.pt
+          if not dist or dynHit.dist < dist then
+            dist = dynHit.dist
+            pt = dynHit.pt
+          end
         end
+      end
+
+      if pt and dist and dist >= minDist then
+        points[#points + 1] = pt
       end
     end
   end
