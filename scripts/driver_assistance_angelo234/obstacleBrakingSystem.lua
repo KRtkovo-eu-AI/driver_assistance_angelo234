@@ -112,11 +112,11 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
     local clamped = math.min(speed_kmh, 150)
     local exponent = (clamped - 60) / 20
     extra_leeway = (aeb_params.high_speed_braking_time_leeway or 0.5) * (math.exp(exponent) - 1)
-    if speed_kmh > 95 then
-      extra_leeway = extra_leeway
-        + ((speed_kmh - 95) / 10) * (aeb_params.very_high_speed_braking_time_leeway or 0.25)
+    if speed_kmh > 85 then
+      extra_leeway = (extra_leeway
+        + (speed_kmh - 85) / 10) * (aeb_params.very_high_speed_braking_time_leeway or 1.0)
     end
-    extra_leeway = math.min(extra_leeway, aeb_params.max_high_speed_braking_leeway or 10)
+    extra_leeway = math.min(extra_leeway, aeb_params.max_high_speed_braking_leeway or 20)
   end
   return ttc - time_to_brake - aeb_params.braking_time_leeway - extra_leeway
 end
