@@ -373,7 +373,8 @@ local function onUpdate(dt)
               other_systems_timer * 2,
               my_veh,
               system_params,
-              aeb_params
+              aeb_params,
+              beeper_params
             )
           end
 

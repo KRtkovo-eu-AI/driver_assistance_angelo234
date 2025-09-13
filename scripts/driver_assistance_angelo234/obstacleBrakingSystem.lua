@@ -9,6 +9,8 @@ local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar'
 local system_state = "ready"
 local release_brake_confidence_level = 0
 
+local beeper_timer = 0
+
 local latest_point_cloud = {}
 
 -- Returns distance to closest obstacle in front of the vehicle while also
@@ -57,6 +59,18 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
   local ttc = distance / speed
   local time_to_brake = speed / acc
   return ttc - time_to_brake - aeb_params.braking_time_leeway
+end
+
+local function soundBeepers(dt, beeper_params)
+  if system_state == "braking" then
+    beeper_timer = beeper_timer + dt
+    if beeper_timer >= 1.0 / beeper_params.fwd_warning_tone_hertz then
+      Engine.Audio.playOnce('AudioGui', 'art/sound/proximity_tone_50ms_loud.wav')
+      beeper_timer = 0
+    end
+  else
+    beeper_timer = 0
+  end
 end
 
 local function holdBrakes(veh, veh_props, aeb_params)
@@ -119,7 +133,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
   end
 end
 
-local function update(dt, veh, system_params, aeb_params)
+local function update(dt, veh, system_params, aeb_params, beeper_params)
   local veh_props = extra_utils.getVehicleProperties(veh)
   if holdBrakes(veh, veh_props, aeb_params) then return end
 
@@ -128,6 +142,7 @@ local function update(dt, veh, system_params, aeb_params)
 
   local time_before_braking = calculateTimeBeforeBraking(distance, veh_props.speed, system_params, aeb_params)
   performEmergencyBraking(dt, veh, aeb_params, time_before_braking, veh_props.speed)
+  soundBeepers(dt, beeper_params)
 end
 
 M.update = update
