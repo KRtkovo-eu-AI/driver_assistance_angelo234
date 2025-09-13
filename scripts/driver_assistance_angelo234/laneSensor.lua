@@ -66,6 +66,7 @@ local function sense(veh)
   -- Smooth results to reduce jitter
   M.prev_width = M.prev_width and (M.prev_width + (lane_width - M.prev_width) * 0.2) or lane_width
   M.prev_offset = M.prev_offset and (M.prev_offset + (lateral_offset - M.prev_offset) * 0.2) or lateral_offset
+  M.prev_dir = M.prev_dir or veh_props.dir
 
   local road_dir
   if count > 0 then
@@ -74,10 +75,13 @@ local function sense(veh)
     road_dir = veh_props.dir
   end
 
+  -- Smooth road direction for stability
+  M.prev_dir = (M.prev_dir + (road_dir - M.prev_dir) * 0.2):normalized()
+
   return {
     lane_width = M.prev_width,
     lateral_offset = M.prev_offset,
-    road_dir = road_dir
+    road_dir = M.prev_dir
   }
 end
 
