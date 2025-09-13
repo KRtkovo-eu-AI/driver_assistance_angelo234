@@ -1,3 +1,5 @@
+-- luacheck: globals vec3 ui_message gearbox_mode_angelo234 input_throttle_angelo234 input_brake_angelo234
+
 local M = {}
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
@@ -5,14 +7,13 @@ local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar'
 
 -- system states: "ready", "braking", "holding"
 local system_state = "ready"
-local beeper_timer = 0
 local release_brake_confidence_level = 0
 
 local latest_point_cloud = {}
 
 -- Returns distance to closest obstacle in front of the vehicle while also
 -- storing the last gathered point cloud from the virtual lidar
-local function frontObstacleDistance(veh, maxDistance)
+local function frontObstacleDistance(veh, veh_props, maxDistance)
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
   local up = veh:getDirectionVectorUp()
@@ -24,12 +25,15 @@ local function frontObstacleDistance(veh, maxDistance)
 
   latest_point_cloud = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 15, 5)
 
+  local right = dir:cross(up)
+  local half_width = veh_props.bb:getHalfExtents().x + 0.25
+
   local best
   for _, p in ipairs(latest_point_cloud) do
     local rel = p - origin
-    local dist = rel:length()
-    if dir:dot(rel) > 0 then
-      best = best and math.min(best, dist) or dist
+    local forward = rel:dot(dir)
+    if forward > 0 and math.abs(rel:dot(right)) <= half_width then
+      best = best and math.min(best, forward) or forward
     end
   end
 
@@ -106,7 +110,7 @@ local function update(dt, veh, system_params, aeb_params)
   local veh_props = extra_utils.getVehicleProperties(veh)
   if holdBrakes(veh, veh_props, aeb_params) then return end
 
-  local distance = frontObstacleDistance(veh, aeb_params.sensor_max_distance)
+  local distance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
   if not distance or veh_props.speed <= aeb_params.min_speed then return end
 
   local time_before_braking = calculateTimeBeforeBraking(distance, veh_props.speed, system_params, aeb_params)
