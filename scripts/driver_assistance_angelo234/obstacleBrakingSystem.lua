@@ -15,36 +15,12 @@ local latest_point_cloud = {}
 
 -- Keeps track of hazard light state so we only toggle when needed
 local hazard_lights_on = false
-local hazardBlinkTimer = 0
-local hazardBlinkState = false
 
--- Enable or disable vehicle hazard lights
+-- Enable or disable vehicle hazard lights via built-in toggle
 local function setHazardLights(veh, state)
   if hazard_lights_on ~= state then
     hazard_lights_on = state
-    if state then
-      hazardBlinkTimer = 0
-      hazardBlinkState = true
-      veh:queueLuaCommand("electrics.values.signal_left = 1")
-      veh:queueLuaCommand("electrics.values.signal_right = 1")
-    else
-      veh:queueLuaCommand("electrics.values.signal_left = 0")
-      veh:queueLuaCommand("electrics.values.signal_right = 0")
-      hazardBlinkState = false
-    end
-  end
-end
-
--- update flashing state of the hazard lights
-local function updateHazardLights(dt, veh)
-  if not hazard_lights_on then return end
-  hazardBlinkTimer = hazardBlinkTimer + dt
-  if hazardBlinkTimer >= 0.5 then
-    hazardBlinkTimer = hazardBlinkTimer - 0.5
-    hazardBlinkState = not hazardBlinkState
-    local val = hazardBlinkState and 1 or 0
-    veh:queueLuaCommand("electrics.values.signal_left = " .. val)
-    veh:queueLuaCommand("electrics.values.signal_right = " .. val)
+    veh:queueLuaCommand("electrics.toggle_warn_signal()")
   end
 end
 
@@ -198,7 +174,6 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
   local time_before_braking = calculateTimeBeforeBraking(distance, forward_speed, system_params, aeb_params)
   performEmergencyBraking(dt, veh, aeb_params, time_before_braking, forward_speed)
   soundBeepers(dt, beeper_params)
-  updateHazardLights(dt, veh)
 end
 
 M.update = update
