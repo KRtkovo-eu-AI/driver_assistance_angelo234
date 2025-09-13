@@ -7,7 +7,7 @@ M.max_steer_radius = 4.3
 M.min_steer_radius = 3.1
 
 M.fwd_aeb_params = {
-    min_speed = 0.75,
+    min_speed = 2.78,
     brake_till_stop_speed = 5,
     apply_parking_brake_speed = 16.7,
     braking_time_leeway = 1.5,
