@@ -18,6 +18,7 @@ local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollision
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
 local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacleBrakingSystem')
+local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 --local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 local first_update = true
@@ -41,6 +42,8 @@ local rear_sensor_data = nil
 local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
+local virtual_lidar_update_timer = 0
+local virtual_lidar_point_cloud = {}
 
 M.curr_camera_mode = "orbit"
 M.prev_camera_mode = "orbit"
@@ -246,6 +249,24 @@ end
 
 --local p = LuaProfiler("my profiler")
 
+local function updateVirtualLidar(dt, veh)
+  if not aeb_params then return end
+  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+    local pos = veh:getPosition()
+    local dir = veh:getDirectionVector()
+    local up = veh:getDirectionVectorUp()
+    dir.z = 0
+    dir = dir:normalized()
+    up = up:normalized()
+    local forward_offset = 1.5
+    local origin = vec3(pos.x + dir.x * forward_offset, pos.y + dir.y * forward_offset, pos.z + 0.5)
+    virtual_lidar_point_cloud = virtual_lidar.scan(origin, dir, up, aeb_params.sensor_max_distance, math.rad(30), math.rad(20), 15, 5)
+    virtual_lidar_update_timer = 0
+  else
+    virtual_lidar_update_timer = virtual_lidar_update_timer + dt
+  end
+end
+
 local i = 0
 
 local function onUpdate(dt)
@@ -274,6 +295,8 @@ local function onUpdate(dt)
   if not be:getEnabled() or not system_params then return end
 
   local veh_props = extra_utils.getVehicleProperties(my_veh)
+
+  updateVirtualLidar(dt, my_veh)
 
   if extra_utils.getPart("acc_angelo234")
   or extra_utils.getPart("forward_collision_mitigation_angelo234")
@@ -361,9 +384,8 @@ local function onUpdate(dt)
 end
 
 local function getVirtualLidarPointCloud()
-  local pts = obstacle_aeb_system.getPointCloud()
   local simple = {}
-  for i, p in ipairs(pts) do
+  for i, p in ipairs(virtual_lidar_point_cloud) do
     simple[i] = {x = p.x, y = p.y, z = p.z}
   end
   return simple
