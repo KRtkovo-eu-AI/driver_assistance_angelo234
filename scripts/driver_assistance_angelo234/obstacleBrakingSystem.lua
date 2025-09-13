@@ -18,10 +18,10 @@ local latest_point_cloud = {}
 local function frontObstacleDistance(veh, veh_props, maxDistance)
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
-  local up = veh:getDirectionVectorUp()
   dir.z = 0
   dir = dir:normalized()
-  up = up:normalized()
+  -- use world up so pitch/roll of the vehicle doesn't tilt the scan
+  local up = vec3(0, 0, 1)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
