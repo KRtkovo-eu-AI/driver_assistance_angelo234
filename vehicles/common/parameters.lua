@@ -6,10 +6,12 @@ M.rev_friction_coeff = 0.8
 M.max_steer_radius = 4.3
 M.min_steer_radius = 3.1
 
-M.fwd_aeb_params = {  
-    min_speed = 0.75,
-    brake_till_stop_speed = 3,
-    braking_time_leeway = 0.3,
+M.fwd_aeb_params = {
+    min_speed = 2.78,
+    brake_till_stop_speed = 5,
+    apply_parking_brake_speed = 16.7,
+    braking_time_leeway = 1.5,
+    braking_distance_leeway = 8,
   
     vehicle_search_radius = 200,
     
@@ -20,7 +22,7 @@ M.fwd_aeb_params = {
     num_of_sensors = 9,
     sensors_polled_per_iteration = 1,
     sensor_offset_forward = 0.0,
-    sensor_max_distance = 30 
+    sensor_max_distance = 60
 }
 
 M.rev_aeb_params = {
@@ -59,5 +61,14 @@ M.rev_cam_params = {
         parking_line_total_len = 0.2 + 0.6 + 1.0
     }
 }
-    
+
+M.lane_assist_params = {
+    steer_kp = 0.5,
+    heading_kp = 1.0,
+    steer_smoothing = 0.2,
+    warning_ratio = 0.8,
+    steer_limit = 0.5,
+}
+
 return M
+

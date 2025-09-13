@@ -1,0 +1,14 @@
+{
+    "lane_assist_angelo234": {
+        "information":{
+            "authors":"angelo234",
+            "name":"Lane Assist System",
+            "value":250,
+        },
+        "slotType" : "lane_assist_angelo234",
+        "slots": [
+            ["type", "default", "description"],
+            ["lane_assist_system_angelo234", "lane_assist_system_angelo234", "Lane Assist"]
+        ],
+    },
+}

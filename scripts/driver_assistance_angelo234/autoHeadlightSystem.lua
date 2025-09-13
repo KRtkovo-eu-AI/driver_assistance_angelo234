@@ -37,6 +37,10 @@ end
 local function systemSwitchedOn()
   local light_state = getLightState()
 
+  if electrics_values_angelo234 ~= nil then
+    light_state = electrics_values_angelo234["lights_state"]
+  end
+
   if light_state == 2 then
     headlights_turned_off = false
   end

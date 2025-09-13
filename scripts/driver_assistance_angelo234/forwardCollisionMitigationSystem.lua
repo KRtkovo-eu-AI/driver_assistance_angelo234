@@ -229,7 +229,7 @@ local function calculateTimeBeforeBraking(distance, vel_rel, system_params, aeb_
 
   --Calculate TTC
   local ttc = distance / vel_rel
-  local time_to_brake = vel_rel / (2 * acc)
+  local time_to_brake = vel_rel / acc
 
   --leeway time depending on speed
   local time_before_braking = ttc - time_to_brake - aeb_params.braking_time_leeway

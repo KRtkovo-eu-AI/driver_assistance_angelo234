@@ -1,0 +1,14 @@
+{
+    "obstacle_collision_mitigation_angelo234": {
+        "information":{
+            "authors":"angelo234",
+            "name":"Obstacle Collision Mitigation System",
+            "value":250,
+        },
+        "slotType" : "obstacle_collision_mitigation_angelo234",
+        "slots": [
+            ["type", "default", "description"],
+            ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle AEB"],
+        ],
+    },
+}
