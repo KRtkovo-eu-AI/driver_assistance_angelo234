@@ -360,6 +360,15 @@ local function onUpdate(dt)
   --p:finish(true)
 end
 
+local function getVirtualLidarPointCloud()
+  local pts = obstacle_aeb_system.getPointCloud()
+  local simple = {}
+  for i, p in ipairs(pts) do
+    simple[i] = {x = p.x, y = p.y, z = p.z}
+  end
+  return simple
+end
+
 local function onInit()
   setExtensionUnloadMode(M, "manual")
 end
@@ -380,5 +389,6 @@ M.changeACCFollowingDistance = changeACCFollowingDistance
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
+M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
 
 return M
