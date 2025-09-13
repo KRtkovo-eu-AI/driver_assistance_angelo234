@@ -32,15 +32,15 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       -- cast a general ray that reports detailed hit information so we can
       -- distinguish between obstructed and free paths
       local hit = castRay(origin, dest, true, true)
-      -- Only keep results that report a valid hit point and a positive
-      -- object identifier within the desired distance range so that free
-      -- space remains transparent in the point cloud.
-      if hit and hit.pt and hit.dist and hit.dist >= minDist and hit.dist <= maxDist then
+      -- Only record rays that intersect something before reaching the
+      -- maximum distance. This keeps unobstructed space transparent in the
+      -- UI while coloring any actual obstacles that the lidar detects.
+      if hit and hit.pt and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
         local hitId = hit.objectId or hit.objectID or hit.cid
         if not hitId and hit.obj and hit.obj.getID then
           hitId = hit.obj:getID()
         end
-        if type(hitId) == "number" and hitId > 0 and (not ignoreId or hitId ~= ignoreId) then
+        if not ignoreId or hitId ~= ignoreId then
           points[#points + 1] = hit.pt
         end
       end
