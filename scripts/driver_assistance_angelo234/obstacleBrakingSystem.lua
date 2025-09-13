@@ -15,9 +15,9 @@ local beeper_timer = 0
 local latest_point_cloud = {}
 
 local function enableHazardLights(veh)
-  -- Force the hazard lights on rather than toggling. The driver can switch
+  -- Toggle the hazard lights on. They remain active until the driver switches
   -- them off manually after the AEB event has passed.
-  veh:queueLuaCommand("electrics.set_warn_signal(true)")
+  veh:queueLuaCommand("electrics.toggle_warn_signal()")
 end
 
 -- speed is in m/s and is used to relax slope filtering at lower speeds
@@ -90,7 +90,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
   end
 
   -- augment lidar with a longer range single-ray sensor for high-speed driving
-  local long_range = aeb_params.long_range_sensor_distance
+  local long_range = aeb_params.long_range_sensor_distance or 300
   if long_range and long_range > maxDistance then
     local ray_dest = origin + dir * long_range
     local hit = castRay(origin, ray_dest, true, true)
@@ -125,8 +125,9 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
   local extra_leeway = 0
   if speed_kmh > 60 then
     local clamped = math.min(speed_kmh, 150)
-    local exponent = (clamped - 60) / 30
-    extra_leeway = (aeb_params.high_speed_braking_time_leeway or 0.2) * (math.exp(exponent) - 1)
+    local exponent = (clamped - 60) / 20
+    extra_leeway = (aeb_params.high_speed_braking_time_leeway or 0.5) * (math.exp(exponent) - 1)
+    extra_leeway = math.min(extra_leeway, aeb_params.max_high_speed_braking_leeway or 10)
   end
   return ttc - time_to_brake - aeb_params.braking_time_leeway - extra_leeway
 end
