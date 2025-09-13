@@ -38,11 +38,14 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       -- avoid coloring free space, only keep results that report a valid object
       -- id and fall within the desired distance range.
       if hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
-        local hitId = hit.objectId or hit.objectID or hit.cid or hit.obj
+        local hitId = hit.objectId or hit.objectID or hit.cid
+        if not hitId and hit.obj and hit.obj.getID then
+          hitId = hit.obj:getID()
+        end
         -- BeamNG returns an object id of 0 for terrain and unobstructed rays.
         -- Treat those as free space by requiring a positive id so only
         -- collisions with actual objects populate the point cloud.
-        if hitId and hitId > 0 and (not ignoreId or hitId ~= ignoreId) then
+        if type(hitId) == "number" and hitId > 0 and (not ignoreId or hitId ~= ignoreId) then
           points[#points + 1] = origin + rayDir * hit.dist
         end
       end
