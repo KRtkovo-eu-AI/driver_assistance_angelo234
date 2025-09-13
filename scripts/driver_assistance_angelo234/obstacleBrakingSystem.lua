@@ -15,8 +15,8 @@ local beeper_timer = 0
 local latest_point_cloud = {}
 
 local function enableHazardLights(veh)
-  -- Turn the hazard lights on and leave them for the driver to switch off.
-  veh:queueLuaCommand("electrics.set_warn_signal(true)")
+  -- Toggle the hazard lights on and leave them for the driver to switch off.
+  veh:queueLuaCommand("electrics.toggle_warn_signal()")
 end
 
 local function enableABS(veh)
@@ -111,6 +111,10 @@ local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_pa
     local clamped = math.min(speed_kmh, 150)
     local exponent = (clamped - 60) / 20
     extra_leeway = (aeb_params.high_speed_braking_time_leeway or 0.5) * (math.exp(exponent) - 1)
+    if speed_kmh > 95 then
+      extra_leeway = extra_leeway
+        + ((speed_kmh - 95) / 10) * (aeb_params.very_high_speed_braking_time_leeway or 0.25)
+    end
     extra_leeway = math.min(extra_leeway, aeb_params.max_high_speed_braking_leeway or 10)
   end
   return ttc - time_to_brake - aeb_params.braking_time_leeway - extra_leeway
