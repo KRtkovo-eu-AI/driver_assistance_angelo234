@@ -19,6 +19,11 @@ local function enableHazardLights(veh)
   veh:queueLuaCommand("electrics.set_warn_signal(true)")
 end
 
+local function enableABS(veh)
+  -- Ensure ABS is active if the vehicle supports it.
+  veh:queueLuaCommand("if electrics.setABSMode then electrics.setABSMode(1) end")
+end
+
 -- speed is in m/s and is used to relax slope filtering at lower speeds
 local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
   local maxDistance = aeb_params.sensor_max_distance
@@ -155,7 +160,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
   if system_state == "braking" and speed < aeb_params.brake_till_stop_speed then
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
-    veh:queueLuaCommand("electrics.values.brakeOverride = 1")
+    veh:queueLuaCommand("electrics.values.brakeOverride = nil")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
     veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
     return
@@ -164,7 +169,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
   if time_before_braking <= 0 then
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
-    veh:queueLuaCommand("electrics.values.brakeOverride = 1")
+    veh:queueLuaCommand("electrics.values.brakeOverride = nil")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
     if speed > aeb_params.apply_parking_brake_speed then
       veh:queueLuaCommand("input.event('parkingbrake', 1, 2)")
@@ -174,6 +179,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     if system_state ~= "braking" then
       ui_message("Obstacle Collision Mitigation Activated", 3)
       enableHazardLights(veh)
+      enableABS(veh)
     end
     system_state = "braking"
   else
