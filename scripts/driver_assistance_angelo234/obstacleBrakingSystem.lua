@@ -13,19 +13,15 @@ local beeper_timer = 0
 
 local latest_point_cloud = {}
 
--- Keeps track of hazard light state so we only toggle when needed
-local hazard_lights_on = false
-
--- Enable or disable vehicle hazard lights via built-in toggle
-local function setHazardLights(veh, state)
-  if hazard_lights_on ~= state then
-    hazard_lights_on = state
-    veh:queueLuaCommand("electrics.toggle_warn_signal()")
-  end
+-- Ensure vehicle hazard lights are on; user will switch them off manually
+local function enableHazardLights(veh)
+  veh:queueLuaCommand("if electrics.values.warn_signal == 0 then electrics.toggle_warn_signal() end")
 end
 
 -- Returns distance to closest obstacle in front of the vehicle while also
 -- storing the last gathered point cloud from the virtual lidar
+-- Returns distance to closest obstacle ahead and the closest clearance to side
+-- obstacles. Also stores the last gathered point cloud from the virtual lidar.
 local function frontObstacleDistance(veh, veh_props, maxDistance)
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
@@ -44,27 +40,39 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local groundThreshold = -0.3
   local top_z = veh_props.bb:getCenter().z + veh_props.bb:getHalfExtents().z
   local roofClearance = top_z - origin.z + 0.25
-  local slopeThreshold = 0.1 -- allow up to ~6 deg road incline
+  local slopeThreshold = 0.03 -- ignore gentle inclines ~1.7 deg
   local right = dir:cross(up)
   local half_width = veh_props.bb:getHalfExtents().x + 0.25
 
   latest_point_cloud = {}
   local best
+  local side_best
   for _, p in ipairs(scan) do
     local rel = p - origin
     local forward = rel:dot(dir)
+    local lateral = math.abs(rel:dot(right))
+    local height = rel:dot(up)
+
+    -- check forward obstacles
     if forward > 0 then
-      local height = rel:dot(up)
       if height >= groundThreshold and height <= roofClearance and height / forward > slopeThreshold then
-        if math.abs(rel:dot(right)) <= half_width then
+        if lateral <= half_width then
           latest_point_cloud[#latest_point_cloud + 1] = p
           best = best and math.min(best, forward) or forward
         end
       end
     end
+
+    -- check potential side collisions near the vehicle
+    if math.abs(forward) <= 2 and height >= groundThreshold and height <= roofClearance then
+      local clearance = lateral - half_width
+      if clearance >= 0 then
+        side_best = side_best and math.min(side_best, clearance) or clearance
+      end
+    end
   end
 
-  return best
+  return best, side_best
 end
 
 local function getPointCloud()
@@ -113,7 +121,6 @@ local function holdBrakes(veh, veh_props, aeb_params)
       veh:queueLuaCommand("input.event('brake', 0, 1)")
       veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
       system_state = "ready"
-      setHazardLights(veh, false)
     end
   end
 
@@ -144,7 +151,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
       ui_message("Obstacle Collision Mitigation Activated", 3)
     end
     system_state = "braking"
-    setHazardLights(veh, true)
+    enableHazardLights(veh)
   else
     if system_state == "braking" then
       release_brake_confidence_level = release_brake_confidence_level + dt
@@ -154,7 +161,6 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
         veh:queueLuaCommand("input.event('brake', 0, 1)")
         veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
         system_state = "ready"
-        setHazardLights(veh, false)
         release_brake_confidence_level = 0
       end
     end
@@ -168,7 +174,13 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   if forward_speed <= aeb_params.min_speed then return end
 
-  local distance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
+  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
+
+  local side_threshold = aeb_params.side_clearance_threshold or 0.3
+  if side_clearance and side_clearance < side_threshold then
+    distance = distance and math.min(distance, side_clearance) or side_clearance
+  end
+
   if not distance then return end
 
   local time_before_braking = calculateTimeBeforeBraking(distance, forward_speed, system_params, aeb_params)
