@@ -15,8 +15,8 @@ local beeper_timer = 0
 local latest_point_cloud = {}
 
 local function enableHazardLights(veh)
-  -- Toggle the hazard lights on and leave them for the driver to switch off.
-  veh:queueLuaCommand("electrics.toggle_warn_signal()")
+  -- Turn on the hazard lights and leave them for the driver to switch off.
+  veh:queueLuaCommand("electrics.set_warn_signal(true)")
 end
 
 local function enableABS(veh)
