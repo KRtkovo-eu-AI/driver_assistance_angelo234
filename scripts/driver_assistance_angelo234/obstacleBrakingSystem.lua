@@ -1,48 +1,43 @@
 local M = {}
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
+local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 
 -- system states: "ready", "braking", "holding"
 local system_state = "ready"
 local beeper_timer = 0
 local release_brake_confidence_level = 0
 
--- Casts multiple rays ahead and returns the nearest hit distance
-local function castRays(baseOrigin, dir, maxDistance, widthDir)
-  local heights = {0.3, 0.8, 1.3}
-  local laterals = widthDir and {0, 0.4, -0.4} or {0}
+local latest_point_cloud = {}
+
+-- Returns distance to closest obstacle in front of the vehicle while also
+-- storing the last gathered point cloud from the virtual lidar
+local function frontObstacleDistance(veh, maxDistance)
+  local pos = veh:getPosition()
+  local dir = veh:getDirectionVector()
+  local up = veh:getDirectionVectorUp()
+  dir.z = 0
+  dir = dir:normalized()
+  up = up:normalized()
+  local forwardOffset = 1.5
+  local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
+
+  latest_point_cloud = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 15, 5)
+
   local best
-
-  for _, lateral in ipairs(laterals) do
-    for _, h in ipairs(heights) do
-      local origin = vec3(baseOrigin.x, baseOrigin.y, baseOrigin.z + h)
-      if widthDir then
-        origin.x = origin.x + widthDir.x * lateral
-        origin.y = origin.y + widthDir.y * lateral
-        origin.z = origin.z + widthDir.z * lateral
-      end
-
-      local dist = castRayStatic(origin, dir, maxDistance)
-      if dist and dist < maxDistance then
-        best = best and math.min(best, dist) or dist
-      end
+  for _, p in ipairs(latest_point_cloud) do
+    local rel = p - origin
+    local dist = rel:length()
+    if dir:dot(rel) > 0 then
+      best = best and math.min(best, dist) or dist
     end
   end
 
   return best
 end
 
-local function frontObstacleDistance(veh, maxDistance)
-  local pos = veh:getPosition()
-  local dir = veh:getDirectionVector()
-  dir.z = 0
-  dir = dir:normalized()
-  local sideDir = vec3(-dir.y, dir.x, 0)
-  local forwardOffset = 1.5
-  local baseOrigin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z)
-
-  local dist = castRays(baseOrigin, dir, maxDistance, sideDir)
-  return dist
+local function getPointCloud()
+  return latest_point_cloud
 end
 
 local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_params)
@@ -119,5 +114,6 @@ local function update(dt, veh, system_params, aeb_params)
 end
 
 M.update = update
+M.getPointCloud = getPointCloud
 
 return M
