@@ -9,6 +9,10 @@
       "control":"*"
     },
     {
+      "action":"toggle_obstacle_aeb",
+      "control":"numpadminus"
+    },
+    {
       "action":"toggle_auto_headlight",
       "control":"numpaddecimal"
     },
