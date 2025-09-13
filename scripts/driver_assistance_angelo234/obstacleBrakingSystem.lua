@@ -15,9 +15,8 @@ local beeper_timer = 0
 local latest_point_cloud = {}
 
 local function enableHazardLights(veh)
-  -- Toggle the hazard lights on. They remain active until the driver switches
-  -- them off manually after the AEB event has passed.
-  veh:queueLuaCommand("electrics.toggle_warn_signal()")
+  -- Turn the hazard lights on and leave them for the driver to switch off.
+  veh:queueLuaCommand("electrics.set_warn_signal(true)")
 end
 
 -- speed is in m/s and is used to relax slope filtering at lower speeds
