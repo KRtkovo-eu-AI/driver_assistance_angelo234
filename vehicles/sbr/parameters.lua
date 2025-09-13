@@ -10,7 +10,8 @@ M.fwd_aeb_params = {
     min_speed = 0.75,
     brake_till_stop_speed = 5,
     apply_parking_brake_speed = 16.7,
-    braking_time_leeway = 1.0,
+    braking_time_leeway = 1.5,
+    braking_distance_leeway = 5,
   
     vehicle_search_radius = 200,
     min_distance_from_car = 1,
@@ -21,7 +22,7 @@ M.fwd_aeb_params = {
     num_of_sensors = 5,
     sensors_polled_per_iteration = 1,
     sensor_offset_forward = -0.3,
-    sensor_max_distance = 200
+    sensor_max_distance = 60
 }
 
 M.rev_aeb_params = {

@@ -25,7 +25,7 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
-  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 15, 5, 0, veh:getID())
+  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
   local groundThreshold = -0.3
   latest_point_cloud = {}
   for _, p in ipairs(scan) do
@@ -56,7 +56,8 @@ end
 
 local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_params)
   local acc = math.min(10, system_params.gravity) * system_params.fwd_friction_coeff
-  local ttc = distance / speed
+  local dist = math.max(0, distance - (aeb_params.braking_distance_leeway or 0))
+  local ttc = dist / speed
   local time_to_brake = speed / acc
   return ttc - time_to_brake - aeb_params.braking_time_leeway
 end
