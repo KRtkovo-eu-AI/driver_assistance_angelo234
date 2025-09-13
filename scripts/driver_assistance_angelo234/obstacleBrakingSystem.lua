@@ -1,5 +1,5 @@
 -- luacheck: globals vec3 ui_message gearbox_mode_angelo234 input_throttle_angelo234 input_brake_angelo234
--- luacheck: globals castRay Engine
+-- luacheck: globals Engine
 
 local M = {}
 
@@ -36,12 +36,10 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
     virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
 
   -- ignore points below groundThreshold or above the vehicle roof to avoid
-  -- triggering on walkways or bridges that are safe to pass under. Also drop
-  -- points that follow a shallow slope upward which indicates the road surface
+  -- triggering on walkways or bridges that are safe to pass under
   local groundThreshold = -0.3
   local top_z = veh_props.bb:getCenter().z + veh_props.bb:getHalfExtents().z
   local roofClearance = top_z - origin.z + 0.25
-  local slopeThreshold = 0.03 -- ignore gentle inclines ~1.7 deg
   local right = dir:cross(up)
   local half_width = veh_props.bb:getHalfExtents().x + 0.25
 
@@ -72,7 +70,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
         if height >= groundThreshold and height <= roofClearance then
           if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
             local slope_height = height - height_allowance
-            if slope_height / forward > slopeThreshold and lateral <= half_width then
+            if slope_height > 0 and lateral <= half_width then
               latest_point_cloud[#latest_point_cloud + 1] = p
               best = best and math.min(best, forward) or forward
             end
@@ -85,24 +83,6 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
       local clearance = lateral - half_width
       if clearance >= 0 then
         side_best = side_best and math.min(side_best, clearance) or clearance
-      end
-    end
-  end
-
-  -- augment lidar with a longer range single-ray sensor for high-speed driving
-  local long_range = aeb_params.long_range_sensor_distance or 300
-  if long_range and long_range > maxDistance then
-    local ray_dest = origin + dir * long_range
-    local hit = castRay(origin, ray_dest, true, true)
-    if hit then
-      local rel = hit.pt - origin
-      local forward = rel:dot(dir)
-      local height = rel:dot(up)
-      if forward > 0 and height >= groundThreshold and height <= roofClearance then
-        local slope_height = height - height_allowance
-        if slope_height / forward > slopeThreshold then
-          best = best and math.min(best, forward) or forward
-        end
       end
     end
   end
