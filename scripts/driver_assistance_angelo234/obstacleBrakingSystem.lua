@@ -13,6 +13,17 @@ local beeper_timer = 0
 
 local latest_point_cloud = {}
 
+-- Keeps track of hazard light state so we only toggle when needed
+local hazard_lights_on = false
+
+-- Enable or disable vehicle hazard lights
+local function setHazardLights(veh, state)
+  if hazard_lights_on ~= state then
+    veh:queueLuaCommand("electrics.hazard = " .. (state and 1 or 0))
+    hazard_lights_on = state
+  end
+end
+
 -- Returns distance to closest obstacle in front of the vehicle while also
 -- storing the last gathered point cloud from the virtual lidar
 local function frontObstacleDistance(veh, veh_props, maxDistance)
@@ -96,6 +107,7 @@ local function holdBrakes(veh, veh_props, aeb_params)
       veh:queueLuaCommand("input.event('brake', 0, 1)")
       veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
       system_state = "ready"
+      setHazardLights(veh, false)
     end
   end
 
@@ -126,6 +138,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
       ui_message("Obstacle Collision Mitigation Activated", 3)
     end
     system_state = "braking"
+    setHazardLights(veh, true)
   else
     if system_state == "braking" then
       release_brake_confidence_level = release_brake_confidence_level + dt
@@ -135,6 +148,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
         veh:queueLuaCommand("input.event('brake', 0, 1)")
         veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
         system_state = "ready"
+        setHazardLights(veh, false)
         release_brake_confidence_level = 0
       end
     end
