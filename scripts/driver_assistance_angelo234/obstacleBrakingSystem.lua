@@ -18,11 +18,9 @@ local function enableHazardLights(veh)
   veh:queueLuaCommand("if electrics.values.warn_signal == 0 then electrics.toggle_warn_signal() end")
 end
 
--- Returns distance to closest obstacle in front of the vehicle while also
--- storing the last gathered point cloud from the virtual lidar
--- Returns distance to closest obstacle ahead and the closest clearance to side
--- obstacles. Also stores the last gathered point cloud from the virtual lidar.
-local function frontObstacleDistance(veh, veh_props, maxDistance)
+-- speed is in m/s and is used to relax slope filtering at lower speeds
+local function frontObstacleDistance(veh, veh_props, aeb_params, speed)
+  local maxDistance = aeb_params.sensor_max_distance
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
   dir.z = 0
@@ -32,7 +30,8 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
-  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+  local scan =
+    virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
 
   -- ignore points below groundThreshold or above the vehicle roof to avoid
   -- triggering on walkways or bridges that are safe to pass under. Also drop
@@ -43,6 +42,19 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local slopeThreshold = 0.03 -- ignore gentle inclines ~1.7 deg
   local right = dir:cross(up)
   local half_width = veh_props.bb:getHalfExtents().x + 0.25
+
+  -- allow some vertical rise before considering slope to handle gentle inclines
+  local base_allowance = aeb_params.slope_height_allowance or 0.25
+  local extra_allowance = 0
+  local speed_kmh = speed * 3.6
+  if speed_kmh < 20 then
+    local low_allowance = aeb_params.low_speed_slope_allowance or 0.25
+    extra_allowance = low_allowance * (1 - speed_kmh / 20)
+  end
+  local height_allowance = base_allowance + extra_allowance
+
+  local overhead_dist = aeb_params.overhead_ignore_distance or 10
+  local overhead_margin = aeb_params.overhead_height_margin or 0.1
 
   latest_point_cloud = {}
   local best
@@ -55,16 +67,21 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
 
     -- check forward obstacles
     if forward > 0 then
-      if height >= groundThreshold and height <= roofClearance and height / forward > slopeThreshold then
-        if lateral <= half_width then
-          latest_point_cloud[#latest_point_cloud + 1] = p
-          best = best and math.min(best, forward) or forward
+      if height >= groundThreshold and height <= roofClearance then
+        if forward > overhead_dist and height >= roofClearance - overhead_margin then
+          -- distant overhead object that can be ignored
+        else
+          local slope_height = height - height_allowance
+          if slope_height / forward > slopeThreshold and lateral <= half_width then
+            latest_point_cloud[#latest_point_cloud + 1] = p
+            best = best and math.min(best, forward) or forward
+          end
         end
       end
     end
 
     -- check potential side collisions near the vehicle
-    if math.abs(forward) <= 2 and height >= groundThreshold and height <= roofClearance then
+    if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
       local clearance = lateral - half_width
       if clearance >= 0 then
         side_best = side_best and math.min(side_best, clearance) or clearance
@@ -81,7 +98,8 @@ end
 
 local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_params)
   local acc = math.min(10, system_params.gravity) * system_params.fwd_friction_coeff
-  local dist = math.max(0, distance - (aeb_params.braking_distance_leeway or 0))
+  local speed_leeway = (aeb_params.braking_speed_leeway_factor or 0.2) * speed
+  local dist = math.max(0, distance - (aeb_params.braking_distance_leeway or 0) - speed_leeway)
   local ttc = dist / speed
   local time_to_brake = speed / acc
   return ttc - time_to_brake - aeb_params.braking_time_leeway
@@ -174,7 +192,7 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   if forward_speed <= aeb_params.min_speed then return end
 
-  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params.sensor_max_distance)
+  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params, forward_speed)
 
   local side_threshold = aeb_params.side_clearance_threshold or 0.3
   if side_clearance and side_clearance < side_threshold then
