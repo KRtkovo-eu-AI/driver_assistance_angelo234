@@ -17,6 +17,7 @@ local fcm_system = require('scripts/driver_assistance_angelo234/forwardCollision
 local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollisionMitigationSystem')
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
+local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacleBrakingSystem')
 --local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 local first_update = true
@@ -32,6 +33,7 @@ local rcm_system_on = true
 local auto_headlight_system_on = false
 local prev_auto_headlight_system_on = false
 local acc_system_on = false
+local obstacle_aeb_system_on = true
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -114,6 +116,22 @@ local function toggleRCMSystem()
   end
 
   ui_message("Reverse Collision Mitigation System switched " .. msg)
+end
+
+local function toggleObstacleAEBSystem()
+  if not extra_utils.getPart("obstacle_collision_mitigation_angelo234") then return end
+
+  obstacle_aeb_system_on = not obstacle_aeb_system_on
+
+  local msg = nil
+
+  if obstacle_aeb_system_on then
+    msg = "ON"
+  else
+    msg = "OFF"
+  end
+
+  ui_message("Obstacle Collision Mitigation System switched " .. msg)
 end
 
 local function toggleAutoHeadlightSystem()
@@ -260,6 +278,7 @@ local function onUpdate(dt)
   if extra_utils.getPart("acc_angelo234")
   or extra_utils.getPart("forward_collision_mitigation_angelo234")
   or extra_utils.getPart("reverse_collision_mitigation_angelo234")
+  or extra_utils.getPart("obstacle_collision_mitigation_angelo234")
   then
     --Update at 120 Hz
     if other_systems_timer >= 1.0 / 120.0 then
@@ -276,15 +295,20 @@ local function onUpdate(dt)
           acc_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
         end
 
-        --Update Forward Collision Mitigation System
-        if extra_utils.getPart("forward_collision_mitigation_angelo234") and fcm_system_on then
-          fcm_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, beeper_params, front_sensor_data)
-        end
+          --Update Forward Collision Mitigation System
+          if extra_utils.getPart("forward_collision_mitigation_angelo234") and fcm_system_on then
+            fcm_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, beeper_params, front_sensor_data)
+          end
 
-        --Update Reverse Collision Mitigation System
-        if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
-          rcm_system.update(other_systems_timer * 2, my_veh, system_params, parking_lines_params, rev_aeb_params, beeper_params, rear_sensor_data)
-        end
+          --Update Obstacle Collision Mitigation System
+          if extra_utils.getPart("obstacle_collision_mitigation_angelo234") and obstacle_aeb_system_on then
+            obstacle_aeb_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params)
+          end
+
+          --Update Reverse Collision Mitigation System
+          if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
+            rcm_system.update(other_systems_timer * 2, my_veh, system_params, parking_lines_params, rev_aeb_params, beeper_params, rear_sensor_data)
+          end
 
         i = 0
       end
@@ -346,6 +370,7 @@ M.onHeadlightsOff = onHeadlightsOff
 M.onHeadlightsOn = onHeadlightsOn
 M.toggleFCMSystem = toggleFCMSystem
 M.toggleRCMSystem = toggleRCMSystem
+M.toggleObstacleAEBSystem = toggleObstacleAEBSystem
 M.toggleAutoHeadlightSystem = toggleAutoHeadlightSystem
 M.setACCSystemOn = setACCSystemOn
 M.toggleACCSystem = toggleACCSystem
