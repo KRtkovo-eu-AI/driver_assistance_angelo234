@@ -23,7 +23,7 @@ local function frontObstacleDistance(veh, veh_props, maxDistance)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
-  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+  local scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 15, 5, 0, veh:getID())
   local groundThreshold = -0.3
   latest_point_cloud = {}
   for _, p in ipairs(scan) do
@@ -64,6 +64,7 @@ local function holdBrakes(veh, veh_props, aeb_params)
     if system_state == "braking" then
       if gearbox_mode_angelo234.previousGearboxBehavior == "realistic" then
         veh:queueLuaCommand("electrics.values.brakeOverride = 1")
+        veh:queueLuaCommand("input.event('brake', 1, 1)")
       else
         veh:queueLuaCommand("electrics.values.brakeOverride = nil")
         veh:queueLuaCommand("input.event('parkingbrake', 1, 2)")
@@ -77,6 +78,7 @@ local function holdBrakes(veh, veh_props, aeb_params)
     if input_throttle_angelo234 > 0.5 or input_brake_angelo234 > 0.3 then
       veh:queueLuaCommand("electrics.values.brakeOverride = nil")
       veh:queueLuaCommand("electrics.values.throttleOverride = nil")
+      veh:queueLuaCommand("input.event('brake', 0, 1)")
       veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
       system_state = "ready"
     end
@@ -90,6 +92,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
     veh:queueLuaCommand("electrics.values.brakeOverride = 1")
+    veh:queueLuaCommand("input.event('brake', 1, 1)")
     return
   end
 
@@ -97,6 +100,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
     veh:queueLuaCommand("electrics.values.brakeOverride = 1")
+    veh:queueLuaCommand("input.event('brake', 1, 1)")
     if system_state ~= "braking" then
       ui_message("Obstacle Collision Mitigation Activated", 3)
     end
@@ -107,6 +111,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
       if release_brake_confidence_level > 0.25 then
         veh:queueLuaCommand("electrics.values.brakeOverride = nil")
         veh:queueLuaCommand("electrics.values.throttleOverride = nil")
+        veh:queueLuaCommand("input.event('brake', 0, 1)")
         system_state = "ready"
         release_brake_confidence_level = 0
       end

@@ -271,8 +271,8 @@ local function updateVirtualLidar(dt, veh)
       aeb_params.sensor_max_distance,
       math.rad(360),
       math.rad(30),
-      90,
-      20,
+      60,
+      15,
       min_dist,
       veh:getID()
     )

@@ -8,8 +8,8 @@ M.min_steer_radius = 3.3
 
 M.fwd_aeb_params = {  
     min_speed = 0.75,
-    brake_till_stop_speed = 2,
-    braking_time_leeway = 0.2,
+    brake_till_stop_speed = 5,
+    braking_time_leeway = 0.6,
   
     vehicle_search_radius = 200,
     min_distance_from_car = 1,
@@ -20,7 +20,7 @@ M.fwd_aeb_params = {
     num_of_sensors = 5,
     sensors_polled_per_iteration = 1,
     sensor_offset_forward = -0.3,
-    sensor_max_distance = 30 
+    sensor_max_distance = 60
 }
 
 M.rev_aeb_params = {
