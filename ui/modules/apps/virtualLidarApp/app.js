@@ -13,11 +13,15 @@ angular.module('beamng.apps')
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (!points || !points.length) { return; }
 
-        var minX = points[0].x, maxX = points[0].x;
-        var minY = points[0].y, maxY = points[0].y;
+        // Ignore points that represent ground hits to visualize only obstacles.
+        var obstacles = points.filter(function (p) { return p.z > -1; });
+        if (!obstacles.length) { return; }
+
+        var minX = obstacles[0].x, maxX = obstacles[0].x;
+        var minY = obstacles[0].y, maxY = obstacles[0].y;
         var minD = Infinity, maxD = -Infinity;
 
-        points.forEach(function (p) {
+        obstacles.forEach(function (p) {
           if (p.x < minX) { minX = p.x; }
           if (p.x > maxX) { maxX = p.x; }
           if (p.y < minY) { minY = p.y; }
@@ -35,7 +39,7 @@ angular.module('beamng.apps')
         );
         var distRange = Math.max(1, maxD - minD);
 
-        points.forEach(function (p) {
+        obstacles.forEach(function (p) {
           var x = (p.x - minX) * scale;
           var y = canvas.height - (p.y - minY) * scale;
           var hue = ((p._d - minD) / distRange) * 240;
