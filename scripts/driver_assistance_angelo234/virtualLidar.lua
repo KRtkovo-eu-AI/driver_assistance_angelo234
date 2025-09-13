@@ -29,8 +29,10 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       local cv, sv = cos(vAng), sin(vAng)
       local rayDir = dir * (cv * ch) + right * (cv * sh) + up * sv
       local dest = origin + rayDir * maxDist
-      local hit = castRay(origin, dest)
-      if hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
+      -- cast a general ray that reports detailed hit information so we can
+      -- distinguish between obstructed and free paths
+      local hit = castRay(origin, dest, true, true)
+      if hit and hit.hit and hit.dist and hit.dist >= minDist and hit.dist < maxDist then
         local hitId = hit.objectId or hit.objectID or hit.cid or hit.obj
         if not ignoreId or hitId ~= ignoreId then
           points[#points + 1] = origin + rayDir * hit.dist
