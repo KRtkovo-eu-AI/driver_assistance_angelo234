@@ -35,7 +35,7 @@ angular.module('beamng.apps')
       }
 
       function update() {
-        bngApi.engineLua('return extensions.driver_assistance_angelo234.getVirtualLidarPointCloud()', function (data) {
+        bngApi.engineLua('extensions.driver_assistance_angelo234.getVirtualLidarPointCloud()', function (data) {
           $scope.$evalAsync(function () {
             draw(data);
           });
