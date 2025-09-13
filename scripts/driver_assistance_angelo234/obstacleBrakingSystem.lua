@@ -8,15 +8,15 @@ local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar'
 
 -- system states: "ready", "braking", "holding"
 local system_state = "ready"
-local release_brake_confidence_level = 0
+local aeb_clear_timer = 0
 
 local beeper_timer = 0
 
 local latest_point_cloud = {}
 
 local function enableHazardLights(veh)
-  -- Toggle the hazard lights on and leave them for the driver to switch off.
-  veh:queueLuaCommand("electrics.toggle_warn_signal()")
+  -- Force hazard lights on and leave them for the driver to switch off manually.
+  veh:queueLuaCommand("electrics.set_warn_signal(true)")
 end
 
 local function enableABS(veh)
@@ -187,16 +187,17 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
       enableABS(veh)
     end
     system_state = "braking"
+    aeb_clear_timer = 0
   else
     if system_state == "braking" then
-      release_brake_confidence_level = release_brake_confidence_level + dt
-      if release_brake_confidence_level > 0.25 then
+      aeb_clear_timer = aeb_clear_timer + dt
+      if aeb_clear_timer > (aeb_params.no_obstacle_brake_release_time or 2) then
         veh:queueLuaCommand("electrics.values.brakeOverride = nil")
         veh:queueLuaCommand("electrics.values.throttleOverride = nil")
         veh:queueLuaCommand("input.event('brake', 0, 1)")
         veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
         system_state = "ready"
-        release_brake_confidence_level = 0
+        aeb_clear_timer = 0
       end
     end
   end
@@ -216,7 +217,13 @@ local function update(dt, veh, system_params, aeb_params, beeper_params)
     distance = distance and math.min(distance, side_clearance) or side_clearance
   end
 
-  if not distance then return end
+  if not distance then
+    if system_state == "braking" then
+      performEmergencyBraking(dt, veh, aeb_params, math.huge, forward_speed)
+      soundBeepers(dt, beeper_params)
+    end
+    return
+  end
 
   local time_before_braking = calculateTimeBeforeBraking(distance, forward_speed, system_params, aeb_params)
   performEmergencyBraking(dt, veh, aeb_params, time_before_braking, forward_speed)
