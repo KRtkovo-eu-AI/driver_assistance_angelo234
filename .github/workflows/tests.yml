@@ -180,10 +180,11 @@ jobs:
             const {owner, repo} = context.repo;
             const sha = context.sha;
             const {data} = await github.rest.checks.listForRef({owner, repo, ref: sha});
-            const check = data.check_runs.find(r => r.name === context.job);
+            const checkName = `${context.workflow} / ${context.job}`;
+            const check = data.check_runs.find(r => r.name === checkName);
             if (check) {
               const suffix = `Successes: ${process.env.TOT_SUCCESS} | Failures: ${process.env.TOT_FAILURES} | Errors: ${process.env.TOT_ERRORS}`;
-              const newName = `${check.name} ${suffix}`;
+              const newName = `${checkName} ${suffix}`;
               await github.rest.checks.update({
                 owner, repo, check_run_id: check.id,
                 name: newName,
