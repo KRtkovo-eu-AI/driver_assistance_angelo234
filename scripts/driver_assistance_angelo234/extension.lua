@@ -270,7 +270,7 @@ end
 
 --local p = LuaProfiler("my profiler")
 
-local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
+local function updateVirtualLidar(dt, veh)
   if not extra_utils.getPart("lidar_angelo234") then
     virtual_lidar_point_cloud = {}
     return
@@ -287,54 +287,33 @@ local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
-    -- Ignore the host vehicle via its ID, so no additional distance clipping
-    -- is required here.
-    local min_dist = 0
+    local max_dist = aeb_params.sensor_max_distance
     local hits = virtual_lidar.scan(
       origin,
       dir,
       up,
-      aeb_params.sensor_max_distance,
+      max_dist,
       math.rad(360),
       math.rad(30),
       60,
       15,
-      min_dist,
+      0,
       veh:getID()
     )
 
-    -- lift added points slightly so the ground filter doesn't remove them
-    local lift = (aeb_params.slope_height_allowance or 0.25) + 0.05
-
-    -- incorporate front sensor data
-    if front_sensors then
-      local front_static = front_sensors[1]
-      if front_static and front_static > 0 and front_static < 9999 then
-        hits[#hits + 1] = origin + dir * front_static + up * lift
-      end
-      local vehs = front_sensors[2]
-      if vehs then
-        for _, data in ipairs(vehs) do
-          if data.other_veh_props and data.other_veh_props.center_pos then
-            local cp = data.other_veh_props.center_pos
-            hits[#hits + 1] = vec3(cp.x, cp.y, origin.z + lift)
+    -- add detections for nearby vehicles using raycasts to their centers
+    for i = 0, be:getObjectCount() - 1 do
+      local other = be:getObject(i)
+      if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
+        local props = extra_utils.getVehicleProperties(other)
+        local rel = props.center_pos - origin
+        local dist = rel:length()
+        if dist < max_dist then
+          local rayDir = rel / dist
+          local hit = castRay(origin, origin + rayDir * dist, true, true)
+          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
+            hits[#hits + 1] = hit.pt
           end
-        end
-      end
-    end
-
-    -- incorporate rear sensor data
-    if rear_sensors then
-      local rear_vehicle = rear_sensors[1]
-      local rear_dist = rear_sensors[2]
-      if rear_dist and rear_dist > 0 and rear_dist < 9999 then
-        hits[#hits + 1] = origin - dir * rear_dist + up * lift
-      end
-      if rear_vehicle then
-        local props = extra_utils.getVehicleProperties(rear_vehicle)
-        if props and props.center_pos then
-          local cp = props.center_pos
-          hits[#hits + 1] = vec3(cp.x, cp.y, origin.z + lift)
         end
       end
     end
@@ -501,7 +480,7 @@ local function onUpdate(dt)
   hsa_system_update_timer = hsa_system_update_timer + dt
   auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
 
-  updateVirtualLidar(dt, my_veh, front_sensor_data, rear_sensor_data)
+  updateVirtualLidar(dt, my_veh)
 
   --p:finish(true)
 end

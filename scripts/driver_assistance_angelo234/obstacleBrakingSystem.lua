@@ -25,7 +25,7 @@ local function enableABS(veh)
 end
 
 -- speed is in m/s and is used to relax slope filtering at lower speeds
-local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_sensors, rear_sensors, use_lidar)
+local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_sensors, use_lidar)
   local maxDistance = aeb_params.sensor_max_distance
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
@@ -59,37 +59,20 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local scan = {}
   if use_lidar then
     scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
-  end
-
-  -- augment scan with sensor data
-  local lift = height_allowance + 0.05
-  if front_sensors then
-    local front_static = front_sensors[1]
-    if front_static and front_static > 0 and front_static < 9999 then
-      scan[#scan + 1] = origin + dir * front_static + up * lift
-    end
-    local vehs = front_sensors[2]
-    if vehs then
-      for _, data in ipairs(vehs) do
-        if data.other_veh_props and data.other_veh_props.center_pos then
-          local cp = data.other_veh_props.center_pos
-          scan[#scan + 1] = vec3(cp.x, cp.y, origin.z + lift)
+    -- add points for nearby vehicles similar to sensor approach
+    for i = 0, be:getObjectCount() - 1 do
+      local other = be:getObject(i)
+      if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
+        local props = extra_utils.getVehicleProperties(other)
+        local rel = props.center_pos - origin
+        local dist = rel:length()
+        if dist < maxDistance and rel:dot(dir) > 0 then
+          local rayDir = rel / dist
+          local hit = castRay(origin, origin + rayDir * dist, true, true)
+          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
+            scan[#scan + 1] = hit.pt
+          end
         end
-      end
-    end
-  end
-
-  if rear_sensors then
-    local rear_vehicle = rear_sensors[1]
-    local rear_dist = rear_sensors[2]
-    if rear_dist and rear_dist > 0 and rear_dist < 9999 then
-      scan[#scan + 1] = origin - dir * rear_dist + up * lift
-    end
-    if rear_vehicle then
-      local props = extra_utils.getVehicleProperties(rear_vehicle)
-      if props and props.center_pos then
-        local cp = props.center_pos
-        scan[#scan + 1] = vec3(cp.x, cp.y, origin.z + lift)
       end
     end
   end
@@ -122,6 +105,26 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
       if clearance >= 0 then
         side_best = side_best and math.min(side_best, clearance) or clearance
       end
+    end
+  end
+
+  -- incorporate sensor measurements without modifying the scan
+  if front_sensors then
+    local sensor_best
+    local front_static = front_sensors[1]
+    if front_static and front_static > 0 and front_static < 9999 then
+      sensor_best = front_static
+    end
+    local vehs = front_sensors[2]
+    if vehs then
+      for _, data in ipairs(vehs) do
+        if data.distance and data.distance > 0 then
+          sensor_best = sensor_best and math.min(sensor_best, data.distance) or data.distance
+        end
+      end
+    end
+    if sensor_best then
+      best = best and math.min(best, sensor_best) or sensor_best
     end
   end
 
@@ -246,7 +249,7 @@ local function update(dt, veh, system_params, aeb_params, beeper_params, front_s
 
   local use_lidar = extra_utils.getPart("lidar_angelo234")
 
-  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params, forward_speed, front_sensors, rear_sensors, use_lidar)
+  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params, forward_speed, front_sensors, use_lidar)
 
   local side_threshold = aeb_params.side_clearance_threshold or 0.3
   if side_clearance and side_clearance < side_threshold then
