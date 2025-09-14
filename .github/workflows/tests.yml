@@ -1,7 +1,6 @@
-name: Busted Tests
+name: CI
 
 on:
-  push:
   pull_request:
 
 jobs:
@@ -9,10 +8,90 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Lua and Busted
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.3 liblua5.3-dev luarocks
+          sudo apt-get install -y lua5.3 liblua5.3-dev luarocks nodejs
           sudo luarocks install busted
-      - name: Run tests
-        run: busted
+      - name: Lua syntax check
+        id: lua
+        continue-on-error: true
+        run: |
+          files="$(find . -name '*.lua')"
+          if [ -n "$files" ]; then
+            echo "$files" | xargs -n1 luac -p
+            count=$(echo "$files" | wc -l)
+          else
+            echo "No Lua files"
+            count=0
+          fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: JS syntax check
+        id: js
+        continue-on-error: true
+        run: |
+          files="$(find . -name '*.js')"
+          if [ -n "$files" ]; then
+            echo "$files" | xargs -n1 node --check
+            count=$(echo "$files" | wc -l)
+          else
+            echo "No JavaScript files"
+            count=0
+          fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Busted tests
+        id: busted
+        continue-on-error: true
+        run: |
+          output=$(busted)
+          status=$?
+          echo "$output"
+          summary=$(echo "$output" | tail -n 1)
+          successes=$(echo "$summary" | awk '{print $1}')
+          failures=$(echo "$summary" | awk '{print $4}')
+          if [ -z "$successes" ]; then successes=0; fi
+          if [ -z "$failures" ]; then failures=1; fi
+          total=$((successes + failures))
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+          exit $status
+      - name: Report results
+        if: always()
+        env:
+          LUA_OUTCOME: ${{ steps.lua.outcome }}
+          LUA_COUNT: ${{ steps.lua.outputs.count }}
+          JS_OUTCOME: ${{ steps.js.outcome }}
+          JS_COUNT: ${{ steps.js.outputs.count }}
+          BUSTED_OUTCOME: ${{ steps.busted.outcome }}
+          BUSTED_TOTAL: ${{ steps.busted.outputs.total }}
+          BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Lua syntax" >> $GITHUB_STEP_SUMMARY
+          if [ "$LUA_OUTCOME" = "success" ]; then
+            echo "✅ Checked $LUA_COUNT Lua files" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Syntax errors in Lua files" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### JS syntax" >> $GITHUB_STEP_SUMMARY
+          if [ "$JS_OUTCOME" = "success" ]; then
+            echo "✅ Checked $JS_COUNT JS files" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Syntax errors in JS files" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Busted" >> $GITHUB_STEP_SUMMARY
+          if [ "$BUSTED_OUTCOME" = "success" ]; then
+            echo "✅ $BUSTED_TOTAL tests run, 0 failures" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ $BUSTED_TOTAL tests run, $BUSTED_FAILURES failures" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$BUSTED_OUTCOME" != "success" ]; then
+            exit 1
+          fi
