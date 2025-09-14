@@ -347,16 +347,16 @@ local function updateVirtualLidar(dt, veh)
         center + x + y + z,
         center + x - y + z,
         center - x + y + z,
-        center - x - y + z
+        center - x - y + z,
+        center + x + y - z,
+        center + x - y - z,
+        center - x + y - z,
+        center - x - y - z
       }
       for _, c in ipairs(corners) do
         local rel = c - origin
-        local dist = rel:length()
-        if dist < max_dist then
-          local hit = castRay(origin, origin + rel, true, true)
-          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
-            hits[#hits + 1] = hit.pt
-          end
+        if rel:length() < max_dist then
+          hits[#hits + 1] = c
         end
       end
       local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
@@ -482,7 +482,9 @@ local function onUpdate(dt)
           end
 
           --Update Obstacle Collision Mitigation System
-          if extra_utils.getPart("obstacle_collision_mitigation_angelo234") and obstacle_aeb_system_on then
+          if extra_utils.getPart("obstacle_collision_mitigation_angelo234")
+            and extra_utils.getPart("obstacle_aeb_angelo234")
+            and obstacle_aeb_system_on then
             obstacle_aeb_system.update(
               other_systems_timer * 2,
               my_veh,
