@@ -116,7 +116,19 @@ jobs:
           total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
           total_error=$((BUSTED_ERRORS))
 
-          summary_file=$(mktemp)
+          summary_file=test-results.md
+          badge_file=tests-badge.svg
+          rm -f "$summary_file" "$badge_file"
+
+          if [ $((total_fail + total_error)) -eq 0 ]; then
+            badge_text="${total_success}%20passed"
+            badge_color="success"
+          else
+            badge_text="$((total_fail + total_error))%20failed"
+            badge_color="critical"
+          fi
+          badge_url="https://img.shields.io/badge/tests-${badge_text}-${badge_color}"
+
           {
             echo "## Test Summary"
             echo
@@ -161,22 +173,24 @@ jobs:
             echo "- Errors: $total_error"
 
             echo
-            if [ $((total_fail + total_error)) -eq 0 ]; then
-              badge_text="${total_success}%20passed"
-              badge_color="success"
-            else
-              badge_text="$((total_fail + total_error))%20failed"
-              badge_color="critical"
-            fi
-            badge_url="https://img.shields.io/badge/tests-${badge_text}-${badge_color}"
             echo "![Tests](${badge_url})"
           } | tee "$summary_file"
+          curl -L "$badge_url" -o "$badge_file"
           cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
 
           printf 'summary<<EOF\n%s\nEOF\n' "$(cat "$summary_file")" >> "$GITHUB_OUTPUT"
           printf 'total_success=%s\n' "$total_success" >> "$GITHUB_OUTPUT"
           printf 'total_fail=%s\n' "$total_fail" >> "$GITHUB_OUTPUT"
           printf 'total_error=%s\n' "$total_error" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: |
+            test-results.md
+            tests-badge.svg
 
       - name: Annotate check name
         if: always()
