@@ -270,7 +270,7 @@ end
 
 --local p = LuaProfiler("my profiler")
 
-local function updateVirtualLidar(dt, veh)
+local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then
@@ -298,6 +298,38 @@ local function updateVirtualLidar(dt, veh)
       min_dist,
       veh:getID()
     )
+
+    -- incorporate front sensor data
+    if front_sensors then
+      local front_static = front_sensors[1]
+      if front_static and front_static < 9999 then
+        hits[#hits + 1] = origin + dir * front_static
+      end
+      local vehs = front_sensors[2]
+      if vehs then
+        for _, data in ipairs(vehs) do
+          if data.other_veh_props and data.other_veh_props.center_pos then
+            hits[#hits + 1] = data.other_veh_props.center_pos
+          end
+        end
+      end
+    end
+
+    -- incorporate rear sensor data
+    if rear_sensors then
+      local rear_vehicle = rear_sensors[1]
+      local rear_dist = rear_sensors[2]
+      if rear_dist and rear_dist < 9999 then
+        hits[#hits + 1] = origin - dir * rear_dist
+      end
+      if rear_vehicle then
+        local props = extra_utils.getVehicleProperties(rear_vehicle)
+        if props and props.center_pos then
+          hits[#hits + 1] = props.center_pos
+        end
+      end
+    end
+
     local groundThreshold = -0.3
     virtual_lidar_point_cloud = {}
     for _, p in ipairs(hits) do
@@ -343,8 +375,6 @@ local function onUpdate(dt)
   if not be:getEnabled() or not system_params then return end
 
   local veh_props = extra_utils.getVehicleProperties(my_veh)
-
-  updateVirtualLidar(dt, my_veh)
   local need_front_sensors = extra_utils.getPart("acc_angelo234")
     or extra_utils.getPart("forward_collision_mitigation_angelo234")
     or (extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on)
@@ -389,7 +419,9 @@ local function onUpdate(dt)
               my_veh,
               system_params,
               aeb_params,
-              beeper_params
+              beeper_params,
+              front_sensor_data,
+              rear_sensor_data
             )
           end
 
@@ -457,6 +489,8 @@ local function onUpdate(dt)
   other_systems_timer = other_systems_timer + dt
   hsa_system_update_timer = hsa_system_update_timer + dt
   auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
+
+  updateVirtualLidar(dt, my_veh, front_sensor_data, rear_sensor_data)
 
   --p:finish(true)
 end
