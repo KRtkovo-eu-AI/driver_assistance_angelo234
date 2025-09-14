@@ -272,6 +272,7 @@ end
 
 local function updateVirtualLidar(dt, veh)
   if not aeb_params then return end
+  if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then
     local pos = veh:getPosition()
     local dir = veh:getDirectionVector()
