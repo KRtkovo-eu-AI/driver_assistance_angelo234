@@ -71,9 +71,9 @@ jobs:
           summary=$(echo "$output" | tail -n 1)
           successes=$(echo "$summary" | awk '{print $1}')
           failures=$(echo "$summary" | awk '{print $4}')
-          errors=$(echo "$summary" | awk '{print $6}')
+          errors=$(echo "$summary" | awk '{print $8}')
           if [ -z "$successes" ]; then successes=0; fi
-          if [ -z "$failures" ]; then failures=1; fi
+          if [ -z "$failures" ]; then failures=0; fi
           if [ -z "$errors" ]; then errors=0; fi
           total=$((successes + failures + errors))
           printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
