@@ -209,6 +209,17 @@ local function toggleLidarLogging()
   ui_message("Lidar logs " .. msg)
 end
 
+local function isPlayerVehicle(veh)
+  local i = 0
+  while true do
+    local playerVeh = be:getPlayerVehicle(i)
+    if playerVeh == nil then break end
+    if playerVeh:getID() == veh:getID() then return true end
+    i = i + 1
+  end
+  return false
+end
+
 --Used for what camera to switch the player to when the player gets out of reverse gear using reverse camera
 local function onCameraModeChanged(new_camera_mode)
   if new_camera_mode ~= M.curr_camera_mode then
@@ -319,6 +330,49 @@ local function updateVirtualLidar(dt, veh)
       veh:getID()
     )
 
+    local detections = {}
+
+    -- add points from front sensor vehicles
+    if front_sensor_data and front_sensor_data[2] then
+      for _, data in ipairs(front_sensor_data[2]) do
+        if data.other_veh_props then
+          local p = data.other_veh_props.center_pos + vec3(0, 0, 1)
+          hits[#hits + 1] = p
+          local veh = data.other_veh
+          if veh then
+            local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
+            local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
+            detections[#detections + 1] = {pos = p, desc = string.format('%s %s', veh_type, id)}
+          end
+        end
+      end
+    end
+
+    -- add point from closest rear sensor vehicle
+    if rear_sensor_data and rear_sensor_data[1] then
+      local vehRear = rear_sensor_data[1]
+      if vehRear then
+        local propsRear = extra_utils.getVehicleProperties(vehRear)
+        local pRear = propsRear.center_pos + vec3(0, 0, 1)
+        hits[#hits + 1] = pRear
+        local id = vehRear.getJBeamFilename and vehRear:getJBeamFilename() or tostring(vehRear:getID())
+        local veh_type = isPlayerVehicle(vehRear) and 'player vehicle' or 'traffic vehicle'
+        detections[#detections + 1] = {pos = pRear, desc = string.format('%s %s', veh_type, id)}
+      end
+    end
+
+    -- approximate static obstacle positions from sensor distances
+    if front_sensor_data and front_sensor_data[1] and front_sensor_data[1] < 9999 then
+      local pFront = origin + dir * front_sensor_data[1]
+      hits[#hits + 1] = pFront
+      detections[#detections + 1] = {pos = pFront, desc = 'front obstacle'}
+    end
+    if rear_sensor_data and rear_sensor_data[2] and rear_sensor_data[2] < 9999 then
+      local pBack = origin - dir * rear_sensor_data[2]
+      hits[#hits + 1] = pBack
+      detections[#detections + 1] = {pos = pBack, desc = 'rear obstacle'}
+    end
+
     -- add detections for nearby vehicles using raycasts to their centers
     for i = 0, be:getObjectCount() - 1 do
       local other = be:getObject(i)
@@ -332,7 +386,8 @@ local function updateVirtualLidar(dt, veh)
           if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
             hits[#hits + 1] = hit.pt
             local id = other.getJBeamFilename and other:getJBeamFilename() or tostring(other:getID())
-            logger.log('I', 'lidar', string.format('Detected vehicle %s at %.1f', id, dist))
+            local veh_type = isPlayerVehicle(other) and 'player vehicle' or 'traffic vehicle'
+            detections[#detections + 1] = {pos = hit.pt, desc = string.format('%s %s', veh_type, id)}
           end
         end
       end
@@ -349,6 +404,16 @@ local function updateVirtualLidar(dt, veh)
           z = rel:dot(up)
         }
       end
+    end
+
+    for _, d in ipairs(detections) do
+      local rel = d.pos - origin
+      local x = rel:dot(right)
+      local y = rel:dot(dir)
+      local z = rel:dot(up)
+      local dist = rel:length()
+      local ang = math.deg(math.atan2(x, y))
+      logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
     end
     virtual_lidar_update_timer = 0
   else
