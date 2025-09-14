@@ -87,7 +87,7 @@ describe('extension', function()
 
     -- globals required for sensor data gathering
     _G.veh_accs_angelo234 = { [1] = {0,0,0} }
-    _G.electrics_values_angelo234 = { [1] = 0, lights_state = 0 }
+    _G.electrics_values_angelo234 = { [1] = 0, lights = 0 }
     _G.angular_speed_angelo234 = 0
     _G.input_throttle_angelo234 = 0
     _G.input_brake_angelo234 = 0

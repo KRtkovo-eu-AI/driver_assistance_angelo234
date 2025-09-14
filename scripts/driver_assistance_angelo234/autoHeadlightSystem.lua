@@ -28,7 +28,7 @@ end
 --If system just switched on, then check if highbeams are already on
 --if they are on, then make note of it
 local function systemSwitchedOn()
-  local light_state = electrics_values_angelo234["lights_state"]
+  local light_state = electrics_values_angelo234["lights"]
 
   if light_state == 2 then
     headlights_turned_off = false
@@ -74,11 +74,11 @@ local function update(dt, veh, vehs_in_front_table)
   --This is to prevent headlight from turning back on due to delay
   --with sending data between Vehicle and GameEngine Lua
   if not headlights_turned_off then
-    light_state = electrics_values_angelo234["lights_state"]
+    light_state = electrics_values_angelo234["lights"]
   else
     light_state = 0
 
-    if electrics_values_angelo234["lights_state"] == 0 then
+    if electrics_values_angelo234["lights"] == 0 then
       headlights_turned_off = false
     end
   end

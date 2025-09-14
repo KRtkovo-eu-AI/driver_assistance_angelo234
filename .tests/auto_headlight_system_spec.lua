@@ -7,7 +7,7 @@ local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoH
 describe('Auto Headlight Dimming', function()
   it('dims and restores headlights based on vehicles ahead', function()
     -- global variable used by module to read light state
-    _G.electrics_values_angelo234 = { lights_state = 2 }
+    _G.electrics_values_angelo234 = { lights = 2 }
 
     local veh = { commands = {} }
     function veh:queueLuaCommand(cmd)
@@ -30,7 +30,7 @@ describe('Auto Headlight Dimming', function()
     assert.are.equal('electrics.setLightsState(1)', veh.commands[#veh.commands])
 
     -- update electrics state to reflect low beams being set
-    _G.electrics_values_angelo234.lights_state = 1
+    _G.electrics_values_angelo234.lights = 1
 
     -- no vehicle ahead anymore
     auto_headlight_system.update(0.25, veh, {})
