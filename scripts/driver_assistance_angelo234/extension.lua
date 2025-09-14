@@ -235,7 +235,6 @@ local function onUpdate(dt)
     -- rcm_system.init()
     -- acc_system.init()
     -- hsa_system.init()
-    auto_headlight_system.init()
     first_update = false
   end
 
