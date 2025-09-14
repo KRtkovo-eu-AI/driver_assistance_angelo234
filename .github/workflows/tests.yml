@@ -17,28 +17,50 @@ jobs:
         id: lua
         continue-on-error: true
         run: |
-          files="$(find . -name '*.lua')"
+          files=$(find . -name '*.lua')
           if [ -n "$files" ]; then
-            echo "$files" | xargs -n1 luac -p
-            count=$(echo "$files" | wc -l)
+            echo 'Lua files:'
+            printf '%s\n' $files
+            errors=0
+            for f in $files; do
+              if ! luac -p "$f"; then
+                errors=$((errors+1))
+              fi
+            done
+            count=$(printf '%s\n' "$files" | wc -l)
           else
-            echo "No Lua files"
+            echo 'No Lua files'
             count=0
+            errors=0
           fi
-          echo "count=$count" >> "$GITHUB_OUTPUT"
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          if [ "$errors" -ne 0 ]; then exit 1; fi
       - name: JS syntax check
         id: js
         continue-on-error: true
         run: |
-          files="$(find . -name '*.js')"
+          files=$(find . -name '*.js')
           if [ -n "$files" ]; then
-            echo "$files" | xargs -n1 node --check
-            count=$(echo "$files" | wc -l)
+            echo 'JS files:'
+            printf '%s\n' $files
+            errors=0
+            for f in $files; do
+              if ! node --check "$f"; then
+                errors=$((errors+1))
+              fi
+            done
+            count=$(printf '%s\n' "$files" | wc -l)
           else
-            echo "No JavaScript files"
+            echo 'No JavaScript files'
             count=0
+            errors=0
           fi
-          echo "count=$count" >> "$GITHUB_OUTPUT"
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          if [ "$errors" -ne 0 ]; then exit 1; fi
       - name: Busted tests
         id: busted
         continue-on-error: true
@@ -49,39 +71,55 @@ jobs:
           summary=$(echo "$output" | tail -n 1)
           successes=$(echo "$summary" | awk '{print $1}')
           failures=$(echo "$summary" | awk '{print $4}')
+          errors=$(echo "$summary" | awk '{print $6}')
           if [ -z "$successes" ]; then successes=0; fi
           if [ -z "$failures" ]; then failures=1; fi
-          total=$((successes + failures))
-          echo "total=$total" >> "$GITHUB_OUTPUT"
-          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+          if [ -z "$errors" ]; then errors=0; fi
+          total=$((successes + failures + errors))
+          printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
+          printf 'successes=%s\n' "$successes" >> "$GITHUB_OUTPUT"
+          printf 'failures=%s\n' "$failures" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
           exit $status
       - name: Report results
         if: always()
         env:
           LUA_OUTCOME: ${{ steps.lua.outcome }}
           LUA_COUNT: ${{ steps.lua.outputs.count }}
+          LUA_ERRORS: ${{ steps.lua.outputs.errors }}
+          LUA_FILES: ${{ steps.lua.outputs.files }}
           JS_OUTCOME: ${{ steps.js.outcome }}
           JS_COUNT: ${{ steps.js.outputs.count }}
+          JS_ERRORS: ${{ steps.js.outputs.errors }}
+          JS_FILES: ${{ steps.js.outputs.files }}
           BUSTED_OUTCOME: ${{ steps.busted.outcome }}
           BUSTED_TOTAL: ${{ steps.busted.outputs.total }}
+          BUSTED_SUCCESS: ${{ steps.busted.outputs.successes }}
           BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
+          BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
         run: |
           echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "### Lua syntax" >> $GITHUB_STEP_SUMMARY
+          if [ "$LUA_COUNT" -gt 0 ]; then
+            echo "$LUA_FILES" | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          fi
           if [ "$LUA_OUTCOME" = "success" ]; then
             echo "✅ Checked $LUA_COUNT Lua files" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Syntax errors in Lua files" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Syntax errors in $LUA_ERRORS Lua files out of $LUA_COUNT" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### JS syntax" >> $GITHUB_STEP_SUMMARY
+          if [ "$JS_COUNT" -gt 0 ]; then
+            echo "$JS_FILES" | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          fi
           if [ "$JS_OUTCOME" = "success" ]; then
             echo "✅ Checked $JS_COUNT JS files" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Syntax errors in JS files" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Syntax errors in $JS_ERRORS JS files out of $JS_COUNT" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -89,8 +127,17 @@ jobs:
           if [ "$BUSTED_OUTCOME" = "success" ]; then
             echo "✅ $BUSTED_TOTAL tests run, 0 failures" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ $BUSTED_TOTAL tests run, $BUSTED_FAILURES failures" >> $GITHUB_STEP_SUMMARY
+            echo "❌ $BUSTED_TOTAL tests run, $BUSTED_FAILURES failures, $BUSTED_ERRORS errors" >> $GITHUB_STEP_SUMMARY
           fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
+          total_failures=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
+          total_errors=$((BUSTED_ERRORS))
+          echo "### Overall" >> $GITHUB_STEP_SUMMARY
+          echo "- Successes: $total_success" >> $GITHUB_STEP_SUMMARY
+          echo "- Failures: $total_failures" >> $GITHUB_STEP_SUMMARY
+          echo "- Errors: $total_errors" >> $GITHUB_STEP_SUMMARY
 
           if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$BUSTED_OUTCOME" != "success" ]; then
             exit 1
