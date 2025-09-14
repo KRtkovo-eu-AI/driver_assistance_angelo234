@@ -6,6 +6,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      total_success: ${{ steps.report.outputs.total_success }}
+      total_failures: ${{ steps.report.outputs.total_failures }}
+      total_errors: ${{ steps.report.outputs.total_errors }}
+      summary: ${{ steps.report.outputs.summary }}
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -167,14 +172,27 @@ jobs:
             exit 1
           fi
 
+  report:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report overall
+        env:
+          SUMMARY: ${{ needs.test.outputs.summary }}
+          TOT_SUCCESS: ${{ needs.test.outputs.total_success }}
+          TOT_FAILURES: ${{ needs.test.outputs.total_failures }}
+          TOT_ERRORS: ${{ needs.test.outputs.total_errors }}
+        run: |
+          echo "$SUMMARY" | tee /tmp/summary.txt
+          cat /tmp/summary.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Annotate check name
-        if: always()
         uses: actions/github-script@v7
         env:
-          TOT_SUCCESS: ${{ steps.report.outputs.total_success }}
-          TOT_FAILURES: ${{ steps.report.outputs.total_failures }}
-          TOT_ERRORS: ${{ steps.report.outputs.total_errors }}
-          REPORT_SUMMARY: ${{ steps.report.outputs.summary }}
+          TOT_SUCCESS: ${{ needs.test.outputs.total_success }}
+          TOT_FAILURES: ${{ needs.test.outputs.total_failures }}
+          TOT_ERRORS: ${{ needs.test.outputs.total_errors }}
+          SUMMARY: ${{ needs.test.outputs.summary }}
         with:
           script: |
             const {owner, repo} = context.repo;
@@ -188,6 +206,15 @@ jobs:
               await github.rest.checks.update({
                 owner, repo, check_run_id: check.id,
                 name: newName,
-                output: {title: suffix, summary: process.env.REPORT_SUMMARY}
+                output: {title: suffix, summary: process.env.SUMMARY}
               });
             }
+      - name: Fail if needed
+        env:
+          TOT_FAILURES: ${{ needs.test.outputs.total_failures }}
+          TOT_ERRORS: ${{ needs.test.outputs.total_errors }}
+        run: |
+          if [ "$TOT_FAILURES" -ne 0 ] || [ "$TOT_ERRORS" -ne 0 ]; then
+            exit 1
+          fi
+
