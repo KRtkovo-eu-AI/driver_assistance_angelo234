@@ -98,31 +98,6 @@ jobs:
           BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
           BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
         run: |
-          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Lua syntax" >> $GITHUB_STEP_SUMMARY
-          if [ "$LUA_COUNT" -gt 0 ]; then
-            echo "$LUA_FILES" | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "$LUA_OUTCOME" = "success" ]; then
-            echo "✅ Checked $LUA_COUNT Lua files" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Syntax errors in $LUA_ERRORS Lua files out of $LUA_COUNT" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### JS syntax" >> $GITHUB_STEP_SUMMARY
-          if [ "$JS_COUNT" -gt 0 ]; then
-            echo "$JS_FILES" | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "$JS_OUTCOME" = "success" ]; then
-            echo "✅ Checked $JS_COUNT JS files" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Syntax errors in $JS_ERRORS JS files out of $JS_COUNT" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
           LUA_COUNT=${LUA_COUNT:-0}
           LUA_ERRORS=${LUA_ERRORS:-0}
           JS_COUNT=${JS_COUNT:-0}
@@ -132,25 +107,53 @@ jobs:
           BUSTED_FAILURES=${BUSTED_FAILURES:-0}
           BUSTED_ERRORS=${BUSTED_ERRORS:-0}
 
-          echo "### Busted" >> $GITHUB_STEP_SUMMARY
-          if [ "$BUSTED_OUTCOME" = "success" ]; then
-            echo "✅ Tests passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Tests failed" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "- Total: $BUSTED_TOTAL" >> $GITHUB_STEP_SUMMARY
-          echo "- Successes: $BUSTED_SUCCESS" >> $GITHUB_STEP_SUMMARY
-          echo "- Failures: $BUSTED_FAILURES" >> $GITHUB_STEP_SUMMARY
-          echo "- Errors: $BUSTED_ERRORS" >> $GITHUB_STEP_SUMMARY
-
-          echo "" >> $GITHUB_STEP_SUMMARY
           total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
           total_failures=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
           total_errors=$((BUSTED_ERRORS))
-          echo "### Overall" >> $GITHUB_STEP_SUMMARY
-          echo "- Successes: $total_success" >> $GITHUB_STEP_SUMMARY
-          echo "- Failures: $total_failures" >> $GITHUB_STEP_SUMMARY
-          echo "- Errors: $total_errors" >> $GITHUB_STEP_SUMMARY
+
+          {
+            echo "## Test Summary"
+            echo
+
+            echo "### Lua syntax"
+            if [ "$LUA_COUNT" -gt 0 ]; then
+              echo "$LUA_FILES" | sed 's/^/- /'
+            fi
+            if [ "$LUA_OUTCOME" = "success" ]; then
+              echo "✅ Checked $LUA_COUNT Lua files"
+            else
+              echo "❌ Syntax errors in $LUA_ERRORS Lua files out of $LUA_COUNT"
+            fi
+
+            echo
+            echo "### JS syntax"
+            if [ "$JS_COUNT" -gt 0 ]; then
+              echo "$JS_FILES" | sed 's/^/- /'
+            fi
+            if [ "$JS_OUTCOME" = "success" ]; then
+              echo "✅ Checked $JS_COUNT JS files"
+            else
+              echo "❌ Syntax errors in $JS_ERRORS JS files out of $JS_COUNT"
+            fi
+
+            echo
+            echo "### Busted"
+            if [ "$BUSTED_OUTCOME" = "success" ]; then
+              echo "✅ Tests passed"
+            else
+              echo "❌ Tests failed"
+            fi
+            echo "- Total: $BUSTED_TOTAL"
+            echo "- Successes: $BUSTED_SUCCESS"
+            echo "- Failures: $BUSTED_FAILURES"
+            echo "- Errors: $BUSTED_ERRORS"
+
+            echo
+            echo "### Overall"
+            echo "- Successes: $total_success"
+            echo "- Failures: $total_failures"
+            echo "- Errors: $total_errors"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
           if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$BUSTED_OUTCOME" != "success" ]; then
             exit 1
