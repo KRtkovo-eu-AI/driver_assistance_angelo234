@@ -3,6 +3,7 @@ local M = {}
 --local p = LuaProfiler("my profiler")
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
+local logger = require('scripts/driver_assistance_angelo234/logger')
 
 --For efficiency
 local max = math.max
@@ -28,6 +29,17 @@ local rear_static_min_dist = 9999
 
 local past_wps_props_table = {}
 
+local function isPlayerVehicle(veh)
+  local i = 0
+  while true do
+    local playerVeh = be:getPlayerVehicle(i)
+    if playerVeh == nil then break end
+    if playerVeh:getID() == veh:getID() then return true end
+    i = i + 1
+  end
+  return false
+end
+
 --Returns a table of vehicles and distance to them within a max_dist radius
 local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
 
@@ -45,9 +57,10 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
 
         local front_dist = (my_veh_props.front_pos - other_veh_props.center_pos):length()
         local rear_dist = (my_veh_props.rear_pos - other_veh_props.center_pos):length()
+        local rel_dir = other_veh_props.center_pos - my_veh_props.center_pos
+        local in_front_vehicle = rel_dir:dot(my_veh_props.dir) > 0
 
-        --If rear distance is larger than front distance, then vehicle is in front
-        if front_dist < max_dist and front_dist < rear_dist and in_front then
+        if front_dist < max_dist and in_front_vehicle and in_front then
           local ray_cast_dist = castRayStatic(my_veh_props.front_pos, (other_veh_props.center_pos - my_veh_props.front_pos):normalized(), max_dist)
 
           --Freepath to vehicle?
@@ -66,7 +79,7 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
           end
 
           --If front distance is larger than rear distance, then vehicle is in rear
-        elseif rear_dist < max_dist and front_dist > rear_dist and not in_front then
+        elseif rear_dist < max_dist and not in_front_vehicle and not in_front then
           local ray_cast_dist = castRayStatic(my_veh_props.rear_pos, (other_veh_props.center_pos - my_veh_props.rear_pos):normalized(), max_dist)
 
           --Freepath to vehicle?
@@ -332,6 +345,17 @@ local function pollFrontSensors(dt, veh_props, system_params, aeb_params)
 
 
   last_vehs_in_same_road_in_front_table = other_vehs_same_road_data
+  
+  if other_vehs_data and #other_vehs_data > 0 then
+    for _, data in pairs(other_vehs_data) do
+      local veh = data.other_veh
+      local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
+      local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
+      logger.log('I', 'sensor_system', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
+    end
+  elseif front_static_min_dist < 9999 then
+    logger.log('I', 'sensor_system', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
+  end
 
   --p:finish(true)
 

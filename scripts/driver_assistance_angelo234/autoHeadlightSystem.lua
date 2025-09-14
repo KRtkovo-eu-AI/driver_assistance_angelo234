@@ -1,6 +1,7 @@
 local M = {}
 
-local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
+local logger = require('scripts/driver_assistance_angelo234/logger')
+
 
 --Based on US Law (about 500 feet)
 local dim_distance = 150
@@ -25,10 +26,16 @@ local function onHeadlightsOn()
   end
 end
 
---If system just switched on, then check if highbeams are already on
---if they are on, then make note of it
+--If system just switched on, then check if headlights are already in high-beam mode
+--if they are, then make note of it
+local function getLightState()
+  return electrics_values_angelo234["lights_state"]
+    or electrics_values_angelo234["lights"]
+    or 0
+end
+
 local function systemSwitchedOn()
-  local light_state = electrics_values_angelo234["lights_state"]
+  local light_state = getLightState()
 
   if light_state == 2 then
     headlights_turned_off = false
@@ -54,31 +61,44 @@ end
 
 local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
   local closest_veh_data = getClosestVehicle(vehs_in_front_table)
+  local other_veh = closest_veh_data[1]
   local distance = closest_veh_data[2]
+
+  if other_veh ~= nil then
+    local id
+    if other_veh.getJBeamFilename then
+      id = other_veh:getJBeamFilename()
+    elseif other_veh.getID then
+      id = tostring(other_veh:getID())
+    else
+      id = "unknown"
+    end
+    logger.log('I', 'auto_headlight_system', string.format('Detected vehicle %s at %.1f', id, distance))
+  end
 
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
     if light_state ~= 1 then
-      veh:queueLuaCommand("electrics.setLightsState(1)")
+      logger.log('I', 'auto_headlight_system', 'Attempting to switch to low beams')
+      veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
     if light_state ~= 2 then
-      veh:queueLuaCommand("electrics.setLightsState(2)")
+      logger.log('I', 'auto_headlight_system', 'Attempting to restore high beams')
+      veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end
 end
 
 local function update(dt, veh, vehs_in_front_table)
-  local light_state = nil
+  local light_state
 
-  --This is to prevent headlight from turning back on due to delay
-  --with sending data between Vehicle and GameEngine Lua
   if not headlights_turned_off then
-    light_state = electrics_values_angelo234["lights_state"]
+    light_state = getLightState()
   else
     light_state = 0
 
-    if electrics_values_angelo234["lights_state"] == 0 then
+    if getLightState() == 0 then
       headlights_turned_off = false
     end
   end
@@ -88,8 +108,6 @@ local function update(dt, veh, vehs_in_front_table)
       armed = true
     end
   else
-    -- if sensor data has not been generated yet the table can be nil
-    -- treat this situation as having no vehicles in front to avoid errors
     autoHeadlightFunction(veh, vehs_in_front_table or {}, light_state)
   end
 end
