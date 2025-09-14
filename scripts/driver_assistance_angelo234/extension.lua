@@ -383,13 +383,6 @@ local function updateVirtualLidar(dt, veh)
       end
     end
 
-    for i = 0, be:getObjectCount() - 1 do
-      local other = be:getObject(i)
-      if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
-        addVehicle(other)
-      end
-    end
-
     local hostBB = veh_props and veh_props.bb
     local hostCenter, hostX, hostY, hostZ, hostExt
     if hostBB then
@@ -409,7 +402,13 @@ local function updateVirtualLidar(dt, veh)
         local hx = relHost:dot(hostX)
         local hy = relHost:dot(hostY)
         local hz = relHost:dot(hostZ)
-        if math.abs(hx) <= hostExt.x + 1 and math.abs(hy) <= hostExt.y + 1 and math.abs(hz) <= hostExt.z + 1 then
+        --
+        -- Some vehicle mods spawn helper objects whose bounding boxes roughly match
+        -- the host vehicle but are offset by a couple of metres.  Those objects end
+        -- up in the scan as ghost silhouettes.  Filter out any hits that fall within
+        -- a generously expanded version of our own bounding box to remove these
+        -- stray points while still allowing nearby traffic to appear.
+        if math.abs(hx) <= hostExt.x + 3 and math.abs(hy) <= hostExt.y + 3 and math.abs(hz) <= hostExt.z + 1 then
           skip = true
         end
       end
