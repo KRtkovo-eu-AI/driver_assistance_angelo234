@@ -45,9 +45,10 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
 
         local front_dist = (my_veh_props.front_pos - other_veh_props.center_pos):length()
         local rear_dist = (my_veh_props.rear_pos - other_veh_props.center_pos):length()
+        local rel_dir = other_veh_props.center_pos - my_veh_props.center_pos
+        local in_front_vehicle = rel_dir:dot(my_veh_props.dir) > 0
 
-        --If rear distance is larger than front distance, then vehicle is in front
-        if front_dist < max_dist and front_dist < rear_dist and in_front then
+        if front_dist < max_dist and in_front_vehicle and in_front then
           local ray_cast_dist = castRayStatic(my_veh_props.front_pos, (other_veh_props.center_pos - my_veh_props.front_pos):normalized(), max_dist)
 
           --Freepath to vehicle?
@@ -66,7 +67,7 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
           end
 
           --If front distance is larger than rear distance, then vehicle is in rear
-        elseif rear_dist < max_dist and front_dist > rear_dist and not in_front then
+        elseif rear_dist < max_dist and not in_front_vehicle and not in_front then
           local ray_cast_dist = castRayStatic(my_veh_props.rear_pos, (other_veh_props.center_pos - my_veh_props.rear_pos):normalized(), max_dist)
 
           --Freepath to vehicle?
