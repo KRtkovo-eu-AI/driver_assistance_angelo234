@@ -65,6 +65,15 @@ local function init(player)
   beeper_params = system_params.beeper_params
   rev_aeb_params = system_params.rev_aeb_params
   parking_lines_params = system_params.rev_cam_params.parking_lines_params
+
+  -- enable auto headlight system by default when the part is installed
+  if extra_utils.getPart("auto_headlight_angelo234") then
+    auto_headlight_system_on = true
+    prev_auto_headlight_system_on = false
+  else
+    auto_headlight_system_on = false
+    prev_auto_headlight_system_on = false
+  end
 end
 
 local function onExtensionLoaded()

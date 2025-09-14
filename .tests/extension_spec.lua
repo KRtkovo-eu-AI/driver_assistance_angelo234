@@ -97,7 +97,6 @@ describe('extension', function()
 
     local extension = require('scripts/driver_assistance_angelo234/extension')
     extension.onExtensionLoaded()
-    extension.toggleAutoHeadlightSystem()
 
     extension.onUpdate(0.3)
     extension.onUpdate(0.3)
