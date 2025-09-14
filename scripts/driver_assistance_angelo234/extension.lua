@@ -256,6 +256,7 @@ local function onUpdate(dt)
   if extra_utils.getPart("acc_angelo234")
   or extra_utils.getPart("forward_collision_mitigation_angelo234")
   or extra_utils.getPart("reverse_collision_mitigation_angelo234")
+  or extra_utils.getPart("auto_headlight_angelo234")
   then
     --Update at 120 Hz
     if other_systems_timer >= 1.0 / 120.0 then
@@ -309,7 +310,8 @@ local function onUpdate(dt)
           auto_headlight_system.systemSwitchedOn()
         end
 
-        auto_headlight_system.update(auto_headlight_system_update_timer, my_veh, front_sensor_data[2])
+        --Use only vehicles detected on the same road in front of the player
+        auto_headlight_system.update(auto_headlight_system_update_timer, my_veh, front_sensor_data[3])
       end
 
       auto_headlight_system_update_timer = 0
