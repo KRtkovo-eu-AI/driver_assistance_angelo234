@@ -38,9 +38,15 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
         pt = origin + rayDir * staticDist
       end
       if dynHit and dynHit.dist and dynHit.dist < maxDist then
-        local hitId = dynHit.objectId or dynHit.objectID or dynHit.cid
-        if not hitId and dynHit.obj and dynHit.obj.getID then
-          hitId = dynHit.obj:getID()
+        local obj = dynHit.obj
+        local hitId = dynHit.objectId or dynHit.objectID
+        if obj and obj.getID then
+          local objId = obj:getID()
+          if ignoreId and objId == ignoreId then
+            hitId = nil
+          elseif not hitId then
+            hitId = objId
+          end
         end
         if hitId and (not ignoreId or hitId ~= ignoreId) then
           if not dist or dynHit.dist < dist then
