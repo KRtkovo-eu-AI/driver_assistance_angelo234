@@ -159,6 +159,17 @@ jobs:
             echo "- Successes: $total_success"
             echo "- Failures: $total_fail"
             echo "- Errors: $total_error"
+
+            echo
+            if [ $((total_fail + total_error)) -eq 0 ]; then
+              badge_text="${total_success}%20passed"
+              badge_color="success"
+            else
+              badge_text="$((total_fail + total_error))%20failed"
+              badge_color="critical"
+            fi
+            badge_url="https://img.shields.io/badge/tests-${badge_text}-${badge_color}"
+            echo "![Tests](${badge_url})"
           } | tee "$summary_file"
           cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
 
