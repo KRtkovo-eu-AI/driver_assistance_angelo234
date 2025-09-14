@@ -28,6 +28,17 @@ local rear_static_min_dist = 9999
 
 local past_wps_props_table = {}
 
+local function isPlayerVehicle(veh)
+  local i = 0
+  while true do
+    local playerVeh = be:getPlayerVehicle(i)
+    if playerVeh == nil then break end
+    if playerVeh:getID() == veh:getID() then return true end
+    i = i + 1
+  end
+  return false
+end
+
 --Returns a table of vehicles and distance to them within a max_dist radius
 local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
 
@@ -333,6 +344,17 @@ local function pollFrontSensors(dt, veh_props, system_params, aeb_params)
 
 
   last_vehs_in_same_road_in_front_table = other_vehs_same_road_data
+  
+  if other_vehs_data and #other_vehs_data > 0 then
+    for _, data in pairs(other_vehs_data) do
+      local veh = data.other_veh
+      local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
+      local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
+      log('I', 'sensor_system', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
+    end
+  elseif front_static_min_dist < 9999 then
+    log('I', 'sensor_system', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
+  end
 
   --p:finish(true)
 

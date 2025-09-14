@@ -36,8 +36,17 @@ _G.castRayStatic = function() return 9999 end
 _G.be = {
   vehicles = {},
   getObjectCount = function(self) return #self.vehicles end,
-  getObject = function(self, i) return self.vehicles[i + 1] end
+  getObject = function(self, i) return self.vehicles[i + 1] end,
+  getPlayerVehicle = function(self, i)
+    if i == 0 then return self.vehicles[1] end
+    return nil
+  end
 }
+
+local logs = {}
+_G.log = function(level, tag, msg)
+  table.insert(logs, {level, tag, msg})
+end
 
 local sensor_system = require('scripts/driver_assistance_angelo234/sensorSystem')
 
@@ -81,6 +90,7 @@ describe('sensor system', function()
     }
     local data = sensor_system.pollFrontSensors(0.1, my_veh.props, {}, aeb_params)
     assert.is_true(#data[2] >= 1)
+    assert.matches('Front sensor detected', logs[1][3])
   end)
 end)
 

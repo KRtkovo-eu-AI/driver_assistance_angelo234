@@ -44,8 +44,8 @@ describe('Auto Headlight Dimming', function()
 
     assert.equal(3, #logs)
     assert.matches('Detected vehicle', logs[1][3])
-    assert.matches('Switching to low beams', logs[2][3])
-    assert.matches('Restoring high beams', logs[3][3])
+    assert.matches('Attempting to switch to low beams', logs[2][3])
+    assert.matches('Attempting to restore high beams', logs[3][3])
   end)
 end)
 

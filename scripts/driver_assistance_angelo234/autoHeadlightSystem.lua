@@ -77,12 +77,12 @@ local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
     if light_state ~= 1 then
-      log('I', 'auto_headlight_system', 'Switching to low beams')
+      log('I', 'auto_headlight_system', 'Attempting to switch to low beams')
       veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
     if light_state ~= 2 then
-      log('I', 'auto_headlight_system', 'Restoring high beams')
+      log('I', 'auto_headlight_system', 'Attempting to restore high beams')
       veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end
