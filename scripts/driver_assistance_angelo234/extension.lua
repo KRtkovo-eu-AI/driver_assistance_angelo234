@@ -317,6 +317,7 @@ local function updateVirtualLidar(dt, veh)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
     local max_dist = aeb_params.sensor_max_distance
+    local veh_props = extra_utils.getVehicleProperties(veh)
     local hits = virtual_lidar.scan(
       origin,
       dir,
@@ -334,11 +335,13 @@ local function updateVirtualLidar(dt, veh)
     local processed = {[veh:getID()] = true}
 
     local function addVehicle(vehObj, props)
-      if not vehObj or not props then return end
-      if props.id == veh:getID() or processed[props.id] then return end
-      processed[props.id] = true
+      if not vehObj then return end
+      local id = vehObj:getID()
+      if id == veh:getID() or processed[id] then return end
+      processed[id] = true
+      props = props or extra_utils.getVehicleProperties(vehObj)
+      if not props or not props.bb then return end
       local bb = props.bb
-      if not bb then return end
       local center = props.center_pos
       local x = vec3(bb:getAxis(0)) * bb:getHalfExtents().x
       local y = vec3(bb:getAxis(1)) * bb:getHalfExtents().y
@@ -359,9 +362,9 @@ local function updateVirtualLidar(dt, veh)
           hits[#hits + 1] = c
         end
       end
-      local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
+      local name = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(id)
       local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
-      detections[#detections + 1] = {pos = center + z, desc = string.format('%s %s', veh_type, id)}
+      detections[#detections + 1] = {pos = center + z, desc = string.format('%s %s', veh_type, name)}
     end
 
     if front_sensor_data and front_sensor_data[2] then
@@ -383,20 +386,42 @@ local function updateVirtualLidar(dt, veh)
     for i = 0, be:getObjectCount() - 1 do
       local other = be:getObject(i)
       if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
-        addVehicle(other, extra_utils.getVehicleProperties(other))
+        addVehicle(other)
       end
+    end
+
+    local hostBB = veh_props and veh_props.bb
+    local hostCenter, hostX, hostY, hostZ, hostExt
+    if hostBB then
+      hostCenter = hostBB:getCenter()
+      hostX = vec3(hostBB:getAxis(0))
+      hostY = vec3(hostBB:getAxis(1))
+      hostZ = vec3(hostBB:getAxis(2))
+      hostExt = hostBB:getHalfExtents()
     end
 
     local groundThreshold = -1.5
     virtual_lidar_point_cloud = {}
     for _, p in ipairs(hits) do
-      local rel = p - origin
-      if rel:dot(up) >= groundThreshold then
-        virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
-          x = rel:dot(right),
-          y = rel:dot(dir),
-          z = rel:dot(up)
-        }
+      local skip = false
+      if hostBB then
+        local relHost = p - hostCenter
+        local hx = relHost:dot(hostX)
+        local hy = relHost:dot(hostY)
+        local hz = relHost:dot(hostZ)
+        if math.abs(hx) <= hostExt.x + 1 and math.abs(hy) <= hostExt.y + 1 and math.abs(hz) <= hostExt.z + 1 then
+          skip = true
+        end
+      end
+      if not skip then
+        local rel = p - origin
+        if rel:dot(up) >= groundThreshold then
+          virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
+            x = rel:dot(right),
+            y = rel:dot(dir),
+            z = rel:dot(up)
+          }
+        end
       end
     end
 
