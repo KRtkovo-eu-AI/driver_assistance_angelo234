@@ -82,6 +82,7 @@ jobs:
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
           exit $status
       - name: Report results
+        id: report
         if: always()
         env:
           LUA_OUTCOME: ${{ steps.lua.outcome }}
@@ -111,7 +112,7 @@ jobs:
           total_failures=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
           total_errors=$((BUSTED_ERRORS))
 
-          {
+          { 
             echo "## Test Summary"
             echo
 
@@ -155,6 +156,33 @@ jobs:
             echo "- Errors: $total_errors"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+          printf 'total_success=%s\n' "$total_success" >> "$GITHUB_OUTPUT"
+          printf 'total_failures=%s\n' "$total_failures" >> "$GITHUB_OUTPUT"
+          printf 'total_errors=%s\n' "$total_errors" >> "$GITHUB_OUTPUT"
+
           if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$BUSTED_OUTCOME" != "success" ]; then
             exit 1
           fi
+
+      - name: Annotate check name
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          TOT_SUCCESS: ${{ steps.report.outputs.total_success }}
+          TOT_FAILURES: ${{ steps.report.outputs.total_failures }}
+          TOT_ERRORS: ${{ steps.report.outputs.total_errors }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const sha = context.sha;
+            const {data} = await github.rest.checks.listForRef({owner, repo, ref: sha});
+            const check = data.check_runs.find(r => r.name === context.job);
+            if (check) {
+              const suffix = `Successes: ${process.env.TOT_SUCCESS} | Failures: ${process.env.TOT_FAILURES} | Errors: ${process.env.TOT_ERRORS}`;
+              const newName = `${check.name} ${suffix}`;
+              await github.rest.checks.update({
+                owner, repo, check_run_id: check.id,
+                name: newName,
+                output: {title: suffix, summary: ''}
+              });
+            }
