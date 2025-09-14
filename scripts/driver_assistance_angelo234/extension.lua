@@ -331,10 +331,11 @@ local function updateVirtualLidar(dt, veh)
     )
 
     local detections = {}
-    local processed = {}
+    local processed = {[veh:getID()] = true}
 
     local function addVehicle(vehObj, props)
-      if not vehObj or not props or processed[props.id] then return end
+      if not vehObj or not props then return end
+      if props.id == veh:getID() or processed[props.id] then return end
       processed[props.id] = true
       local bb = props.bb
       if not bb then return end
