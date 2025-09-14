@@ -252,16 +252,22 @@ local function onUpdate(dt)
 
   local veh_props = extra_utils.getVehicleProperties(my_veh)
 
-  if extra_utils.getPart("acc_angelo234")
-  or extra_utils.getPart("forward_collision_mitigation_angelo234")
-  or extra_utils.getPart("reverse_collision_mitigation_angelo234")
-  then
+  local need_front_sensors = extra_utils.getPart("acc_angelo234")
+    or extra_utils.getPart("forward_collision_mitigation_angelo234")
+    or (extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on)
+  local need_rear_sensors = extra_utils.getPart("reverse_collision_mitigation_angelo234")
+
+  if need_front_sensors or need_rear_sensors then
     --Update at 120 Hz
     if other_systems_timer >= 1.0 / 120.0 then
       if i == 0 then
         --Get sensor data
-        front_sensor_data = sensor_system.pollFrontSensors(other_systems_timer * 2, veh_props, system_params, aeb_params)
-        rear_sensor_data = sensor_system.pollRearSensors(other_systems_timer * 2, veh_props, system_params, rev_aeb_params)
+        if need_front_sensors then
+          front_sensor_data = sensor_system.pollFrontSensors(other_systems_timer * 2, veh_props, system_params, aeb_params)
+        end
+        if need_rear_sensors then
+          rear_sensor_data = sensor_system.pollRearSensors(other_systems_timer * 2, veh_props, system_params, rev_aeb_params)
+        end
 
         i = 1
 
@@ -277,7 +283,7 @@ local function onUpdate(dt)
         end
 
         --Update Reverse Collision Mitigation System
-        if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
+        if need_rear_sensors and rcm_system_on then
           rcm_system.update(other_systems_timer * 2, my_veh, system_params, parking_lines_params, rev_aeb_params, beeper_params, rear_sensor_data)
         end
 
