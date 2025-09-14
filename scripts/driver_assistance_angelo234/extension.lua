@@ -191,6 +191,24 @@ local function toggleDebugLogging()
   ui_message("Driver assistance logs " .. msg)
 end
 
+local function toggleFrontSensorLogging()
+  local enabled = logger.toggleSensor('front_sensor')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Front sensor logs " .. msg)
+end
+
+local function toggleRearSensorLogging()
+  local enabled = logger.toggleSensor('rear_sensor')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Rear sensor logs " .. msg)
+end
+
+local function toggleLidarLogging()
+  local enabled = logger.toggleSensor('lidar')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Lidar logs " .. msg)
+end
+
 --Used for what camera to switch the player to when the player gets out of reverse gear using reverse camera
 local function onCameraModeChanged(new_camera_mode)
   if new_camera_mode ~= M.curr_camera_mode then
@@ -313,6 +331,8 @@ local function updateVirtualLidar(dt, veh)
           local hit = castRay(origin, origin + rayDir * dist, true, true)
           if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
             hits[#hits + 1] = hit.pt
+            local id = other.getJBeamFilename and other:getJBeamFilename() or tostring(other:getID())
+            logger.log('I', 'lidar', string.format('Detected vehicle %s at %.1f', id, dist))
           end
         end
       end
@@ -512,6 +532,9 @@ M.setACCSpeed = setACCSpeed
 M.changeACCSpeed = changeACCSpeed
 M.changeACCFollowingDistance = changeACCFollowingDistance
 M.toggleDebugLogging = toggleDebugLogging
+M.toggleFrontSensorLogging = toggleFrontSensorLogging
+M.toggleRearSensorLogging = toggleRearSensorLogging
+M.toggleLidarLogging = toggleLidarLogging
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
