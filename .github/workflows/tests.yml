@@ -12,7 +12,7 @@ jobs:
       - name: Install Lua and Busted
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.3 luarocks
+          sudo apt-get install -y lua5.3 liblua5.3-dev luarocks
           sudo luarocks install busted
       - name: Run tests
         run: busted
