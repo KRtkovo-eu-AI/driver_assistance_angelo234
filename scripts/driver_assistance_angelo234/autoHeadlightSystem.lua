@@ -59,15 +59,30 @@ end
 
 local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
   local closest_veh_data = getClosestVehicle(vehs_in_front_table)
+  local other_veh = closest_veh_data[1]
   local distance = closest_veh_data[2]
+
+  if other_veh ~= nil then
+    local id
+    if other_veh.getJBeamFilename then
+      id = other_veh:getJBeamFilename()
+    elseif other_veh.getID then
+      id = tostring(other_veh:getID())
+    else
+      id = "unknown"
+    end
+    log('I', 'auto_headlight_system', string.format('Detected vehicle %s at %.1f', id, distance))
+  end
 
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
     if light_state ~= 1 then
+      log('I', 'auto_headlight_system', 'Switching to low beams')
       veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
     if light_state ~= 2 then
+      log('I', 'auto_headlight_system', 'Restoring high beams')
       veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end
