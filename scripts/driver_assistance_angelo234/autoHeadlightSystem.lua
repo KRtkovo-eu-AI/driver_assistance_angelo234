@@ -26,8 +26,14 @@ end
 
 --If system just switched on, then check if headlights are already in high-beam mode
 --if they are, then make note of it
+local function getLightState()
+  return electrics_values_angelo234["lights_state"]
+    or electrics_values_angelo234["lights"]
+    or 0
+end
+
 local function systemSwitchedOn()
-  local light_state = electrics_values_angelo234["lights"]
+  local light_state = getLightState()
 
   if light_state == 2 then
     headlights_turned_off = false
@@ -58,11 +64,11 @@ local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
     if light_state ~= 1 then
-      veh:queueLuaCommand("electrics.setLightsState(1)")
+      veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
     if light_state ~= 2 then
-      veh:queueLuaCommand("electrics.setLightsState(2)")
+      veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end
 end
@@ -71,11 +77,11 @@ local function update(dt, veh, vehs_in_front_table)
   local light_state
 
   if not headlights_turned_off then
-    light_state = electrics_values_angelo234["lights"]
+    light_state = getLightState()
   else
     light_state = 0
 
-    if electrics_values_angelo234["lights"] == 0 then
+    if getLightState() == 0 then
       headlights_turned_off = false
     end
   end
