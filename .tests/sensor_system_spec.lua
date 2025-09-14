@@ -48,6 +48,9 @@ _G.log = function(level, tag, msg)
   table.insert(logs, {level, tag, msg})
 end
 
+local logger = require('scripts/driver_assistance_angelo234/logger')
+logger.setEnabled(true)
+
 local sensor_system = require('scripts/driver_assistance_angelo234/sensorSystem')
 
 describe('sensor system', function()

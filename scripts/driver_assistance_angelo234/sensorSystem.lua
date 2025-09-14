@@ -3,6 +3,7 @@ local M = {}
 --local p = LuaProfiler("my profiler")
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
+local logger = require('scripts/driver_assistance_angelo234/logger')
 
 --For efficiency
 local max = math.max
@@ -350,10 +351,10 @@ local function pollFrontSensors(dt, veh_props, system_params, aeb_params)
       local veh = data.other_veh
       local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
       local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
-      log('I', 'sensor_system', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
+      logger.log('I', 'sensor_system', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
     end
   elseif front_static_min_dist < 9999 then
-    log('I', 'sensor_system', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
+    logger.log('I', 'sensor_system', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
   end
 
   --p:finish(true)

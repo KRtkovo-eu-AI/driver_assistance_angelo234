@@ -7,6 +7,9 @@ _G.log = function(level, tag, msg)
   table.insert(logs, {level, tag, msg})
 end
 
+local logger = require('scripts/driver_assistance_angelo234/logger')
+logger.setEnabled(true)
+
 local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 describe('Auto Headlight Dimming', function()

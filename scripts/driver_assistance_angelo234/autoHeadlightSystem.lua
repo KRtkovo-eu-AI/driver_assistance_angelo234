@@ -1,5 +1,7 @@
 local M = {}
 
+local logger = require('scripts/driver_assistance_angelo234/logger')
+
 
 --Based on US Law (about 500 feet)
 local dim_distance = 150
@@ -71,18 +73,18 @@ local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
     else
       id = "unknown"
     end
-    log('I', 'auto_headlight_system', string.format('Detected vehicle %s at %.1f', id, distance))
+    logger.log('I', 'auto_headlight_system', string.format('Detected vehicle %s at %.1f', id, distance))
   end
 
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
     if light_state ~= 1 then
-      log('I', 'auto_headlight_system', 'Attempting to switch to low beams')
+      logger.log('I', 'auto_headlight_system', 'Attempting to switch to low beams')
       veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
     if light_state ~= 2 then
-      log('I', 'auto_headlight_system', 'Attempting to restore high beams')
+      logger.log('I', 'auto_headlight_system', 'Attempting to restore high beams')
       veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end

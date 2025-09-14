@@ -18,6 +18,7 @@ local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollision
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
 local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
+local logger = require('scripts/driver_assistance_angelo234/logger')
 
 local first_update = true
 
@@ -175,6 +176,12 @@ local function changeACCFollowingDistance(amt)
   if not extra_utils.getPart("acc_angelo234") then return end
 
   acc_system.changeACCFollowingDistance(amt)
+end
+
+local function toggleDebugLogging()
+  local enabled = logger.toggle()
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Driver assistance logs " .. msg)
 end
 
 --Used for what camera to switch the player to when the player gets out of reverse gear using reverse camera
@@ -358,6 +365,7 @@ M.toggleACCSystem = toggleACCSystem
 M.setACCSpeed = setACCSpeed
 M.changeACCSpeed = changeACCSpeed
 M.changeACCFollowingDistance = changeACCFollowingDistance
+M.toggleDebugLogging = toggleDebugLogging
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
