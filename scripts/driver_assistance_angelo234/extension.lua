@@ -331,69 +331,62 @@ local function updateVirtualLidar(dt, veh)
     )
 
     local detections = {}
+    local processed = {}
 
-    -- add points from front sensor vehicles
+    local function addVehicle(vehObj, props)
+      if not vehObj or not props or processed[props.id] then return end
+      processed[props.id] = true
+      local bb = props.bb
+      if not bb then return end
+      local center = props.center_pos
+      local x = vec3(bb:getAxis(0)) * bb:getHalfExtents().x
+      local y = vec3(bb:getAxis(1)) * bb:getHalfExtents().y
+      local z = vec3(bb:getAxis(2)) * bb:getHalfExtents().z
+      local corners = {
+        center + x + y + z,
+        center + x - y + z,
+        center - x + y + z,
+        center - x - y + z
+      }
+      for _, c in ipairs(corners) do
+        local rel = c - origin
+        local dist = rel:length()
+        if dist < max_dist then
+          local hit = castRay(origin, origin + rel, true, true)
+          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
+            hits[#hits + 1] = hit.pt
+          end
+        end
+      end
+      local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
+      local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
+      detections[#detections + 1] = {pos = center + z, desc = string.format('%s %s', veh_type, id)}
+    end
+
     if front_sensor_data and front_sensor_data[2] then
       for _, data in ipairs(front_sensor_data[2]) do
-        if data.other_veh_props then
-          local p = data.other_veh_props.center_pos + vec3(0, 0, 1)
-          hits[#hits + 1] = p
-          local veh = data.other_veh
-          if veh then
-            local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
-            local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
-            detections[#detections + 1] = {pos = p, desc = string.format('%s %s', veh_type, id)}
-          end
+        if data.other_veh and data.other_veh_props then
+          addVehicle(data.other_veh, data.other_veh_props)
         end
       end
     end
 
-    -- add point from closest rear sensor vehicle
     if rear_sensor_data and rear_sensor_data[1] then
       local vehRear = rear_sensor_data[1]
       if vehRear then
         local propsRear = extra_utils.getVehicleProperties(vehRear)
-        local pRear = propsRear.center_pos + vec3(0, 0, 1)
-        hits[#hits + 1] = pRear
-        local id = vehRear.getJBeamFilename and vehRear:getJBeamFilename() or tostring(vehRear:getID())
-        local veh_type = isPlayerVehicle(vehRear) and 'player vehicle' or 'traffic vehicle'
-        detections[#detections + 1] = {pos = pRear, desc = string.format('%s %s', veh_type, id)}
+        addVehicle(vehRear, propsRear)
       end
     end
 
-    -- approximate static obstacle positions from sensor distances
-    if front_sensor_data and front_sensor_data[1] and front_sensor_data[1] < 9999 then
-      local pFront = origin + dir * front_sensor_data[1]
-      hits[#hits + 1] = pFront
-      detections[#detections + 1] = {pos = pFront, desc = 'front obstacle'}
-    end
-    if rear_sensor_data and rear_sensor_data[2] and rear_sensor_data[2] < 9999 then
-      local pBack = origin - dir * rear_sensor_data[2]
-      hits[#hits + 1] = pBack
-      detections[#detections + 1] = {pos = pBack, desc = 'rear obstacle'}
-    end
-
-    -- add detections for nearby vehicles using raycasts to their centers
     for i = 0, be:getObjectCount() - 1 do
       local other = be:getObject(i)
       if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
-        local props = extra_utils.getVehicleProperties(other)
-        local rel = props.center_pos - origin
-        local dist = rel:length()
-        if dist < max_dist then
-          local rayDir = rel / dist
-          local hit = castRay(origin, origin + rayDir * dist, true, true)
-          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
-            hits[#hits + 1] = hit.pt
-            local id = other.getJBeamFilename and other:getJBeamFilename() or tostring(other:getID())
-            local veh_type = isPlayerVehicle(other) and 'player vehicle' or 'traffic vehicle'
-            detections[#detections + 1] = {pos = hit.pt, desc = string.format('%s %s', veh_type, id)}
-          end
-        end
+        addVehicle(other, extra_utils.getVehicleProperties(other))
       end
     end
 
-    local groundThreshold = -0.3
+    local groundThreshold = -1.5
     virtual_lidar_point_cloud = {}
     for _, p in ipairs(hits) do
       local rel = p - origin
