@@ -112,7 +112,8 @@ jobs:
           total_failures=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
           total_errors=$((BUSTED_ERRORS))
 
-          { 
+          summary_file=$(mktemp)
+          {
             echo "## Test Summary"
             echo
 
@@ -154,8 +155,10 @@ jobs:
             echo "- Successes: $total_success"
             echo "- Failures: $total_failures"
             echo "- Errors: $total_errors"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } | tee "$summary_file"
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
 
+          printf 'summary<<EOF\n%s\nEOF\n' "$(cat "$summary_file")" >> "$GITHUB_OUTPUT"
           printf 'total_success=%s\n' "$total_success" >> "$GITHUB_OUTPUT"
           printf 'total_failures=%s\n' "$total_failures" >> "$GITHUB_OUTPUT"
           printf 'total_errors=%s\n' "$total_errors" >> "$GITHUB_OUTPUT"
@@ -171,6 +174,7 @@ jobs:
           TOT_SUCCESS: ${{ steps.report.outputs.total_success }}
           TOT_FAILURES: ${{ steps.report.outputs.total_failures }}
           TOT_ERRORS: ${{ steps.report.outputs.total_errors }}
+          REPORT_SUMMARY: ${{ steps.report.outputs.summary }}
         with:
           script: |
             const {owner, repo} = context.repo;
@@ -183,6 +187,6 @@ jobs:
               await github.rest.checks.update({
                 owner, repo, check_run_id: check.id,
                 name: newName,
-                output: {title: suffix, summary: ''}
+                output: {title: suffix, summary: process.env.REPORT_SUMMARY}
               });
             }
