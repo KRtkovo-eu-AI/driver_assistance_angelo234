@@ -112,9 +112,9 @@ jobs:
           BUSTED_FAILURES=${BUSTED_FAILURES:-0}
           BUSTED_ERRORS=${BUSTED_ERRORS:-0}
           BUSTED_PENDING=${BUSTED_PENDING:-0}
-          total_pass=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
-          total_fail=$((BUSTED_FAILURES + BUSTED_ERRORS + LUA_ERRORS + JS_ERRORS))
-          total_skip=$((BUSTED_PENDING))
+          total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
+          total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
+          total_error=$((BUSTED_ERRORS))
 
           summary_file=$(mktemp)
           {
@@ -156,35 +156,35 @@ jobs:
 
             echo
             echo "### Overall"
-            echo "- Passed: $total_pass"
-            echo "- Failed: $total_fail"
-            echo "- Skipped: $total_skip"
+            echo "- Successes: $total_success"
+            echo "- Failures: $total_fail"
+            echo "- Errors: $total_error"
           } | tee "$summary_file"
           cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
 
           printf 'summary<<EOF\n%s\nEOF\n' "$(cat "$summary_file")" >> "$GITHUB_OUTPUT"
-          printf 'total_pass=%s\n' "$total_pass" >> "$GITHUB_OUTPUT"
+          printf 'total_success=%s\n' "$total_success" >> "$GITHUB_OUTPUT"
           printf 'total_fail=%s\n' "$total_fail" >> "$GITHUB_OUTPUT"
-          printf 'total_skip=%s\n' "$total_skip" >> "$GITHUB_OUTPUT"
+          printf 'total_error=%s\n' "$total_error" >> "$GITHUB_OUTPUT"
 
       - name: Annotate check name
         if: always()
         uses: actions/github-script@v7
         env:
-          TOT_PASS: ${{ steps.report.outputs.total_pass }}
+          TOT_SUCCESS: ${{ steps.report.outputs.total_success }}
           TOT_FAIL: ${{ steps.report.outputs.total_fail }}
-          TOT_SKIP: ${{ steps.report.outputs.total_skip }}
+          TOT_ERROR: ${{ steps.report.outputs.total_error }}
           SUMMARY: ${{ steps.report.outputs.summary }}
         with:
           script: |
             const {owner, repo} = context.repo;
             const sha = context.sha;
             const {data} = await github.rest.checks.listForRef({owner, repo, ref: sha});
-            const checkName = `${context.workflow} / ${context.job}`;
-            const check = data.check_runs.find(r => r.name === checkName);
+            const baseName = `${context.workflow} / ${context.job}`;
+            const check = data.check_runs.find(r => r.name.startsWith(baseName));
             if (check) {
-              const suffix = `${process.env.TOT_PASS} passed, ${process.env.TOT_FAIL} failed, ${process.env.TOT_SKIP} skipped`;
-              const newName = `${checkName} ${suffix}`;
+              const suffix = `Successes: ${process.env.TOT_SUCCESS} | Failures: ${process.env.TOT_FAIL} | Errors: ${process.env.TOT_ERROR}`;
+              const newName = `${baseName} (${context.eventName}) ${suffix}`;
               await github.rest.checks.update({
                 owner, repo, check_run_id: check.id,
                 name: newName,
@@ -196,8 +196,9 @@ jobs:
         if: always()
         env:
           TOT_FAIL: ${{ steps.report.outputs.total_fail }}
+          TOT_ERROR: ${{ steps.report.outputs.total_error }}
         run: |
-          if [ "$TOT_FAIL" -ne 0 ]; then
+          if [ $((TOT_FAIL + TOT_ERROR)) -ne 0 ]; then
             exit 1
           fi
 
