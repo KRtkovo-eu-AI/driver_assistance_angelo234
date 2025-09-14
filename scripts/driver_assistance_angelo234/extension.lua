@@ -17,7 +17,7 @@ local fcm_system = require('scripts/driver_assistance_angelo234/forwardCollision
 local rcm_system = require('scripts/driver_assistance_angelo234/reverseCollisionMitigationSystem')
 local acc_system = require('scripts/driver_assistance_angelo234/accSystem')
 local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistSystem')
---local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
+local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 
 local first_update = true
 
@@ -76,11 +76,11 @@ local function onVehicleSwitched(oid, nid, player)
 end
 
 local function onHeadlightsOff()
-  --auto_headlight_system.onHeadlightsOff()
+  auto_headlight_system.onHeadlightsOff()
 end
 
 local function onHeadlightsOn()
-  --auto_headlight_system.onHeadlightsOn()
+  auto_headlight_system.onHeadlightsOn()
 end
 
 --Functions called with key binding
@@ -117,8 +117,6 @@ local function toggleRCMSystem()
 end
 
 local function toggleAutoHeadlightSystem()
-  --[[
-
   if not extra_utils.getPart("auto_headlight_angelo234") then return end
 
   auto_headlight_system_on = not auto_headlight_system_on
@@ -132,8 +130,6 @@ local function toggleAutoHeadlightSystem()
   end
 
   ui_message("Auto Headlight Dimming switched " .. msg)
-
-  ]]--
 end
 
 local function setACCSystemOn(on)
@@ -239,7 +235,7 @@ local function onUpdate(dt)
     -- rcm_system.init()
     -- acc_system.init()
     -- hsa_system.init()
-    --auto_headlight_system.init()
+    auto_headlight_system.init()
     first_update = false
   end
 
@@ -305,10 +301,7 @@ local function onUpdate(dt)
     --p:add("hsa update")
   end
 
-  --AUTO HEADLIGHT SYSTEM DISABLED TEMPORARILY WHILE FINDING A FIX
-
-  --[[
-  --Update at 4 Hz
+  --Update Auto Headlight System at 4 Hz
   if auto_headlight_system_update_timer >= 0.25 then
     if extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on then
       if front_sensor_data ~= nil then
@@ -326,7 +319,6 @@ local function onUpdate(dt)
 
     --p:add("auto headlight update")
   end
-  ]]--
 
   --Update timers for updating systems
   other_systems_timer = other_systems_timer + dt

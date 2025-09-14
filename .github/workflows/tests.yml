@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.3 liblua5.3-dev luarocks nodejs
+          sudo luarocks install busted
+      - name: Lua syntax check
+        id: lua
+        continue-on-error: true
+        run: |
+          files=$(find . -name '*.lua')
+          if [ -n "$files" ]; then
+            echo 'Lua files:'
+            printf '%s\n' $files
+            errors=0
+            for f in $files; do
+              if ! luac -p "$f"; then
+                errors=$((errors+1))
+              fi
+            done
+            count=$(printf '%s\n' "$files" | wc -l)
+          else
+            echo 'No Lua files'
+            count=0
+            errors=0
+          fi
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          if [ "$errors" -ne 0 ]; then exit 1; fi
+      - name: JS syntax check
+        id: js
+        continue-on-error: true
+        run: |
+          files=$(find . -name '*.js')
+          if [ -n "$files" ]; then
+            echo 'JS files:'
+            printf '%s\n' $files
+            errors=0
+            for f in $files; do
+              if ! node --check "$f"; then
+                errors=$((errors+1))
+              fi
+            done
+            count=$(printf '%s\n' "$files" | wc -l)
+          else
+            echo 'No JavaScript files'
+            count=0
+            errors=0
+          fi
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          if [ "$errors" -ne 0 ]; then exit 1; fi
+      - name: Busted tests
+        id: busted
+        continue-on-error: true
+        run: |
+          output=$(busted)
+          status=$?
+          echo "$output"
+          summary=$(echo "$output" | tail -n 1)
+          successes=$(echo "$summary" | awk '{print $1}')
+          failures=$(echo "$summary" | awk '{print $4}')
+          errors=$(echo "$summary" | awk '{print $7}')
+          pending=$(echo "$summary" | awk '{print $10}')
+          if ! [[ "$successes" =~ ^[0-9]+$ ]]; then successes=0; fi
+          if ! [[ "$failures" =~ ^[0-9]+$ ]]; then failures=0; fi
+          if ! [[ "$errors" =~ ^[0-9]+$ ]]; then errors=0; fi
+          if ! [[ "$pending" =~ ^[0-9]+$ ]]; then pending=0; fi
+          total=$((successes + failures + errors + pending))
+          printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
+          printf 'successes=%s\n' "$successes" >> "$GITHUB_OUTPUT"
+          printf 'failures=%s\n' "$failures" >> "$GITHUB_OUTPUT"
+          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
+          printf 'pending=%s\n' "$pending" >> "$GITHUB_OUTPUT"
+          exit $status
+      - name: Report results
+        id: report
+        if: always()
+        env:
+          LUA_OUTCOME: ${{ steps.lua.outcome }}
+          LUA_COUNT: ${{ steps.lua.outputs.count }}
+          LUA_ERRORS: ${{ steps.lua.outputs.errors }}
+          LUA_FILES: ${{ steps.lua.outputs.files }}
+          JS_OUTCOME: ${{ steps.js.outcome }}
+          JS_COUNT: ${{ steps.js.outputs.count }}
+          JS_ERRORS: ${{ steps.js.outputs.errors }}
+          JS_FILES: ${{ steps.js.outputs.files }}
+          BUSTED_OUTCOME: ${{ steps.busted.outcome }}
+          BUSTED_TOTAL: ${{ steps.busted.outputs.total }}
+          BUSTED_SUCCESS: ${{ steps.busted.outputs.successes }}
+          BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
+          BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
+          BUSTED_PENDING: ${{ steps.busted.outputs.pending }}
+        run: |
+          LUA_COUNT=${LUA_COUNT:-0}
+          LUA_ERRORS=${LUA_ERRORS:-0}
+          JS_COUNT=${JS_COUNT:-0}
+          JS_ERRORS=${JS_ERRORS:-0}
+          BUSTED_TOTAL=${BUSTED_TOTAL:-0}
+          BUSTED_SUCCESS=${BUSTED_SUCCESS:-0}
+          BUSTED_FAILURES=${BUSTED_FAILURES:-0}
+          BUSTED_ERRORS=${BUSTED_ERRORS:-0}
+          BUSTED_PENDING=${BUSTED_PENDING:-0}
+          total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
+          total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
+          total_error=$((BUSTED_ERRORS))
+
+          summary_file=$(mktemp)
+          {
+            echo "## Test Summary"
+            echo
+
+            echo "### Lua syntax"
+            if [ "$LUA_COUNT" -gt 0 ]; then
+              echo "$LUA_FILES" | sed 's/^/- /'
+            fi
+            if [ "$LUA_OUTCOME" = "success" ]; then
+              echo "✅ Checked $LUA_COUNT Lua files"
+            else
+              echo "❌ Syntax errors in $LUA_ERRORS Lua files out of $LUA_COUNT"
+            fi
+
+            echo
+            echo "### JS syntax"
+            if [ "$JS_COUNT" -gt 0 ]; then
+              echo "$JS_FILES" | sed 's/^/- /'
+            fi
+            if [ "$JS_OUTCOME" = "success" ]; then
+              echo "✅ Checked $JS_COUNT JS files"
+            else
+              echo "❌ Syntax errors in $JS_ERRORS JS files out of $JS_COUNT"
+            fi
+
+            echo
+            echo "### Busted"
+            if [ "$BUSTED_OUTCOME" = "success" ]; then
+              echo "✅ Tests passed"
+            else
+              echo "❌ Tests failed"
+            fi
+            echo "- Total: $BUSTED_TOTAL"
+            echo "- Successes: $BUSTED_SUCCESS"
+            echo "- Failures: $BUSTED_FAILURES"
+            echo "- Errors: $BUSTED_ERRORS"
+
+            echo
+            echo "### Overall"
+            echo "- Successes: $total_success"
+            echo "- Failures: $total_fail"
+            echo "- Errors: $total_error"
+
+            echo
+            if [ $((total_fail + total_error)) -eq 0 ]; then
+              badge_text="${total_success}%20passed"
+              badge_color="success"
+            else
+              badge_text="$((total_fail + total_error))%20failed"
+              badge_color="critical"
+            fi
+            badge_url="https://img.shields.io/badge/tests-${badge_text}-${badge_color}"
+            echo "![Tests](${badge_url})"
+          } | tee "$summary_file"
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+
+          printf 'summary<<EOF\n%s\nEOF\n' "$(cat "$summary_file")" >> "$GITHUB_OUTPUT"
+          printf 'total_success=%s\n' "$total_success" >> "$GITHUB_OUTPUT"
+          printf 'total_fail=%s\n' "$total_fail" >> "$GITHUB_OUTPUT"
+          printf 'total_error=%s\n' "$total_error" >> "$GITHUB_OUTPUT"
+
+      - name: Annotate check name
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          TOT_SUCCESS: ${{ steps.report.outputs.total_success }}
+          TOT_FAIL: ${{ steps.report.outputs.total_fail }}
+          TOT_ERROR: ${{ steps.report.outputs.total_error }}
+          SUMMARY: ${{ steps.report.outputs.summary }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const sha = context.sha;
+            const {data} = await github.rest.checks.listForRef({owner, repo, ref: sha});
+            const baseName = `${context.workflow} / ${context.job}`;
+            const check = data.check_runs.find(r => r.name.startsWith(baseName));
+            if (check) {
+              const suffix = `Successes: ${process.env.TOT_SUCCESS} | Failures: ${process.env.TOT_FAIL} | Errors: ${process.env.TOT_ERROR}`;
+              const newName = `${baseName} (${context.eventName}) ${suffix}`;
+              await github.rest.checks.update({
+                owner, repo, check_run_id: check.id,
+                name: newName,
+                output: {title: suffix, summary: process.env.SUMMARY}
+              });
+            }
+
+      - name: Fail if needed
+        if: always()
+        env:
+          TOT_FAIL: ${{ steps.report.outputs.total_fail }}
+          TOT_ERROR: ${{ steps.report.outputs.total_error }}
+        run: |
+          if [ $((TOT_FAIL + TOT_ERROR)) -ne 0 ]; then
+            exit 1
+          fi
+
