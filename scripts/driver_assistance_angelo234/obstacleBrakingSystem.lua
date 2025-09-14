@@ -25,7 +25,7 @@ local function enableABS(veh)
 end
 
 -- speed is in m/s and is used to relax slope filtering at lower speeds
-local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_sensors, rear_sensors)
+local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_sensors, rear_sensors, use_lidar)
   local maxDistance = aeb_params.sensor_max_distance
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
@@ -36,8 +36,10 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
 
-  local scan =
-    virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+  local scan = {}
+  if use_lidar then
+    scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+  end
 
   -- augment scan with sensor data
   if front_sensors then
@@ -240,7 +242,9 @@ local function update(dt, veh, system_params, aeb_params, beeper_params, front_s
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   if forward_speed <= aeb_params.min_speed then return end
 
-  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params, forward_speed, front_sensors, rear_sensors)
+  local use_lidar = extra_utils.getPart("lidar_angelo234")
+
+  local distance, side_clearance = frontObstacleDistance(veh, veh_props, aeb_params, forward_speed, front_sensors, rear_sensors, use_lidar)
 
   local side_threshold = aeb_params.side_clearance_threshold or 0.3
   if side_clearance and side_clearance < side_threshold then

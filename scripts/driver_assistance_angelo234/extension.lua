@@ -271,6 +271,10 @@ end
 --local p = LuaProfiler("my profiler")
 
 local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
+  if not extra_utils.getPart("lidar_angelo234") then
+    virtual_lidar_point_cloud = {}
+    return
+  end
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then
@@ -377,8 +381,10 @@ local function onUpdate(dt)
   local veh_props = extra_utils.getVehicleProperties(my_veh)
   local need_front_sensors = extra_utils.getPart("acc_angelo234")
     or extra_utils.getPart("forward_collision_mitigation_angelo234")
+    or extra_utils.getPart("obstacle_collision_mitigation_angelo234")
     or (extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on)
   local need_rear_sensors = extra_utils.getPart("reverse_collision_mitigation_angelo234")
+    or extra_utils.getPart("obstacle_collision_mitigation_angelo234")
 
   if need_front_sensors or need_rear_sensors then
     --Update at 120 Hz

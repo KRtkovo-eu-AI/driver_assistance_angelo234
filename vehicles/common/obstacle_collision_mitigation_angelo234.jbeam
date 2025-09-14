@@ -9,6 +9,7 @@
         "slots": [
             ["type", "default", "description"],
             ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle AEB"],
+            ["lidar_angelo234", "", "Lidar"],
         ],
     },
 }
