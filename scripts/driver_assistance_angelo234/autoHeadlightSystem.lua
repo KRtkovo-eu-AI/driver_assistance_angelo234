@@ -28,9 +28,9 @@ end
 --If system just switched on, then check if highbeams are already on
 --if they are on, then make note of it
 local function systemSwitchedOn()
-  local light_state = electrics_values_angelo234["lights"]
+  local highbeam = electrics_values_angelo234["highbeam"]
 
-  if light_state == 2 then
+  if highbeam == 1 then
     headlights_turned_off = false
   end
 end
@@ -52,31 +52,29 @@ local function getClosestVehicle(other_vehs_data)
   return {other_veh, distance}
 end
 
-local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
+local function autoHeadlightFunction(veh, vehs_in_front_table, highbeam_state)
   local closest_veh_data = getClosestVehicle(vehs_in_front_table)
   local distance = closest_veh_data[2]
 
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
-    if light_state ~= 1 then
-      veh:queueLuaCommand("electrics.setLightsState(1)")
+    if highbeam_state ~= 0 then
+      veh:queueLuaCommand("electrics.setLightsState(1); electrics.highbeam=0")
     end
   else
-    if light_state ~= 2 then
-      veh:queueLuaCommand("electrics.setLightsState(2)")
+    if highbeam_state ~= 1 then
+      veh:queueLuaCommand("electrics.highbeam=1; electrics.setLightsState(2)")
     end
   end
 end
 
 local function update(dt, veh, vehs_in_front_table)
-  local light_state = nil
+  local highbeam_state
 
-  --This is to prevent headlight from turning back on due to delay
-  --with sending data between Vehicle and GameEngine Lua
   if not headlights_turned_off then
-    light_state = electrics_values_angelo234["lights"]
+    highbeam_state = electrics_values_angelo234["highbeam"]
   else
-    light_state = 0
+    highbeam_state = 0
 
     if electrics_values_angelo234["lights"] == 0 then
       headlights_turned_off = false
@@ -84,13 +82,11 @@ local function update(dt, veh, vehs_in_front_table)
   end
 
   if not armed then
-    if light_state == 2 then
+    if highbeam_state == 1 then
       armed = true
     end
   else
-    -- if sensor data has not been generated yet the table can be nil
-    -- treat this situation as having no vehicles in front to avoid errors
-    autoHeadlightFunction(veh, vehs_in_front_table or {}, light_state)
+    autoHeadlightFunction(veh, vehs_in_front_table or {}, highbeam_state)
   end
 end
 
