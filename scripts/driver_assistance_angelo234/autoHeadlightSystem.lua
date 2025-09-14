@@ -88,7 +88,9 @@ local function update(dt, veh, vehs_in_front_table)
       armed = true
     end
   else
-    autoHeadlightFunction(veh, vehs_in_front_table, light_state)
+    -- if sensor data has not been generated yet the table can be nil
+    -- treat this situation as having no vehicles in front to avoid errors
+    autoHeadlightFunction(veh, vehs_in_front_table or {}, light_state)
   end
 end
 
