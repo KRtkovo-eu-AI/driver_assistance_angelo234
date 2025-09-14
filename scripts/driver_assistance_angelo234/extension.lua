@@ -303,17 +303,21 @@ local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
       veh:getID()
     )
 
+    -- lift added points slightly so the ground filter doesn't remove them
+    local lift = (aeb_params.slope_height_allowance or 0.25) + 0.05
+
     -- incorporate front sensor data
     if front_sensors then
       local front_static = front_sensors[1]
-      if front_static and front_static < 9999 then
-        hits[#hits + 1] = origin + dir * front_static
+      if front_static and front_static > 0 and front_static < 9999 then
+        hits[#hits + 1] = origin + dir * front_static + up * lift
       end
       local vehs = front_sensors[2]
       if vehs then
         for _, data in ipairs(vehs) do
           if data.other_veh_props and data.other_veh_props.center_pos then
-            hits[#hits + 1] = data.other_veh_props.center_pos
+            local cp = data.other_veh_props.center_pos
+            hits[#hits + 1] = vec3(cp.x, cp.y, origin.z + lift)
           end
         end
       end
@@ -323,13 +327,14 @@ local function updateVirtualLidar(dt, veh, front_sensors, rear_sensors)
     if rear_sensors then
       local rear_vehicle = rear_sensors[1]
       local rear_dist = rear_sensors[2]
-      if rear_dist and rear_dist < 9999 then
-        hits[#hits + 1] = origin - dir * rear_dist
+      if rear_dist and rear_dist > 0 and rear_dist < 9999 then
+        hits[#hits + 1] = origin - dir * rear_dist + up * lift
       end
       if rear_vehicle then
         local props = extra_utils.getVehicleProperties(rear_vehicle)
         if props and props.center_pos then
-          hits[#hits + 1] = props.center_pos
+          local cp = props.center_pos
+          hits[#hits + 1] = vec3(cp.x, cp.y, origin.z + lift)
         end
       end
     end

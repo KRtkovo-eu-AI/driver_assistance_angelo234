@@ -35,42 +35,6 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local up = vec3(0, 0, 1)
   local forwardOffset = 1.5
   local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
-
-  local scan = {}
-  if use_lidar then
-    scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
-  end
-
-  -- augment scan with sensor data
-  if front_sensors then
-    local front_static = front_sensors[1]
-    if front_static and front_static < 9999 then
-      scan[#scan + 1] = origin + dir * front_static
-    end
-    local vehs = front_sensors[2]
-    if vehs then
-      for _, data in ipairs(vehs) do
-        if data.other_veh_props and data.other_veh_props.center_pos then
-          scan[#scan + 1] = data.other_veh_props.center_pos
-        end
-      end
-    end
-  end
-
-  if rear_sensors then
-    local rear_vehicle = rear_sensors[1]
-    local rear_dist = rear_sensors[2]
-    if rear_dist and rear_dist < 9999 then
-      scan[#scan + 1] = origin - dir * rear_dist
-    end
-    if rear_vehicle then
-      local props = extra_utils.getVehicleProperties(rear_vehicle)
-      if props and props.center_pos then
-        scan[#scan + 1] = props.center_pos
-      end
-    end
-  end
-
   -- ignore points below groundThreshold or above the vehicle roof to avoid
   -- triggering on walkways or bridges that are safe to pass under
   local groundThreshold = -0.3
@@ -91,6 +55,44 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
 
   local overhead_dist = aeb_params.overhead_ignore_distance or 10
   local overhead_margin = aeb_params.overhead_height_margin or 0.1
+
+  local scan = {}
+  if use_lidar then
+    scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+  end
+
+  -- augment scan with sensor data
+  local lift = height_allowance + 0.05
+  if front_sensors then
+    local front_static = front_sensors[1]
+    if front_static and front_static > 0 and front_static < 9999 then
+      scan[#scan + 1] = origin + dir * front_static + up * lift
+    end
+    local vehs = front_sensors[2]
+    if vehs then
+      for _, data in ipairs(vehs) do
+        if data.other_veh_props and data.other_veh_props.center_pos then
+          local cp = data.other_veh_props.center_pos
+          scan[#scan + 1] = vec3(cp.x, cp.y, origin.z + lift)
+        end
+      end
+    end
+  end
+
+  if rear_sensors then
+    local rear_vehicle = rear_sensors[1]
+    local rear_dist = rear_sensors[2]
+    if rear_dist and rear_dist > 0 and rear_dist < 9999 then
+      scan[#scan + 1] = origin - dir * rear_dist + up * lift
+    end
+    if rear_vehicle then
+      local props = extra_utils.getVehicleProperties(rear_vehicle)
+      if props and props.center_pos then
+        local cp = props.center_pos
+        scan[#scan + 1] = vec3(cp.x, cp.y, origin.z + lift)
+      end
+    end
+  end
 
   latest_point_cloud = {}
   local best
