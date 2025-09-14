@@ -1,0 +1,10 @@
+{
+    "lidar_angelo234": {
+        "information":{
+            "authors":"angelo234",
+            "name":"Lidar",
+            "value":250,
+        },
+        "slotType" : "lidar_angelo234",
+    },
+}

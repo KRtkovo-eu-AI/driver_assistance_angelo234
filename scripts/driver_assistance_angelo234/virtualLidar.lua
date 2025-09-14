@@ -42,7 +42,7 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
         if not hitId and dynHit.obj and dynHit.obj.getID then
           hitId = dynHit.obj:getID()
         end
-        if not ignoreId or hitId ~= ignoreId then
+        if hitId and (not ignoreId or hitId ~= ignoreId) then
           if not dist or dynHit.dist < dist then
             dist = dynHit.dist
             pt = dynHit.pt
