@@ -71,10 +71,10 @@ jobs:
           summary=$(echo "$output" | tail -n 1)
           successes=$(echo "$summary" | awk '{print $1}')
           failures=$(echo "$summary" | awk '{print $4}')
-          errors=$(echo "$summary" | awk '{print $8}')
-          if [ -z "$successes" ]; then successes=0; fi
-          if [ -z "$failures" ]; then failures=0; fi
-          if [ -z "$errors" ]; then errors=0; fi
+          errors=$(echo "$summary" | awk '{print $7}')
+          if ! [[ "$successes" =~ ^[0-9]+$ ]]; then successes=0; fi
+          if ! [[ "$failures" =~ ^[0-9]+$ ]]; then failures=0; fi
+          if ! [[ "$errors" =~ ^[0-9]+$ ]]; then errors=0; fi
           total=$((successes + failures + errors))
           printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
           printf 'successes=%s\n' "$successes" >> "$GITHUB_OUTPUT"
@@ -123,12 +123,25 @@ jobs:
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
+          LUA_COUNT=${LUA_COUNT:-0}
+          LUA_ERRORS=${LUA_ERRORS:-0}
+          JS_COUNT=${JS_COUNT:-0}
+          JS_ERRORS=${JS_ERRORS:-0}
+          BUSTED_TOTAL=${BUSTED_TOTAL:-0}
+          BUSTED_SUCCESS=${BUSTED_SUCCESS:-0}
+          BUSTED_FAILURES=${BUSTED_FAILURES:-0}
+          BUSTED_ERRORS=${BUSTED_ERRORS:-0}
+
           echo "### Busted" >> $GITHUB_STEP_SUMMARY
           if [ "$BUSTED_OUTCOME" = "success" ]; then
-            echo "✅ $BUSTED_TOTAL tests run, 0 failures" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Tests passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ $BUSTED_TOTAL tests run, $BUSTED_FAILURES failures, $BUSTED_ERRORS errors" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Tests failed" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "- Total: $BUSTED_TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "- Successes: $BUSTED_SUCCESS" >> $GITHUB_STEP_SUMMARY
+          echo "- Failures: $BUSTED_FAILURES" >> $GITHUB_STEP_SUMMARY
+          echo "- Errors: $BUSTED_ERRORS" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
