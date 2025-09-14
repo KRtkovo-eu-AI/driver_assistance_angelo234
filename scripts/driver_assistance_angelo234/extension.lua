@@ -191,6 +191,35 @@ local function toggleDebugLogging()
   ui_message("Driver assistance logs " .. msg)
 end
 
+local function toggleFrontSensorLogging()
+  local enabled = logger.toggleSensor('front_sensor')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Front sensor logs " .. msg)
+end
+
+local function toggleRearSensorLogging()
+  local enabled = logger.toggleSensor('rear_sensor')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Rear sensor logs " .. msg)
+end
+
+local function toggleLidarLogging()
+  local enabled = logger.toggleSensor('lidar')
+  local msg = enabled and "enabled" or "disabled"
+  ui_message("Lidar logs " .. msg)
+end
+
+local function isPlayerVehicle(veh)
+  local i = 0
+  while true do
+    local playerVeh = be:getPlayerVehicle(i)
+    if playerVeh == nil then break end
+    if playerVeh:getID() == veh:getID() then return true end
+    i = i + 1
+  end
+  return false
+end
+
 --Used for what camera to switch the player to when the player gets out of reverse gear using reverse camera
 local function onCameraModeChanged(new_camera_mode)
   if new_camera_mode ~= M.curr_camera_mode then
@@ -271,6 +300,10 @@ end
 --local p = LuaProfiler("my profiler")
 
 local function updateVirtualLidar(dt, veh)
+  if not extra_utils.getPart("lidar_angelo234") then
+    virtual_lidar_point_cloud = {}
+    return
+  end
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then
@@ -283,22 +316,78 @@ local function updateVirtualLidar(dt, veh)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
-    -- Ignore the host vehicle via its ID, so no additional distance clipping
-    -- is required here.
-    local min_dist = 0
+    local max_dist = aeb_params.sensor_max_distance
     local hits = virtual_lidar.scan(
       origin,
       dir,
       up,
-      aeb_params.sensor_max_distance,
+      max_dist,
       math.rad(360),
       math.rad(30),
       60,
       15,
-      min_dist,
+      0,
       veh:getID()
     )
-    local groundThreshold = -0.3
+
+    local detections = {}
+    local processed = {[veh:getID()] = true}
+
+    local function addVehicle(vehObj, props)
+      if not vehObj or not props then return end
+      if props.id == veh:getID() or processed[props.id] then return end
+      processed[props.id] = true
+      local bb = props.bb
+      if not bb then return end
+      local center = props.center_pos
+      local x = vec3(bb:getAxis(0)) * bb:getHalfExtents().x
+      local y = vec3(bb:getAxis(1)) * bb:getHalfExtents().y
+      local z = vec3(bb:getAxis(2)) * bb:getHalfExtents().z
+      local corners = {
+        center + x + y + z,
+        center + x - y + z,
+        center - x + y + z,
+        center - x - y + z,
+        center + x + y - z,
+        center + x - y - z,
+        center - x + y - z,
+        center - x - y - z
+      }
+      for _, c in ipairs(corners) do
+        local rel = c - origin
+        if rel:length() < max_dist then
+          hits[#hits + 1] = c
+        end
+      end
+      local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
+      local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
+      detections[#detections + 1] = {pos = center + z, desc = string.format('%s %s', veh_type, id)}
+    end
+
+    if front_sensor_data and front_sensor_data[2] then
+      for _, data in ipairs(front_sensor_data[2]) do
+        if data.other_veh and data.other_veh_props then
+          addVehicle(data.other_veh, data.other_veh_props)
+        end
+      end
+    end
+
+    if rear_sensor_data and rear_sensor_data[1] then
+      local vehRear = rear_sensor_data[1]
+      if vehRear then
+        local propsRear = extra_utils.getVehicleProperties(vehRear)
+        addVehicle(vehRear, propsRear)
+      end
+    end
+
+    for i = 0, be:getObjectCount() - 1 do
+      local other = be:getObject(i)
+      if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
+        addVehicle(other, extra_utils.getVehicleProperties(other))
+      end
+    end
+
+    local groundThreshold = -1.5
     virtual_lidar_point_cloud = {}
     for _, p in ipairs(hits) do
       local rel = p - origin
@@ -309,6 +398,16 @@ local function updateVirtualLidar(dt, veh)
           z = rel:dot(up)
         }
       end
+    end
+
+    for _, d in ipairs(detections) do
+      local rel = d.pos - origin
+      local x = rel:dot(right)
+      local y = rel:dot(dir)
+      local z = rel:dot(up)
+      local dist = rel:length()
+      local ang = math.deg(math.atan2(x, y))
+      logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
     end
     virtual_lidar_update_timer = 0
   else
@@ -343,12 +442,12 @@ local function onUpdate(dt)
   if not be:getEnabled() or not system_params then return end
 
   local veh_props = extra_utils.getVehicleProperties(my_veh)
-
-  updateVirtualLidar(dt, my_veh)
   local need_front_sensors = extra_utils.getPart("acc_angelo234")
     or extra_utils.getPart("forward_collision_mitigation_angelo234")
+    or extra_utils.getPart("obstacle_collision_mitigation_angelo234")
     or (extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on)
   local need_rear_sensors = extra_utils.getPart("reverse_collision_mitigation_angelo234")
+    or extra_utils.getPart("obstacle_collision_mitigation_angelo234")
 
   if need_front_sensors or need_rear_sensors then
     --Update at 120 Hz
@@ -383,13 +482,17 @@ local function onUpdate(dt)
           end
 
           --Update Obstacle Collision Mitigation System
-          if extra_utils.getPart("obstacle_collision_mitigation_angelo234") and obstacle_aeb_system_on then
+          if extra_utils.getPart("obstacle_collision_mitigation_angelo234")
+            and extra_utils.getPart("obstacle_aeb_angelo234")
+            and obstacle_aeb_system_on then
             obstacle_aeb_system.update(
               other_systems_timer * 2,
               my_veh,
               system_params,
               aeb_params,
-              beeper_params
+              beeper_params,
+              front_sensor_data,
+              rear_sensor_data
             )
           end
 
@@ -458,6 +561,8 @@ local function onUpdate(dt)
   hsa_system_update_timer = hsa_system_update_timer + dt
   auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
 
+  updateVirtualLidar(dt, my_veh)
+
   --p:finish(true)
 end
 
@@ -488,6 +593,9 @@ M.setACCSpeed = setACCSpeed
 M.changeACCSpeed = changeACCSpeed
 M.changeACCFollowingDistance = changeACCFollowingDistance
 M.toggleDebugLogging = toggleDebugLogging
+M.toggleFrontSensorLogging = toggleFrontSensorLogging
+M.toggleRearSensorLogging = toggleRearSensorLogging
+M.toggleLidarLogging = toggleLidarLogging
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit

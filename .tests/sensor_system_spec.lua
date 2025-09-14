@@ -50,6 +50,7 @@ end
 
 local logger = require('scripts/driver_assistance_angelo234/logger')
 logger.setEnabled(true)
+logger.setSensorEnabled('front_sensor', true)
 
 local sensor_system = require('scripts/driver_assistance_angelo234/sensorSystem')
 
