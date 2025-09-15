@@ -9,18 +9,25 @@ angular.module('beamng.apps')
       var canvas = $element.find('canvas')[0];
       var ctx = canvas.getContext('2d');
       var carColor = [255, 255, 255];
-      var scale = 5; // pixels per meter
+      var perspective = 5; // larger = stronger perspective
 
-      function drawVehicle(cx, cy) {
+      function project(f, l) {
+        var z = f + perspective;
+        var px = canvas.width / 2 + (l / z) * canvas.width;
+        var py = canvas.height - (f / z) * canvas.height;
+        return [px, py];
+      }
+
+      function drawVehicle() {
         ctx.save();
         ctx.fillStyle = 'rgba(' +
           Math.round(carColor[0]) + ',' +
           Math.round(carColor[1]) + ',' +
           Math.round(carColor[2]) + ',0.5)';
-        var carWidth = 10;
-        var carLength = 20;
-        ctx.translate(cx, cy);
-        ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
+        var carWidth = 20;
+        var carLength = 40;
+        ctx.translate(canvas.width / 2, canvas.height - carLength);
+        ctx.fillRect(-carWidth / 2, 0, carWidth, carLength);
         ctx.restore();
       }
 
@@ -29,12 +36,20 @@ angular.module('beamng.apps')
         ctx.strokeStyle = style;
         ctx.beginPath();
         for (var i = 0; i < points.length; i++) {
-          var f = points[i][0];
-          var l = points[i][1];
-          var x = canvas.width / 2 + l * scale;
-          var y = canvas.height / 2 - f * scale;
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          var p = project(points[i][0], points[i][1]);
+          if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
         }
+        ctx.stroke();
+      }
+
+      function drawAssist(steer) {
+        if (typeof steer !== 'number') return;
+        var baseX = canvas.width / 2;
+        var baseY = canvas.height - 40;
+        ctx.strokeStyle = 'red';
+        ctx.beginPath();
+        ctx.moveTo(baseX, baseY);
+        ctx.lineTo(baseX + steer * 100, baseY - 50);
         ctx.stroke();
       }
 
@@ -44,8 +59,9 @@ angular.module('beamng.apps')
           drawLine(data.left_line, 'yellow');
           drawLine(data.right_line, 'yellow');
           drawLine(data.center_line, 'white');
+          drawAssist(data.assist_steer);
         }
-        drawVehicle(canvas.width / 2, canvas.height / 2);
+        drawVehicle();
       }
 
       function update() {

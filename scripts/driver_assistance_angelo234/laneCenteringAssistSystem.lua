@@ -135,6 +135,9 @@ local function update(dt, veh, system_params)
     return
   end
 
+  sensor.assist_steer = target
+  latest_data = sensor
+
   local final = raw_input + target * assist_weight
   if final > 1 then final = 1 elseif final < -1 then final = -1 end
 
