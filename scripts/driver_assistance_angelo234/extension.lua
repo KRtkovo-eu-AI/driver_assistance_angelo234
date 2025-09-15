@@ -46,7 +46,7 @@ local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
-local VIRTUAL_LIDAR_PHASES = 8
+local VIRTUAL_LIDAR_PHASES = 12
 local virtual_lidar_point_cloud = {}
 
 local function resetVirtualLidarPointCloud()
