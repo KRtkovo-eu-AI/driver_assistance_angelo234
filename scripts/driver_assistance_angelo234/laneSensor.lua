@@ -26,6 +26,19 @@ local function fitLine(points)
   return a, b
 end
 
+local function fitLineRange(points, f_min, f_max)
+  local subset = {}
+  for i = 1, #points do
+    local p = points[i]
+    local f = p[1]
+    if f >= f_min and f <= f_max then
+      subset[#subset + 1] = p
+    end
+  end
+  local a, b = fitLine(subset)
+  return a, b, #subset
+end
+
 -- Scan the road ahead using ray casts to estimate lane boundaries and heading.
 -- Returns lane width, lateral offset from center and road direction.
 local function sense(veh)
@@ -99,19 +112,36 @@ local lane_width, lateral_offset, road_dir, future_dir, curvature
     local aL, bL = fitLine(left_pts)
     local aR, bR = fitLine(right_pts)
 
-    local f_ref = 10
-    local left_lat = aL * f_ref + bL
-    local right_lat = aR * f_ref + bR
+    local aL_near, bL_near, nLn = fitLineRange(left_pts, 0, 10)
+    local aR_near, bR_near, nRn = fitLineRange(right_pts, 0, 10)
+    local aL_far, bL_far, nLf = fitLineRange(left_pts, 20, 30)
+    local aR_far, bR_far, nRf = fitLineRange(right_pts, 20, 30)
+
+    if nLn < 2 then aL_near, bL_near = aL, bL end
+    if nRn < 2 then aR_near, bR_near = aR, bR end
+    if nLf < 2 then aL_far, bL_far = aL, bL end
+    if nRf < 2 then aR_far, bR_far = aR, bR end
+
+    local slope_near = (aL_near + aR_near) * 0.5
+    local slope_far = (aL_far + aR_far) * 0.5
+
+    local lidar_dir = (forward + right * slope_near):normalized()
+    local lidar_future_dir = (forward + right * slope_far):normalized()
+    local lidar_curvature = (slope_far - slope_near) / 20
+
+    local f_ref = 5
+    local left_lat = aL_near * f_ref + bL_near
+    local right_lat = aR_near * f_ref + bR_near
     local lidar_width = right_lat - left_lat
     if lidar_width > 0 then
       local lane_center = 0.5 * (left_lat + right_lat)
       local lidar_offset = -lane_center
-      local slope = (aL + aR) * 0.5
-      local lidar_dir = (forward + right * slope):normalized()
 
       lane_width = lane_width and (lane_width * 0.7 + lidar_width * 0.3) or lidar_width
       lateral_offset = lateral_offset and (lateral_offset * 0.7 + lidar_offset * 0.3) or lidar_offset
       road_dir = road_dir and (road_dir + lidar_dir):normalized() or lidar_dir
+      future_dir = future_dir and (future_dir + lidar_future_dir):normalized() or lidar_future_dir
+      curvature = curvature and (curvature + lidar_curvature) * 0.5 or lidar_curvature
     end
   end
 

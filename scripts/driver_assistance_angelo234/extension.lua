@@ -692,7 +692,11 @@ local function getVirtualLidarData()
 end
 
 local function getLaneCenteringData()
-  return lane_centering_system.getLaneData()
+  local data = lane_centering_system.getLaneData()
+  if data then
+    data.color = getVehicleColor()
+  end
+  return data
 end
 
 local function onInit()

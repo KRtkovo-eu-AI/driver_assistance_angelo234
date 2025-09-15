@@ -72,6 +72,8 @@ M.lane_centering_params = {
     steer_smoothing = 0.4,
     warning_ratio = 0.8,
     steer_limit = 0.15,
+    override_threshold = 0.2,
+    override_cooldown = 5,
 }
 
 return M
