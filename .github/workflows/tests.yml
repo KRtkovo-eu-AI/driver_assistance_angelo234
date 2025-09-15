@@ -68,7 +68,7 @@ jobs:
           output=$(busted)
           status=$?
           echo "$output"
-          summary=$(echo "$output" | tail -n 1)
+          summary=$(printf '%s\n' "$output" | sed -e 's/\x1B\[[0-9;]*m//g' | awk 'NF {line=$0} END {print line}')
           successes=$(echo "$summary" | awk '{print $1}')
           failures=$(echo "$summary" | awk '{print $4}')
           errors=$(echo "$summary" | awk '{print $7}')
@@ -83,6 +83,7 @@ jobs:
           printf 'failures=%s\n' "$failures" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
           printf 'pending=%s\n' "$pending" >> "$GITHUB_OUTPUT"
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           exit $status
       - name: Report results
         id: report
@@ -102,6 +103,7 @@ jobs:
           BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
           BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
           BUSTED_PENDING: ${{ steps.busted.outputs.pending }}
+          BUSTED_STATUS: ${{ steps.busted.outputs.status }}
         run: |
           LUA_COUNT=${LUA_COUNT:-0}
           LUA_ERRORS=${LUA_ERRORS:-0}
@@ -112,6 +114,12 @@ jobs:
           BUSTED_FAILURES=${BUSTED_FAILURES:-0}
           BUSTED_ERRORS=${BUSTED_ERRORS:-0}
           BUSTED_PENDING=${BUSTED_PENDING:-0}
+          BUSTED_STATUS=${BUSTED_STATUS:-0}
+          BUSTED_SUMMARY_PRESENT=1
+          if [ "$BUSTED_STATUS" -ne 0 ] && [ $((BUSTED_FAILURES + BUSTED_ERRORS)) -eq 0 ]; then
+            BUSTED_ERRORS=$((BUSTED_ERRORS + 1))
+            BUSTED_SUMMARY_PRESENT=0
+          fi
           total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
           total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
           total_error=$((BUSTED_ERRORS))
@@ -160,6 +168,10 @@ jobs:
               echo "✅ Tests passed"
             else
               echo "❌ Tests failed"
+              if [ "$BUSTED_SUMMARY_PRESENT" -eq 0 ]; then
+                echo
+                echo "Busted exited with status $BUSTED_STATUS before reporting test counts."
+              fi
             fi
             echo "- Total: $BUSTED_TOTAL"
             echo "- Successes: $BUSTED_SUCCESS"
@@ -222,7 +234,20 @@ jobs:
         env:
           TOT_FAIL: ${{ steps.report.outputs.total_fail }}
           TOT_ERROR: ${{ steps.report.outputs.total_error }}
+          LUA_OUTCOME: ${{ steps.lua.outcome }}
+          JS_OUTCOME: ${{ steps.js.outcome }}
+          BUSTED_OUTCOME: ${{ steps.busted.outcome }}
+          BUSTED_STATUS: ${{ steps.busted.outputs.status }}
         run: |
+          TOT_FAIL=${TOT_FAIL:-0}
+          TOT_ERROR=${TOT_ERROR:-0}
+          BUSTED_STATUS=${BUSTED_STATUS:-0}
+          if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$BUSTED_OUTCOME" != "success" ]; then
+            exit 1
+          fi
+          if [ "$BUSTED_STATUS" -ne 0 ]; then
+            exit 1
+          fi
           if [ $((TOT_FAIL + TOT_ERROR)) -ne 0 ]; then
             exit 1
           fi
