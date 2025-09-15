@@ -51,7 +51,7 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
     if other_veh:getJBeamFilename() ~= "unicycle" then
       local other_veh_props = extra_utils.getVehicleProperties(other_veh)
 
-      if other_veh_props.id ~= my_veh_props.id then
+      if other_veh_props.id ~= my_veh_props.id and not extra_utils.isVehicleGhost(other_veh, other_veh_props) then
         --Get aproximate distance first between vehicles and return if less than max dist
         local other_bb = other_veh_props.bb
 

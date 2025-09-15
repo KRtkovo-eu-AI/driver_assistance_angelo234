@@ -481,6 +481,7 @@ local function updateVirtualLidar(dt, veh)
       if not vehObj or not props then return end
       if props.id == veh:getID() or processed[props.id] then return end
       processed[props.id] = true
+      if extra_utils.isVehicleGhost(vehObj, props) then return end
       local bb = props.bb
       if not bb then return end
       local center = props.center_pos
@@ -517,7 +518,7 @@ local function updateVirtualLidar(dt, veh)
 
     if front_sensor_data and front_sensor_data[2] then
       for _, data in ipairs(front_sensor_data[2]) do
-        if data.other_veh and data.other_veh_props then
+        if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
           addVehicle(data.other_veh, data.other_veh_props)
         end
       end
@@ -527,14 +528,19 @@ local function updateVirtualLidar(dt, veh)
       local vehRear = rear_sensor_data[1]
       if vehRear then
         local propsRear = extra_utils.getVehicleProperties(vehRear)
-        addVehicle(vehRear, propsRear)
+        if not extra_utils.isVehicleGhost(vehRear, propsRear) then
+          addVehicle(vehRear, propsRear)
+        end
       end
     end
 
     for i = 0, be:getObjectCount() - 1 do
       local other = be:getObject(i)
       if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
-        addVehicle(other, extra_utils.getVehicleProperties(other))
+        local otherProps = extra_utils.getVehicleProperties(other)
+        if not extra_utils.isVehicleGhost(other, otherProps) then
+          addVehicle(other, otherProps)
+        end
       end
     end
 

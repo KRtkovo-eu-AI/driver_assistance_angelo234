@@ -64,13 +64,15 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
       local other = be:getObject(i)
       if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
         local props = extra_utils.getVehicleProperties(other)
-        local rel = props.center_pos - origin
-        local dist = rel:length()
-        if dist < maxDistance and rel:dot(dir) > 0 then
-          local rayDir = rel / dist
-          local hit = castRay(origin, origin + rayDir * dist, true, true)
-          if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
-            scan[#scan + 1] = hit.pt
+        if not extra_utils.isVehicleGhost(other, props) then
+          local rel = props.center_pos - origin
+          local dist = rel:length()
+          if dist < maxDistance and rel:dot(dir) > 0 then
+            local rayDir = rel / dist
+            local hit = castRay(origin, origin + rayDir * dist, true, true)
+            if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
+              scan[#scan + 1] = hit.pt
+            end
           end
         end
       end

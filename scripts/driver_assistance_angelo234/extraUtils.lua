@@ -26,6 +26,162 @@ end
 
 local vehs_props_reusing = {}
 
+local function safeCallMethod(obj, name)
+  if not obj then return nil end
+  local fn = obj[name]
+  if type(fn) ~= "function" then return nil end
+  local ok, res = pcall(fn, obj)
+  if ok then return res end
+  return nil
+end
+
+local function safeCallFunction(fn, ...)
+  if type(fn) ~= "function" then return nil end
+  local ok, res = pcall(fn, ...)
+  if ok then return res end
+  return nil
+end
+
+local function hasGhostTrait(candidate)
+  if not candidate then return false end
+
+  local truthyChecks = {
+    "isGhost",
+    "getIsGhost",
+    "isTrafficGhost",
+    "isGhostModeEnabled"
+  }
+
+  for _, name in ipairs(truthyChecks) do
+    local res = safeCallMethod(candidate, name)
+    if res then return true end
+  end
+
+  local falseyChecks = {
+    "getActive",
+    "isActive",
+    "getActiveStatus"
+  }
+
+  for _, name in ipairs(falseyChecks) do
+    local res = safeCallMethod(candidate, name)
+    if res ~= nil then
+      if res == false then return true end
+      if type(res) == "string" then
+        local lowered = res:lower()
+        if lowered == "ghost" or lowered == "ghosted" or lowered == "ghosting"
+          or lowered == "inactive" then
+          return true
+        end
+      end
+    end
+  end
+
+  local shown = safeCallMethod(candidate, "isObjectShown")
+  if shown ~= nil and shown == false then return true end
+
+  local hidden = safeCallMethod(candidate, "isObjectHidden")
+  if hidden ~= nil and hidden == true then return true end
+
+  local visible = safeCallMethod(candidate, "getMeshVisibility")
+  if visible ~= nil and visible == false then return true end
+
+  return false
+end
+
+local function getVehicleDataSafe(id)
+  if not id or not core_vehicle_manager then return nil end
+  local data = safeCallFunction(core_vehicle_manager.getVehicleData, id)
+  if data ~= nil then return data end
+  if type(core_vehicle_manager.getVehicleData) == "function" then
+    local ok, res = pcall(core_vehicle_manager.getVehicleData, core_vehicle_manager, id)
+    if ok then return res end
+  end
+  return nil
+end
+
+local function vehicleDataMarksGhost(data)
+  if not data then return false end
+
+  if data.ghost or data.isGhost or data.ghostMode or data.ghosted then
+    return true
+  end
+
+  local booleanFields = {
+    "isSpawned",
+    "spawned",
+    "active",
+    "isActive",
+    "inGame",
+    "isInGame",
+    "visible",
+    "isVisible",
+    "render",
+    "rendered",
+    "renderVisible",
+    "renderedVisible"
+  }
+
+  for _, field in ipairs(booleanFields) do
+    local value = data[field]
+    if value ~= nil and value == false then
+      return true
+    end
+  end
+
+  local stringFields = {
+    "state",
+    "status",
+    "spawnState",
+    "spawn_state",
+    "spawnStatus",
+    "spawn_status",
+    "renderState",
+    "render_state",
+    "visibility",
+    "presence",
+    "mode"
+  }
+
+  for _, field in ipairs(stringFields) do
+    local value = data[field]
+    if type(value) == "string" then
+      local lowered = value:lower()
+      if lowered == "ghost" or lowered == "ghosted" or lowered == "ghosting"
+        or lowered == "despawned" or lowered == "hidden" or lowered == "inactive" then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+local function isVehicleGhost(veh, props)
+  if not veh then return true end
+
+  if hasGhostTrait(veh) or hasGhostTrait(veh.obj) then
+    return true
+  end
+
+  local id = veh.getID and veh:getID()
+  if id then
+    local data = getVehicleDataSafe(id)
+    if vehicleDataMarksGhost(data) then
+      return true
+    end
+  end
+
+  if props and props.bb then
+    local half_extents = props.bb:getHalfExtents()
+    if half_extents and half_extents.x == 0 and half_extents.y == 0 and half_extents.z == 0 then
+      return true
+    end
+  end
+
+  return false
+end
+
 local function getVehicleProperties(veh)
   if not vehs_props_reusing[veh:getID()] then
     vehs_props_reusing[veh:getID()] = {
@@ -73,6 +229,7 @@ local function getVehicleProperties(veh)
 
   return props
 end
+
 
 local function getPathLen(path, startIdx, stopIdx)
   if not path then return end
@@ -486,5 +643,6 @@ M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
 M.onClientPostStartMission = onClientPostStartMission
+M.isVehicleGhost = isVehicleGhost
 
 return M
