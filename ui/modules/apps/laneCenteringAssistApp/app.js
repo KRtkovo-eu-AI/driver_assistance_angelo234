@@ -25,13 +25,16 @@ angular.module('beamng.apps')
         if (data.road_dir) {
           yaw = Math.atan2(data.road_dir.y, data.road_dir.x);
         }
-        var shift = Math.tan(yaw) * bottom;
+        var curve = data.curvature || 0;
+        var shift0 = Math.tan(yaw) * bottom;
+        var shift1 = Math.tan(yaw + curve) * bottom;
+        var midShift = (shift0 + shift1) / 2;
         ctx.lineWidth = 2;
         ctx.strokeStyle = 'yellow';
-        ctx.beginPath(); ctx.moveTo(left, bottom); ctx.lineTo(left + shift, horizon); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(right, bottom); ctx.lineTo(right + shift, horizon); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(left, bottom); ctx.quadraticCurveTo(left + midShift, bottom * 0.5, left + shift1, horizon); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(right, bottom); ctx.quadraticCurveTo(right + midShift, bottom * 0.5, right + shift1, horizon); ctx.stroke();
         ctx.strokeStyle = 'green';
-        ctx.beginPath(); ctx.moveTo(center, bottom); ctx.lineTo(center + shift, horizon); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(center, bottom); ctx.quadraticCurveTo(center + midShift, bottom * 0.5, center + shift1, horizon); ctx.stroke();
       }
 
       function update() {

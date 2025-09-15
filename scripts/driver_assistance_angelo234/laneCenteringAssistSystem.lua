@@ -8,6 +8,7 @@ local lane_sensor = require('scripts/driver_assistance_angelo234/laneSensor')
 local latest_data = nil
 local current_steer = 0
 local warning_played = false
+local prev_norm_offset = 0
 
 -- Apply proportional control with smoothing to keep vehicle centered and aligned with lane
 local function update(dt, veh, system_params)
@@ -17,33 +18,31 @@ local function update(dt, veh, system_params)
   latest_data = sensor
   if not sensor then return end
   local params = system_params.lane_centering_params or {}
-  local kp = params.steer_kp or 0.5
-  local heading_kp = params.heading_kp or 1.0
-  local smoothing = params.steer_smoothing or 0.2
+  local kp = params.steer_kp or 0.2
+  local kd = params.steer_kd or 0.4
+  local heading_kp = params.heading_kp or 0.5
+  local smoothing = params.steer_smoothing or 0.1
   local warn_ratio = params.warning_ratio or 0.8
-  local steer_limit = params.steer_limit or 0.5
+  local steer_limit = params.steer_limit or 0.3
 
   local lane_width = sensor.lane_width or 0
   if lane_width <= 0 then return end
   local offset = sensor.lateral_offset or 0
 
   local half_width = lane_width * 0.5
+  local norm_offset = offset / half_width
+  local offset_rate = (norm_offset - prev_norm_offset) / dt
+  prev_norm_offset = norm_offset
   local abs_off = math.abs(offset)
   local warn_zone = warn_ratio * half_width
 
-  -- Compute heading error between vehicle and road direction
+  -- Compute heading error using look-ahead direction when available
   local veh_props = extra_utils.getVehicleProperties(veh)
-  local road_dir = sensor.road_dir or veh_props.dir
-  local heading_error = veh_props.dir:cross(road_dir).z
+  local desired_dir = sensor.future_dir or sensor.road_dir or veh_props.dir
+  local heading_error = veh_props.dir:cross(desired_dir).z
 
-  local target = 0
-  if abs_off > half_width then
-    local outside = abs_off - half_width
-    target = -(kp * outside / half_width * (offset > 0 and 1 or -1) + heading_kp * heading_error)
-    if target > steer_limit then target = steer_limit elseif target < -steer_limit then target = -steer_limit end
-  else
-    target = -heading_kp * heading_error
-  end
+  local target = -(kp * norm_offset + kd * offset_rate + heading_kp * heading_error)
+  if target > steer_limit then target = steer_limit elseif target < -steer_limit then target = -steer_limit end
 
   if abs_off > warn_zone and abs_off <= half_width then
     if not warning_played then

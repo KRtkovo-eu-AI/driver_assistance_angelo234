@@ -74,12 +74,20 @@ local function sense(veh)
     end
   end
 
-  local lane_width, lateral_offset, road_dir
+local lane_width, lateral_offset, road_dir, future_dir, curvature
 
   if wps then
     lane_width = wps.lane_width
     lateral_offset = wps.lat_dist_from_wp
     road_dir = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
+
+    local look_ahead = 20
+    local future_pos = veh_props.front_pos + road_dir * look_ahead
+    local future_wps = extra_utils.getWaypointStartEnd(veh_props, veh_props, future_pos)
+    if future_wps then
+      future_dir = extra_utils.toNormXYVec(future_wps.end_wp_pos - future_wps.start_wp_pos)
+      curvature = math.atan2(road_dir:cross(future_dir).z, road_dir:dot(future_dir))
+    end
   end
 
   if lidar_valid and #left_pts >= 2 and #right_pts >= 2 then
@@ -107,11 +115,19 @@ local function sense(veh)
   M.prev_width = M.prev_width and (M.prev_width + (lane_width - M.prev_width) * 0.1) or lane_width
   M.prev_offset = M.prev_offset and (M.prev_offset + (lateral_offset - M.prev_offset) * 0.1) or lateral_offset
   M.prev_dir = M.prev_dir and (M.prev_dir + (road_dir - M.prev_dir) * 0.1):normalized() or road_dir
+  if future_dir then
+    M.prev_future_dir = M.prev_future_dir and (M.prev_future_dir + (future_dir - M.prev_future_dir) * 0.1):normalized() or future_dir
+  end
+  if curvature then
+    M.prev_curvature = M.prev_curvature and (M.prev_curvature + (curvature - M.prev_curvature) * 0.1) or curvature
+  end
 
   return {
     lane_width = M.prev_width,
     lateral_offset = M.prev_offset,
-    road_dir = M.prev_dir
+    road_dir = M.prev_dir,
+    future_dir = M.prev_future_dir,
+    curvature = M.prev_curvature
   }
 end
 
