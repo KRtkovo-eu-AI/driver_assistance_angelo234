@@ -679,10 +679,10 @@ local function getVehicleColor()
       local r = c.x or c.r or 1
       local g = c.y or c.g or 1
       local b = c.z or c.b or 1
-      return {r * 255, g * 255, b * 255}
+      return {r = r * 255, g = g * 255, b = b * 255}
     end
   end
-  return {255, 255, 255}
+  return {r = 255, g = 255, b = 255}
 end
 
 local function getVirtualLidarData()

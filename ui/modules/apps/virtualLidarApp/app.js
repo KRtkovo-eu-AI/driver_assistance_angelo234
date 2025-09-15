@@ -63,7 +63,13 @@ angular.module('beamng.apps')
           'extensions.driver_assistance_angelo234.getVirtualLidarData()',
           function (data) {
             $scope.$evalAsync(function () {
-              if (data.color) { carColor = data.color; }
+              if (data.color) {
+                carColor = [
+                  typeof data.color.r === 'number' ? data.color.r : 255,
+                  typeof data.color.g === 'number' ? data.color.g : 255,
+                  typeof data.color.b === 'number' ? data.color.b : 255
+                ];
+              }
               draw(data.points);
             });
           }
