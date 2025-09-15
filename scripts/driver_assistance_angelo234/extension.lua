@@ -46,7 +46,17 @@ local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
-local virtual_lidar_point_cloud = {{}, {}}
+local VIRTUAL_LIDAR_PHASES = 8
+local virtual_lidar_point_cloud = {}
+
+local function resetVirtualLidarPointCloud()
+  virtual_lidar_point_cloud = {}
+  for i = 1, VIRTUAL_LIDAR_PHASES do
+    virtual_lidar_point_cloud[i] = {}
+  end
+end
+
+resetVirtualLidarPointCloud()
 local virtual_lidar_phase = 0
 
 M.curr_camera_mode = "orbit"
@@ -302,7 +312,7 @@ end
 
 local function updateVirtualLidar(dt, veh)
   if not extra_utils.getPart("lidar_angelo234") then
-    virtual_lidar_point_cloud = {{}, {}}
+    resetVirtualLidarPointCloud()
     return
   end
   if not aeb_params then return end
@@ -329,7 +339,7 @@ local function updateVirtualLidar(dt, veh)
       15,
       0,
       veh:getID(),
-      {hStart = virtual_lidar_phase, hStep = 2}
+      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
     )
 
     -- cache properties of the player's vehicle for later filtering
@@ -432,7 +442,7 @@ local function updateVirtualLidar(dt, veh)
       local ang = math.deg(math.atan2(x, y))
       logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
     end
-    virtual_lidar_phase = (virtual_lidar_phase + 1) % 2
+    virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
     virtual_lidar_update_timer = 0
   else
     virtual_lidar_update_timer = virtual_lidar_update_timer + dt
