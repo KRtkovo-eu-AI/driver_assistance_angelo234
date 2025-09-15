@@ -406,12 +406,12 @@ local function clamp(value, minVal, maxVal)
 end
 
 local function spacingForDistance(distance)
-  local nearDist = 4
-  local farDist = 80
-  local minSpacing = 0.1
-  local maxSpacing = 0.6
+  local nearDist = 5
+  local farDist = 120
+  local minSpacing = 0.065
+  local maxSpacing = 0.4
   local t = clamp((distance - nearDist) / (farDist - nearDist), 0, 1)
-  t = t ^ 0.6
+  t = t ^ 0.55
   return minSpacing + (maxSpacing - minSpacing) * t
 end
 
@@ -432,6 +432,22 @@ end
 
 local function raySlack(distance)
   return 0.25 + distance * 0.01
+end
+
+local function clusterCountForDistance(distance)
+  if distance < 12 then
+    return 5
+  elseif distance < 35 then
+    return 4
+  else
+    return 3
+  end
+end
+
+local function clusterSpreads(baseSpacing)
+  local planar = math.max(baseSpacing * 0.45, 0.04)
+  local depth = math.max(baseSpacing * 0.35, 0.03)
+  return planar, depth
 end
 
 --local p = LuaProfiler("my profiler")
@@ -537,7 +553,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.y,
           axisB = axis_z,
           halfB = half_extents.z,
-          spacingScale = 1.0
+          spacingScale = 1.0,
+          depth = half_extents.x
         },
         {
           center = center - axis_x * half_extents.x,
@@ -546,7 +563,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.y,
           axisB = axis_z,
           halfB = half_extents.z,
-          spacingScale = 1.05
+          spacingScale = 1.05,
+          depth = half_extents.x
         },
         {
           center = center + axis_y * half_extents.y,
@@ -555,7 +573,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.x,
           axisB = axis_z,
           halfB = half_extents.z,
-          spacingScale = 0.95
+          spacingScale = 0.95,
+          depth = half_extents.y
         },
         {
           center = center - axis_y * half_extents.y,
@@ -564,7 +583,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.x,
           axisB = axis_z,
           halfB = half_extents.z,
-          spacingScale = 1.1
+          spacingScale = 1.1,
+          depth = half_extents.y
         },
         {
           center = center + axis_z * half_extents.z,
@@ -573,7 +593,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.x,
           axisB = axis_y,
           halfB = half_extents.y,
-          spacingScale = 0.75
+          spacingScale = 0.75,
+          depth = half_extents.z
         },
         {
           center = center - axis_z * half_extents.z,
@@ -582,7 +603,8 @@ local function updateVirtualLidar(dt, veh)
           halfA = half_extents.x,
           axisB = axis_y,
           halfB = half_extents.y,
-          spacingScale = 1.3
+          spacingScale = 1.3,
+          depth = half_extents.z
         }
       }
 
@@ -617,14 +639,27 @@ local function updateVirtualLidar(dt, veh)
         return true
       end
 
-      local jitterFactor = 0.3
+      local function pushIfVisible(point)
+        if hasLineOfSight(point) then
+          vehicle_hits[#vehicle_hits + 1] = point
+          return true
+        end
+        return false
+      end
+
+      local jitterFactor = 0.4
       for _, face in ipairs(faces) do
         local toSensor = origin - face.center
         local distToSensor = toSensor:length()
         if distToSensor > 0 then
           local facing = face.normal:dot(toSensor / distToSensor)
-          if facing > 0.05 then
+          if facing > 0.025 then
             local baseSpacing = spacingForDistance(distToSensor) * face.spacingScale
+            local clusterCount = clusterCountForDistance(distToSensor)
+            local planarSpreadBase, depthSpreadBase = clusterSpreads(baseSpacing)
+            local planarSpreadA = math.min(planarSpreadBase, face.halfA * 0.9)
+            local planarSpreadB = math.min(planarSpreadBase, face.halfB * 0.9)
+            local depthSpread = math.min(depthSpreadBase, (face.depth or math.max(face.halfA, face.halfB)) * 0.85)
             local stepsA = stepsPerHalfExtent(face.halfA, baseSpacing)
             local stepsB = stepsPerHalfExtent(face.halfB, baseSpacing)
             local jitterAmount = baseSpacing * jitterFactor
@@ -638,8 +673,19 @@ local function updateVirtualLidar(dt, veh)
                 local jittered = candidate
                   + face.axisA * ((math.random() - 0.5) * jitterAmount)
                   + face.axisB * ((math.random() - 0.5) * jitterAmount)
-                if hasLineOfSight(jittered) then
-                  vehicle_hits[#vehicle_hits + 1] = jittered
+                local baseVisible = pushIfVisible(jittered)
+                if clusterCount > 1 then
+                  for _ = 2, clusterCount do
+                    local scatter = jittered
+                      + face.axisA * ((math.random() - 0.5) * planarSpreadA)
+                      + face.axisB * ((math.random() - 0.5) * planarSpreadB)
+                      - face.normal * (math.random() * depthSpread)
+                    if baseVisible then
+                      vehicle_hits[#vehicle_hits + 1] = scatter
+                    else
+                      baseVisible = pushIfVisible(scatter)
+                    end
+                  end
                 end
               end
             end
