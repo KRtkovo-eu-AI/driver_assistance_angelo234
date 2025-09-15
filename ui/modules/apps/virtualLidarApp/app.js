@@ -8,10 +8,16 @@ angular.module('beamng.apps')
     controller: ['$scope', '$element', function ($scope, $element) {
       var canvas = $element.find('canvas')[0];
       var ctx = canvas.getContext('2d');
+      // Fixed world range for drawing (in meters). Keeps zoom stable.
+      var FIXED_RANGE = 60;
+      var carColor = [255, 255, 255];
 
       function drawVehicle() {
         ctx.save();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fillStyle = 'rgba(' +
+          Math.round(carColor[0]) + ',' +
+          Math.round(carColor[1]) + ',' +
+          Math.round(carColor[2]) + ',0.5)';
         var carWidth = 10;
         var carLength = 20;
         ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -26,23 +32,18 @@ angular.module('beamng.apps')
           return;
         }
 
-        var maxAbsX = 0, maxAbsY = 0;
         var minD = Infinity, maxD = -Infinity;
 
         points.forEach(function (p) {
-          if (Math.abs(p.x) > maxAbsX) { maxAbsX = Math.abs(p.x); }
-          if (Math.abs(p.y) > maxAbsY) { maxAbsY = Math.abs(p.y); }
-
           var d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
           if (d < minD) { minD = d; }
           if (d > maxD) { maxD = d; }
           p._d = d;
         });
 
-        var range = Math.max(1, Math.max(maxAbsX, maxAbsY));
         var scale = Math.min(
-          canvas.width / (2 * range),
-          canvas.height / (2 * range)
+          canvas.width / (2 * FIXED_RANGE),
+          canvas.height / (2 * FIXED_RANGE)
         );
         var distRange = Math.max(1, maxD - minD);
 
@@ -58,11 +59,21 @@ angular.module('beamng.apps')
       }
 
       function update() {
-        bngApi.engineLua('extensions.driver_assistance_angelo234.getVirtualLidarPointCloud()', function (data) {
-          $scope.$evalAsync(function () {
-            draw(data);
-          });
-        });
+        bngApi.engineLua(
+          'extensions.driver_assistance_angelo234.getVirtualLidarData()',
+          function (data) {
+            $scope.$evalAsync(function () {
+              if (data.color) {
+                carColor = [
+                  typeof data.color.r === 'number' ? data.color.r : 255,
+                  typeof data.color.g === 'number' ? data.color.g : 255,
+                  typeof data.color.b === 'number' ? data.color.b : 255
+                ];
+              }
+              draw(data.points);
+            });
+          }
+        );
       }
 
       var interval = setInterval(update, 100);
