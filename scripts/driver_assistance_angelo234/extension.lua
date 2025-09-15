@@ -59,6 +59,7 @@ local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
 local VEHICLE_POINT_MIN_SPACING = 0.3
+local VEHICLE_POINT_MAX_SPACING = 2.0
 local VEHICLE_POINT_MAX_STEPS = 20
 local VIRTUAL_LIDAR_H_FOV = math.rad(360)
 local VIRTUAL_LIDAR_V_FOV = math.rad(30)
@@ -413,7 +414,7 @@ local function updateVirtualLidar(dt, veh)
   end
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
-  if virtual_lidar_update_timer >= 1.0 / 60.0 then
+  if virtual_lidar_update_timer >= 1.0 / 20.0 then
     local pos = veh:getPosition()
     local dir = veh:getDirectionVector()
     local up = veh:getDirectionVectorUp()
@@ -505,15 +506,27 @@ local function updateVirtualLidar(dt, veh)
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
+      local relCenter = center - origin
       local relTop = top - origin
-      local function stepsForHalfSpan(halfSpan)
-        local steps = math.floor(halfSpan / VEHICLE_POINT_MIN_SPACING + 0.5)
+      local forwardDist = relCenter:dot(dir)
+      local sideDist = relCenter:dot(right)
+      local planarDist = math.max(0.5, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
+      local heightOffset = math.abs(relCenter:dot(up))
+      local function clampSpacing(value)
+        if value < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
+        if value > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
+        return value
+      end
+      local spacing_x = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_H_STEP))
+      local spacing_y = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_V_STEP) + heightOffset * math.tan(VIRTUAL_LIDAR_V_STEP))
+      local function stepsForHalfSpan(halfSpan, spacing)
+        local steps = math.floor(halfSpan / math.max(spacing, VEHICLE_POINT_MIN_SPACING) + 0.5)
         if steps < 1 then steps = 1 end
         if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
         return steps
       end
-      local steps_x = stepsForHalfSpan(half_extents.x)
-      local steps_y = stepsForHalfSpan(half_extents.y)
+      local steps_x = stepsForHalfSpan(half_extents.x, spacing_x)
+      local steps_y = stepsForHalfSpan(half_extents.y, spacing_y)
       for xi = -steps_x, steps_x do
         local offset_x = axis_x * (half_extents.x * xi / steps_x)
         for yi = -steps_y, steps_y do
@@ -810,8 +823,21 @@ local function getVehicleColor()
   return {r = 255, g = 255, b = 255}
 end
 
+local function getPlayerVehicleBounds()
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return nil end
+  local props = extra_utils.getVehicleProperties(veh)
+  if not props or not props.bb then return nil end
+  local half = props.bb:getHalfExtents()
+  return {width = half.x * 2, length = half.y * 2, height = half.z * 2}
+end
+
 local function getVirtualLidarData()
-  return {points = getVirtualLidarPointCloud(), color = getVehicleColor()}
+  return {
+    points = getVirtualLidarPointCloud(),
+    color = getVehicleColor(),
+    bounds = getPlayerVehicleBounds()
+  }
 end
 
 local function getLaneCenteringData()
