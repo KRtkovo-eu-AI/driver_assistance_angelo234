@@ -118,8 +118,11 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local vehs = front_sensors[2]
     if vehs then
       for _, data in ipairs(vehs) do
-        if data.distance and data.distance > 0 then
-          sensor_best = sensor_best and math.min(sensor_best, data.distance) or data.distance
+        if data.distance and data.distance > 0 and data.other_veh_props then
+          local rel_speed = (data.other_veh_props.velocity - veh_props.velocity):length()
+          if rel_speed < (aeb_params.vehicle_relative_speed_threshold or 1) then
+            sensor_best = sensor_best and math.min(sensor_best, data.distance) or data.distance
+          end
         end
       end
     end
@@ -136,7 +139,8 @@ local function getPointCloud()
 end
 
 local function calculateTimeBeforeBraking(distance, speed, system_params, aeb_params)
-  local acc = math.min(10, system_params.gravity) * system_params.fwd_friction_coeff
+  local base_acc = math.min(10, system_params.gravity) * system_params.fwd_friction_coeff
+  local acc = base_acc * (aeb_params.obstacle_brake_acc_factor or 0.7)
   local speed_kmh = speed * 3.6
   local extra_distance_leeway = speed_kmh > 95 and 10 or 0
   local speed_leeway = (aeb_params.braking_speed_leeway_factor or 0.2) * speed
@@ -202,7 +206,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
   if system_state == "braking" and speed < aeb_params.brake_till_stop_speed then
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
-    veh:queueLuaCommand("electrics.values.brakeOverride = nil")
+    veh:queueLuaCommand("electrics.values.brakeOverride = 1")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
     veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
     return
@@ -211,7 +215,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
   if time_before_braking <= 0 then
     veh:queueLuaCommand("electrics.values.throttleOverride = 0")
     veh:queueLuaCommand("input.event('throttle', 0, 1)")
-    veh:queueLuaCommand("electrics.values.brakeOverride = nil")
+    veh:queueLuaCommand("electrics.values.brakeOverride = 1")
     veh:queueLuaCommand("input.event('brake', 1, 1)")
     if speed > aeb_params.apply_parking_brake_speed then
       veh:queueLuaCommand("input.event('parkingbrake', 1, 2)")
