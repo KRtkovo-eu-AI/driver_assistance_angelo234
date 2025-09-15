@@ -36,8 +36,14 @@ The current functionality includes:
 - **Hill Start Assist**  
   When stopping on an incline, holds the brakes when you lift off the brake until you press the gas. If the brake is released for more than 3 seconds, or you activate throttle, brakes release automatically. :contentReference[oaicite:7]{index=7}
 
-- **Automatic Headlight Dimming** *(Disabled for now)*  
+- **Automatic Headlight Dimming**
   High beams are automatically dimmed when detecting another vehicle ahead. When no vehicles are detected, high beams return. :contentReference[oaicite:8]{index=8}
+
+- **Obstacle Collision Automatic Emergency Braking (WIP)**
+
+- **Virtual Lidar (WIP)**
+
+- **Lane Centering Assist (WIP)**
 
 ---
 
