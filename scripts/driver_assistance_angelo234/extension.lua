@@ -333,39 +333,57 @@ local function updateVirtualLidar(dt, veh)
     -- higher speeds while still scanning the entire surroundings over time
     local hits = {}
 
-    -- base scan for the current phase to maintain 360° coverage
-    local phaseHits = virtual_lidar.scan(
-      origin,
-      dir,
-      up,
-      max_dist,
-      math.rad(360),
-      math.rad(30),
-      60,
-      15,
-      0,
-      veh:getID(),
-      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
-    )
-    for i = 1, #phaseHits do hits[#hits + 1] = phaseHits[i] end
-
-    -- if vehicle is travelling faster than ~60 km/h, perform an additional
-    -- high-priority scan focusing on the front of the vehicle
     local speed = veh:getVelocity():length() * 3.6
+    local isRearPhase = virtual_lidar_phase >= 5 and virtual_lidar_phase <= 8
+
     if speed > 60 then
+      -- skip some rear phases and instead perform a dedicated forward scan
+      if not isRearPhase then
+        local phaseHits = virtual_lidar.scan(
+          origin,
+          dir,
+          up,
+          max_dist,
+          math.rad(360),
+          math.rad(30),
+          60,
+          15,
+          0,
+          veh:getID(),
+          {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+        )
+        for i = 1, #phaseHits do hits[#hits + 1] = phaseHits[i] end
+      end
+
       local frontHits = virtual_lidar.scan(
         origin,
         dir,
         up,
         max_dist,
-        math.rad(180),
+        math.rad(135),
         math.rad(30),
-        30,
+        24,
         15,
         0,
         veh:getID()
       )
       for i = 1, #frontHits do hits[#hits + 1] = frontHits[i] end
+    else
+      -- base scan for the current phase to maintain 360° coverage at low speeds
+      local phaseHits = virtual_lidar.scan(
+        origin,
+        dir,
+        up,
+        max_dist,
+        math.rad(360),
+        math.rad(30),
+        60,
+        15,
+        0,
+        veh:getID(),
+        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+      )
+      for i = 1, #phaseHits do hits[#hits + 1] = phaseHits[i] end
     end
 
     -- cache properties of the player's vehicle for later filtering
