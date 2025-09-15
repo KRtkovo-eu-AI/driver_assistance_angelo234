@@ -11,7 +11,6 @@ local warning_played = false
 
 local steering_pid = nil
 local steering_smooth = nil
-local last_assist = 0
 local override_timer = 0
 
 -- Apply PID control with smoothing to keep vehicle centered and aligned with lane
@@ -20,7 +19,6 @@ local function update(dt, veh, system_params)
   if not extra_utils.getPart("lane_centering_assist_system_angelo234") then return end
   if override_timer > 0 then
     override_timer = override_timer - dt
-    last_assist = 0
     return
   end
 
@@ -72,21 +70,18 @@ local function update(dt, veh, system_params)
     raw_input = electrics_values_angelo234["steering_input"] or 0
   end
 
-  local driver_input = raw_input - last_assist
-  local assist_weight = math.max(0, 1 - math.abs(driver_input) * 5)
+  local assist_weight = math.max(0, 1 - math.abs(raw_input) * 5)
 
   local disable_thresh = params.override_threshold or 0.2
-  if math.abs(driver_input) > disable_thresh then
+  if math.abs(raw_input) > disable_thresh then
     override_timer = params.override_cooldown or 5
     ui_message("Lane Centering Assist disengaged")
-    last_assist = 0
     return
   end
 
-  local final = driver_input + target * assist_weight
+  local final = raw_input + target * assist_weight
   if final > 1 then final = 1 elseif final < -1 then final = -1 end
 
-  last_assist = target * assist_weight
   veh:queueLuaCommand(string.format("input.event('steering', %f, 0)", final))
 end
 
