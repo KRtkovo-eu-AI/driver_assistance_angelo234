@@ -8,10 +8,10 @@
     "top": "100px",
     "width": "300px"
   },
-  "description": "Displays lane sensor data.",
-  "directive": "laneAssistApp",
-  "domElement": "<lane-assist-app></lane-assist-app>",
-  "name": "Lane Assist Viewer",
+  "description": "Displays lane centering sensor data.",
+  "directive": "laneCenteringAssistApp",
+  "domElement": "<lane-centering-assist-app></lane-centering-assist-app>",
+  "name": "Lane Centering Assist Viewer",
   "types": [
     "ui.apps.categories.examples"
   ],

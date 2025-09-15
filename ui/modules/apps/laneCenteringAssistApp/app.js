@@ -1,7 +1,7 @@
 angular.module('beamng.apps')
-.directive('laneAssistApp', [function () {
+.directive('laneCenteringAssistApp', [function () {
   return {
-    templateUrl: '/ui/modules/apps/laneAssistApp/app.html',
+    templateUrl: '/ui/modules/apps/laneCenteringAssistApp/app.html',
     replace: true,
     restrict: 'EA',
     scope: true,
@@ -14,20 +14,22 @@ angular.module('beamng.apps')
         if (!data || !data.lane_width) { return; }
         var laneWidth = data.lane_width;
         var offset = data.lateral_offset || 0;
+        var slope = data.slope || 0;
         var scale = canvas.width / laneWidth;
         var center = canvas.width / 2 - offset * scale;
         var halfLane = laneWidth * 0.5 * scale;
         var left = center - halfLane;
         var right = center + halfLane;
+        var dx = slope * canvas.height;
         ctx.strokeStyle = 'yellow';
-        ctx.beginPath(); ctx.moveTo(left, 0); ctx.lineTo(left, canvas.height); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(right, 0); ctx.lineTo(right, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(left - dx, 0); ctx.lineTo(left, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(right - dx, 0); ctx.lineTo(right, canvas.height); ctx.stroke();
         ctx.fillStyle = 'red';
         ctx.fillRect(center - 5, canvas.height - 20, 10, 20);
       }
 
       function update() {
-        bngApi.engineLua('extensions.driver_assistance_angelo234.getLaneSensorData()', function (data) {
+        bngApi.engineLua('extensions.driver_assistance_angelo234.getLaneCenteringSensorData()', function (data) {
           $scope.$evalAsync(function () {
             draw(data);
           });

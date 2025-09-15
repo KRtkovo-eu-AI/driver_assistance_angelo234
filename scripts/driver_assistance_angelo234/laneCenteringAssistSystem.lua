@@ -16,7 +16,7 @@ local function update(dt, veh, system_params)
   local sensor = lane_sensor.sense(veh)
   latest_data = sensor
   if not sensor then return end
-  local params = system_params.lane_assist_params or {}
+  local params = system_params.lane_centering_assist_params or {}
   local kp = params.steer_kp or 0.5
   local heading_kp = params.heading_kp or 1.0
   local smoothing = params.steer_smoothing or 0.2
@@ -61,7 +61,8 @@ local function update(dt, veh, system_params)
   if electrics_values_angelo234 then
     driver_input = electrics_values_angelo234["steering_input"] or 0
   end
-  local final = driver_input + current_steer
+  local authority = 1 - math.min(1, math.abs(driver_input))
+  local final = driver_input + current_steer * authority
   if final > 1 then final = 1 elseif final < -1 then final = -1 end
   veh:queueLuaCommand(string.format("input.event('steering', %f, 1)", final))
 end
