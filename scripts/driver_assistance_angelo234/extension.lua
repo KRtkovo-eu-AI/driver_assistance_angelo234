@@ -49,6 +49,10 @@ local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
 local VIRTUAL_LIDAR_PHASES = 8
 local FRONT_LIDAR_PHASES = 4
+local VIRTUAL_LIDAR_H_RES = 72
+local VIRTUAL_LIDAR_V_RES = 18
+local FRONT_LIDAR_H_RES = 72
+local FRONT_LIDAR_V_RES = 18
 local virtual_lidar_point_cloud = {}
 local virtual_lidar_frames = {}
 local front_lidar_point_cloud = {}
@@ -363,8 +367,8 @@ local function frontLidarLoop()
           front_dist,
           math.rad(170),
           math.rad(30),
-          60,
-          15,
+          FRONT_LIDAR_H_RES,
+          FRONT_LIDAR_V_RES,
           0,
           veh:getID(),
           {hStart = front_lidar_phase, hStep = FRONT_LIDAR_PHASES}
@@ -430,8 +434,8 @@ local function updateVirtualLidar(dt, veh)
     local ANG_REAR = 112.5
     local hFov = math.rad(360)
     local vFov = math.rad(30)
-    local hRes = 60
-    local vRes = 15
+    local hRes = VIRTUAL_LIDAR_H_RES
+    local vRes = VIRTUAL_LIDAR_V_RES
     local scan_hits = virtual_lidar.scan(
       origin,
       dir,
@@ -498,12 +502,12 @@ local function updateVirtualLidar(dt, veh)
       local top = center + axis_z * half_extents.z
       local center_rel = center - origin
       local distance_to_center = center_rel:length()
-      local min_spacing = 0.35
-      local max_spacing = 2.75
-      local angle_spacing = math.rad(3.0)
+      local min_spacing = 0.28
+      local max_spacing = 2.25
+      local angle_spacing = math.rad(2.4)
       local spacing_from_angle = distance_to_center * math.tan(angle_spacing)
       local raster_spacing = math.max(min_spacing, math.min(max_spacing, spacing_from_angle))
-      local max_steps = 24
+      local max_steps = 28
       local function stepsFor(span)
         if span <= 0 then
           return 1
@@ -512,7 +516,7 @@ local function updateVirtualLidar(dt, veh)
       end
       local steps_x = stepsFor(half_extents.x * 2)
       local steps_y = stepsFor(half_extents.y * 2)
-      local jitter_scale = 0.35
+      local jitter_scale = 0.25
       local veh_seed = (props.id or (vehObj.getID and vehObj:getID()) or 0) * 0.001
       local function randUnit(ix, iy, axisIndex)
         local seed = veh_seed + ix * 0.161803 + iy * 0.314159 + axisIndex * 0.271828
