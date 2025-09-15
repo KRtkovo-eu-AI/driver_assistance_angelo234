@@ -9,17 +9,74 @@ angular.module('beamng.apps')
       var canvas = $element.find('canvas')[0];
       var ctx = canvas.getContext('2d');
       var carColor = [255, 255, 255];
+      var CAR_WIDTH = 10;
+      var CAR_LENGTH = 20;
+      var CAR_POINT_SIZE = 2;
+      var vehiclePointCloud = createVehiclePointCloud(CAR_WIDTH, CAR_LENGTH, CAR_POINT_SIZE);
+
+      function createVehiclePointCloud(width, length, dotSize) {
+        var points = [];
+        var halfW = width / 2;
+        var halfL = length / 2;
+        var safeHalfW = halfW || 1;
+        var safeHalfL = halfL || 1;
+        var baseSpacing = dotSize * 1.5;
+        var spacingScale = dotSize * 0.8;
+        var jitter = dotSize * 0.35;
+        var maxRadius = Math.sqrt(halfW * halfW + halfL * halfL) || 1;
+
+        for (var y = -halfL; y <= halfL + 0.001;) {
+          var depthRatio = Math.abs(y) / safeHalfL;
+          var ySpacing = baseSpacing + depthRatio * spacingScale;
+          for (var x = -halfW; x <= halfW + 0.001;) {
+            var lateralRatio = Math.abs(x) / safeHalfW;
+            var spacing = baseSpacing + Math.max(depthRatio, lateralRatio) * spacingScale;
+            var skipProbability = 0.05 + Math.max(depthRatio, lateralRatio) * 0.1;
+            var nextX = x + spacing;
+            if (Math.random() >= skipProbability) {
+              var distRatio = Math.sqrt(x * x + y * y) / maxRadius;
+              points.push({
+                x: x + (Math.random() - 0.5) * jitter,
+                y: y + (Math.random() - 0.5) * jitter,
+                alpha: Math.min(1, Math.max(0.3, 0.35 + (1 - distRatio) * 0.4))
+              });
+            }
+            x = nextX;
+          }
+          y += ySpacing;
+        }
+
+        var outlineStep = dotSize * 1.25;
+        for (var ox = -halfW; ox <= halfW + 0.001; ox += outlineStep) {
+          points.push({ x: ox, y: -halfL, alpha: 0.55 });
+          points.push({ x: ox, y: halfL, alpha: 0.55 });
+        }
+        for (var oy = -halfL; oy <= halfL + 0.001; oy += outlineStep) {
+          points.push({ x: -halfW, y: oy, alpha: 0.55 });
+          points.push({ x: halfW, y: oy, alpha: 0.55 });
+        }
+
+        points.push({ x: 0, y: 0, alpha: 0.75 });
+
+        return points;
+      }
 
       function drawVehicle(x) {
         ctx.save();
-        ctx.fillStyle = 'rgba(' +
+        ctx.translate(x, canvas.height - CAR_LENGTH / 2);
+        var colorPrefix = 'rgba(' +
           Math.round(carColor[0]) + ',' +
           Math.round(carColor[1]) + ',' +
-          Math.round(carColor[2]) + ',0.5)';
-        var carWidth = 10;
-        var carLength = 20;
-        ctx.translate(x, canvas.height - carLength);
-        ctx.fillRect(-carWidth / 2, 0, carWidth, carLength);
+          Math.round(carColor[2]) + ',';
+        vehiclePointCloud.forEach(function (point) {
+          ctx.fillStyle = colorPrefix + point.alpha + ')';
+          ctx.fillRect(
+            point.x - CAR_POINT_SIZE / 2,
+            point.y - CAR_POINT_SIZE / 2,
+            CAR_POINT_SIZE,
+            CAR_POINT_SIZE
+          );
+        });
         ctx.restore();
       }
 
