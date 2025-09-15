@@ -33,7 +33,8 @@ local function sense(veh)
   local veh_props = extra_utils.getVehicleProperties(veh)
   if not veh_props then return nil end
 
-  local wps = extra_utils.getWaypointStartEnd(veh_props, veh_props, veh_props.center_pos)
+  local wps = extra_utils.getWaypointStartEndAdvanced(veh_props, veh_props, veh_props.center_pos, M.prev_wps)
+  M.prev_wps = wps
 
   local origin = veh_props.front_pos + veh_props.dir_up * 0.5
   local pts = virtual_lidar.scan(
@@ -78,12 +79,16 @@ local lane_width, lateral_offset, road_dir, future_dir, curvature
 
   if wps then
     lane_width = wps.lane_width
-    lateral_offset = wps.lat_dist_from_wp
+    if wps.one_way then
+      lateral_offset = wps.lat_dist_from_wp
+    else
+      lateral_offset = wps.lat_dist_from_wp - (lane_width * 0.5)
+    end
     road_dir = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
 
     local look_ahead = 20
     local future_pos = veh_props.front_pos + road_dir * look_ahead
-    local future_wps = extra_utils.getWaypointStartEnd(veh_props, veh_props, future_pos)
+    local future_wps = extra_utils.getWaypointStartEndAdvanced(veh_props, veh_props, future_pos, wps)
     if future_wps then
       future_dir = extra_utils.toNormXYVec(future_wps.end_wp_pos - future_wps.start_wp_pos)
       curvature = math.atan2(road_dir:cross(future_dir).z, road_dir:dot(future_dir))
