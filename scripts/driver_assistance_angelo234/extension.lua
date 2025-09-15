@@ -395,6 +395,45 @@ end
 
 front_lidar_thread = coroutine.create(frontLidarLoop)
 
+local function clamp(value, minVal, maxVal)
+  if value < minVal then
+    return minVal
+  end
+  if value > maxVal then
+    return maxVal
+  end
+  return value
+end
+
+local function spacingForDistance(distance)
+  local nearDist = 4
+  local farDist = 80
+  local minSpacing = 0.1
+  local maxSpacing = 0.6
+  local t = clamp((distance - nearDist) / (farDist - nearDist), 0, 1)
+  t = t ^ 0.6
+  return minSpacing + (maxSpacing - minSpacing) * t
+end
+
+local MAX_FACE_STEPS = 25
+
+local function stepsPerHalfExtent(halfExtent, spacing)
+  if halfExtent <= 0 then
+    return 1
+  end
+  local steps = math.ceil(halfExtent / math.max(spacing, 0.01))
+  if steps < 1 then
+    steps = 1
+  elseif steps > MAX_FACE_STEPS then
+    steps = MAX_FACE_STEPS
+  end
+  return steps
+end
+
+local function raySlack(distance)
+  return 0.25 + distance * 0.01
+end
+
 --local p = LuaProfiler("my profiler")
 
 local function updateVirtualLidar(dt, veh)
@@ -486,28 +525,129 @@ local function updateVirtualLidar(dt, veh)
       if not bb then return end
       local center = props.center_pos
       local half_extents = bb:getHalfExtents()
-      local axis_x = vec3(bb:getAxis(0))
-      local axis_y = vec3(bb:getAxis(1))
-      local axis_z = vec3(bb:getAxis(2))
-      local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
-      local function stepsFor(span)
-        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
+      local axis_x = vec3(bb:getAxis(0)):normalized()
+      local axis_y = vec3(bb:getAxis(1)):normalized()
+      local axis_z = vec3(bb:getAxis(2)):normalized()
+
+      local faces = {
+        {
+          center = center + axis_x * half_extents.x,
+          normal = axis_x,
+          axisA = axis_y,
+          halfA = half_extents.y,
+          axisB = axis_z,
+          halfB = half_extents.z,
+          spacingScale = 1.0
+        },
+        {
+          center = center - axis_x * half_extents.x,
+          normal = -axis_x,
+          axisA = axis_y,
+          halfA = half_extents.y,
+          axisB = axis_z,
+          halfB = half_extents.z,
+          spacingScale = 1.05
+        },
+        {
+          center = center + axis_y * half_extents.y,
+          normal = axis_y,
+          axisA = axis_x,
+          halfA = half_extents.x,
+          axisB = axis_z,
+          halfB = half_extents.z,
+          spacingScale = 0.95
+        },
+        {
+          center = center - axis_y * half_extents.y,
+          normal = -axis_y,
+          axisA = axis_x,
+          halfA = half_extents.x,
+          axisB = axis_z,
+          halfB = half_extents.z,
+          spacingScale = 1.1
+        },
+        {
+          center = center + axis_z * half_extents.z,
+          normal = axis_z,
+          axisA = axis_x,
+          halfA = half_extents.x,
+          axisB = axis_y,
+          halfB = half_extents.y,
+          spacingScale = 0.75
+        },
+        {
+          center = center - axis_z * half_extents.z,
+          normal = -axis_z,
+          axisA = axis_x,
+          halfA = half_extents.x,
+          axisB = axis_y,
+          halfB = half_extents.y,
+          spacingScale = 1.3
+        }
+      }
+
+      local function hasLineOfSight(pt)
+        local rel = pt - origin
+        local dist = rel:length()
+        if dist <= 0 then
+          return false
+        end
+        if dist > allowedDistance(rel) then
+          return false
+        end
+        local dirTo = rel / dist
+        local slack = raySlack(dist)
+        local staticDist = castRayStatic(origin, dirTo, dist)
+        if staticDist and staticDist < dist - slack then
+          return false
+        end
+        local dynHit = castRay(origin, origin + dirTo * dist, true, true)
+        if dynHit and dynHit.dist then
+          local hitDist = dynHit.dist
+          if hitDist < dist - slack then
+            local hitId = dynHit.objectId or dynHit.objectID or dynHit.cid
+            if not hitId and dynHit.obj and dynHit.obj.getID then
+              hitId = dynHit.obj:getID()
+            end
+            if hitId ~= props.id then
+              return false
+            end
+          end
+        end
+        return true
       end
-      local steps_x = stepsFor(half_extents.x * 2)
-      local steps_y = stepsFor(half_extents.y * 2)
-      for xi = -steps_x, steps_x do
-        local offset_x = axis_x * (half_extents.x * xi / steps_x)
-        for yi = -steps_y, steps_y do
-          local offset_y = axis_y * (half_extents.y * yi / steps_y)
-          local p = top + offset_x + offset_y
-          local rel = p - origin
-          if rel:length() < allowedDistance(rel) then
-            vehicle_hits[#vehicle_hits + 1] = p
+
+      local jitterFactor = 0.3
+      for _, face in ipairs(faces) do
+        local toSensor = origin - face.center
+        local distToSensor = toSensor:length()
+        if distToSensor > 0 then
+          local facing = face.normal:dot(toSensor / distToSensor)
+          if facing > 0.05 then
+            local baseSpacing = spacingForDistance(distToSensor) * face.spacingScale
+            local stepsA = stepsPerHalfExtent(face.halfA, baseSpacing)
+            local stepsB = stepsPerHalfExtent(face.halfB, baseSpacing)
+            local jitterAmount = baseSpacing * jitterFactor
+            for ia = -stepsA, stepsA do
+              local fracA = stepsA == 0 and 0 or ia / stepsA
+              local offsetA = face.axisA * (face.halfA * fracA)
+              for ib = -stepsB, stepsB do
+                local fracB = stepsB == 0 and 0 or ib / stepsB
+                local offsetB = face.axisB * (face.halfB * fracB)
+                local candidate = face.center + offsetA + offsetB
+                local jittered = candidate
+                  + face.axisA * ((math.random() - 0.5) * jitterAmount)
+                  + face.axisB * ((math.random() - 0.5) * jitterAmount)
+                if hasLineOfSight(jittered) then
+                  vehicle_hits[#vehicle_hits + 1] = jittered
+                end
+              end
+            end
           end
         end
       end
+
+      local top = center + axis_z * half_extents.z
       local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
