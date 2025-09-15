@@ -328,6 +328,11 @@ local function updateVirtualLidar(dt, veh)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
     local max_dist = aeb_params.sensor_max_distance
+    local front_dist = max_dist
+    local rear_dist = max_dist * 0.5
+    local side_dist = max_dist * 0.25
+    local ANG_FRONT = 67.5
+    local ANG_SIDE = 112.5
     local vel = veh:getVelocity()
     local forward_speed = vel:dot(dir) * 3.6
     local hits
@@ -340,7 +345,7 @@ local function updateVirtualLidar(dt, veh)
           origin,
           dir,
           up,
-          max_dist,
+          front_dist,
           math.rad(135),
           math.rad(30),
           40,
@@ -355,7 +360,7 @@ local function updateVirtualLidar(dt, veh)
           origin,
           -dir,
           up,
-          max_dist,
+          rear_dist,
           math.rad(225),
           math.rad(30),
           20,
@@ -370,7 +375,7 @@ local function updateVirtualLidar(dt, veh)
         origin,
         dir,
         up,
-        max_dist,
+        front_dist,
         math.rad(360),
         math.rad(30),
         60,
@@ -404,6 +409,18 @@ local function updateVirtualLidar(dt, veh)
     local detections = {}
     local processed = {[veh:getID()] = true}
 
+    local function allowedDistance(rel)
+      local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
+      local absAng = math.abs(ang)
+      if absAng <= ANG_FRONT then
+        return front_dist
+      elseif absAng >= ANG_SIDE then
+        return rear_dist
+      else
+        return side_dist
+      end
+    end
+
     local function addVehicle(vehObj, props)
       if not vehObj or not props then return end
       if props.id == veh:getID() or processed[props.id] then return end
@@ -426,13 +443,17 @@ local function updateVirtualLidar(dt, veh)
       }
       for _, c in ipairs(corners) do
         local rel = c - origin
-        if rel:length() < max_dist then
+        if rel:length() < allowedDistance(rel) then
           hits[#hits + 1] = c
         end
       end
-      local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
-      local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
-      detections[#detections + 1] = {pos = center + z, desc = string.format('%s %s', veh_type, id)}
+      local top = center + z
+      local relTop = top - origin
+      if relTop:length() <= allowedDistance(relTop) then
+        local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
+        local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
+        detections[#detections + 1] = {pos = top, desc = string.format('%s %s', veh_type, id)}
+      end
     end
 
     if front_sensor_data and front_sensor_data[2] then
@@ -462,7 +483,7 @@ local function updateVirtualLidar(dt, veh)
     local current_cloud = {}
     for _, p in ipairs(hits) do
       local rel = p - origin
-      if rel:dot(up) >= groundThreshold and not insideSelf(p) then
+      if rel:dot(up) >= groundThreshold and not insideSelf(p) and rel:length() <= allowedDistance(rel) then
         current_cloud[#current_cloud + 1] = {
           x = rel:dot(right),
           y = rel:dot(dir),
