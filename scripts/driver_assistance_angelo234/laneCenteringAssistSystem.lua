@@ -9,8 +9,9 @@ local _ = require("controlSystems")
 local latest_data = nil
 local warning_played = false
 
-local steering_pid = newPIDStandard(0.1, 2, 1.25, -0.3, 0.3)
-local steering_smooth = newTemporalSmoothing(200, 200)
+local steering_pid = nil
+local steering_smooth = nil
+local last_assist = 0
 
 -- Apply PID control with smoothing to keep vehicle centered and aligned with lane
 local function update(dt, veh, system_params)
@@ -22,7 +23,13 @@ local function update(dt, veh, system_params)
   local params = system_params.lane_centering_params or {}
   local heading_kp = params.heading_kp or 0.5
   local warn_ratio = params.warning_ratio or 0.8
-  local steer_limit = params.steer_limit or 0.3
+  local steer_limit = params.steer_limit or 0.15
+
+  if not steering_pid then
+    steering_pid = newPIDStandard(params.steer_kp or 0.1, 0, params.steer_kd or 0.1, -steer_limit, steer_limit)
+    local smooth = (params.steer_smoothing or 0.4) * 1000
+    steering_smooth = newTemporalSmoothing(smooth, smooth)
+  end
 
   local lane_width = sensor.lane_width or 0
   if lane_width <= 0 then return end
@@ -30,6 +37,7 @@ local function update(dt, veh, system_params)
 
   local half_width = lane_width * 0.5
   local norm_offset = offset / half_width
+  if math.abs(norm_offset) < 0.02 then norm_offset = 0 end
   local abs_off = math.abs(offset)
   local warn_zone = warn_ratio * half_width
 
@@ -52,13 +60,18 @@ local function update(dt, veh, system_params)
     warning_played = false
   end
 
-  local driver_input = 0
+  local raw_input = 0
   if electrics_values_angelo234 then
-    driver_input = electrics_values_angelo234["steering_input"] or 0
+    raw_input = electrics_values_angelo234["steering_input"] or 0
   end
-  local assist_weight = math.max(0, 1 - math.abs(driver_input))
+
+  local driver_input = raw_input - last_assist
+  local assist_weight = math.max(0, 1 - math.abs(driver_input) * 5)
+
   local final = driver_input + target * assist_weight
   if final > 1 then final = 1 elseif final < -1 then final = -1 end
+
+  last_assist = target * assist_weight
   veh:queueLuaCommand(string.format("input.event('steering', %f, 0)", final))
 end
 

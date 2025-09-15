@@ -66,12 +66,12 @@ M.rev_cam_params = {
 }
 
 M.lane_centering_params = {
-    steer_kp = 0.2,
-    steer_kd = 0.4,
+    steer_kp = 0.1,
+    steer_kd = 0.1,
     heading_kp = 0.5,
-    steer_smoothing = 0.1,
+    steer_smoothing = 0.4,
     warning_ratio = 0.8,
-    steer_limit = 0.3,
+    steer_limit = 0.15,
 }
 
 return M
