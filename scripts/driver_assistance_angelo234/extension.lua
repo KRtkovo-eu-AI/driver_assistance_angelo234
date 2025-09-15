@@ -50,10 +50,13 @@ local virtual_lidar_update_timer = 0
 local VIRTUAL_LIDAR_PHASES = 8
 local FRONT_LIDAR_PHASES = 4
 local virtual_lidar_point_cloud = {}
+local virtual_lidar_ground_point_cloud = {}
 local virtual_lidar_frames = {}
 local front_lidar_point_cloud = {}
+local front_lidar_ground_point_cloud = {}
 local front_lidar_frames = {}
 local front_lidar_point_cloud_wip = {}
+local front_lidar_ground_point_cloud_wip = {}
 local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
@@ -67,24 +70,32 @@ local VIRTUAL_LIDAR_H_RES = 60
 local VIRTUAL_LIDAR_V_RES = 15
 local VIRTUAL_LIDAR_H_STEP = VIRTUAL_LIDAR_H_FOV / math.max(1, VIRTUAL_LIDAR_H_RES - 1)
 local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_RES - 1)
+local LIDAR_GROUND_THRESHOLD = -1.5
+local LIDAR_LOW_OBJECT_BAND = 1.0
 
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
+  virtual_lidar_ground_point_cloud = {}
   virtual_lidar_frames = {}
   front_lidar_point_cloud = {}
+  front_lidar_ground_point_cloud = {}
   front_lidar_frames = {}
   front_lidar_point_cloud_wip = {}
+  front_lidar_ground_point_cloud_wip = {}
   front_lidar_frames_wip = {}
   vehicle_lidar_point_cloud = {}
   vehicle_lidar_frame = nil
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
+    virtual_lidar_ground_point_cloud[i] = {}
     virtual_lidar_frames[i] = nil
   end
   for i = 1, FRONT_LIDAR_PHASES do
     front_lidar_point_cloud[i] = {}
+    front_lidar_ground_point_cloud[i] = {}
     front_lidar_frames[i] = nil
     front_lidar_point_cloud_wip[i] = {}
+    front_lidar_ground_point_cloud_wip[i] = {}
     front_lidar_frames_wip[i] = nil
   end
 end
@@ -379,22 +390,32 @@ local function frontLidarLoop()
           veh:getID(),
           {hStart = front_lidar_phase, hStep = FRONT_LIDAR_PHASES}
         )
-        local groundThreshold = -1.5
+        local groundThreshold = LIDAR_GROUND_THRESHOLD
+        local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
         local current_cloud = {}
+        local low_cloud = {}
         for _, p in ipairs(hits) do
           local rel = p - origin
-          if rel:dot(up) >= groundThreshold and rel:length() <= front_dist then
-            current_cloud[#current_cloud + 1] = {
+          local z = rel:dot(up)
+          if rel:length() <= front_dist then
+            local point = {
               x = rel:dot(right),
               y = rel:dot(dir),
-              z = rel:dot(up)
+              z = z
             }
+            if z >= groundThreshold then
+              current_cloud[#current_cloud + 1] = point
+            elseif z >= lowObjectMin then
+              low_cloud[#low_cloud + 1] = point
+            end
           end
         end
         front_lidar_point_cloud_wip[front_lidar_phase + 1] = current_cloud
+        front_lidar_ground_point_cloud_wip[front_lidar_phase + 1] = low_cloud
         front_lidar_phase = (front_lidar_phase + 1) % FRONT_LIDAR_PHASES
         if front_lidar_phase == 0 then
           front_lidar_point_cloud, front_lidar_point_cloud_wip = front_lidar_point_cloud_wip, front_lidar_point_cloud
+          front_lidar_ground_point_cloud, front_lidar_ground_point_cloud_wip = front_lidar_ground_point_cloud_wip, front_lidar_ground_point_cloud
           front_lidar_frames, front_lidar_frames_wip = front_lidar_frames_wip, front_lidar_frames
         end
         front_lidar_update_timer = 0
@@ -573,19 +594,28 @@ local function updateVirtualLidar(dt, veh)
       end
     end
 
-    local groundThreshold = -1.5
+    local groundThreshold = LIDAR_GROUND_THRESHOLD
+    local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
     local current_cloud = {}
+    local ground_cloud = {}
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
-      if rel:dot(up) >= groundThreshold and not insideSelf(p) and rel:length() <= allowedDistance(rel) then
-        current_cloud[#current_cloud + 1] = {
+      if not insideSelf(p) and rel:length() <= allowedDistance(rel) then
+        local z = rel:dot(up)
+        local point = {
           x = rel:dot(right),
           y = rel:dot(dir),
-          z = rel:dot(up)
+          z = z
         }
+        if z >= groundThreshold then
+          current_cloud[#current_cloud + 1] = point
+        elseif z >= lowObjectMin then
+          ground_cloud[#ground_cloud + 1] = point
+        end
       end
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
+    virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
 
     local veh_cloud = {}
     for _, p in ipairs(vehicle_hits) do
@@ -807,6 +837,36 @@ local function getVirtualLidarPointCloud()
   return combined
 end
 
+local function getVirtualLidarGroundPointCloud()
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return {} end
+  local pos = veh:getPosition()
+  local dir = veh:getDirectionVector()
+  dir.z = 0
+  dir = dir:normalized()
+  local up = veh:getDirectionVectorUp():normalized()
+  local right = dir:cross(up):normalized()
+  local curr = {origin = vec3(pos.x, pos.y, pos.z + 1.8), dir = dir, right = right, up = up}
+  local combined = {}
+  for i = 1, #virtual_lidar_ground_point_cloud do
+    local frame = virtual_lidar_frames[i]
+    if frame then
+      for j = 1, #virtual_lidar_ground_point_cloud[i] do
+        combined[#combined + 1] = drift_proximity.apply(virtual_lidar_ground_point_cloud[i][j], frame, curr)
+      end
+    end
+  end
+  for i = 1, #front_lidar_ground_point_cloud do
+    local frame = front_lidar_frames[i]
+    if frame then
+      for j = 1, #front_lidar_ground_point_cloud[i] do
+        combined[#combined + 1] = drift_proximity.apply(front_lidar_ground_point_cloud[i][j], frame, curr)
+      end
+    end
+  end
+  return combined
+end
+
 local function getVehicleColor()
   local veh = be:getPlayerVehicle(0)
   if veh then
@@ -835,6 +895,7 @@ end
 local function getVirtualLidarData()
   return {
     points = getVirtualLidarPointCloud(),
+    groundPoints = getVirtualLidarGroundPointCloud(),
     color = getVehicleColor(),
     bounds = getPlayerVehicleBounds()
   }

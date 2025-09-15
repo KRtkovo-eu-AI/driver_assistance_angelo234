@@ -29,35 +29,44 @@ angular.module('beamng.apps')
         ctx.restore();
       }
 
-      function draw(points) {
+      function draw(points, groundPoints) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         var scale = Math.min(
           canvas.width / (2 * FIXED_RANGE),
           canvas.height / (2 * FIXED_RANGE)
         );
-        if (!points || !points.length) {
+        var regular = Array.isArray(points) ? points : [];
+        var low = Array.isArray(groundPoints) ? groundPoints : [];
+        if (!regular.length && !low.length) {
           drawVehicle(scale);
           return;
         }
 
         var minD = Infinity, maxD = -Infinity;
 
-        points.forEach(function (p) {
-          var d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-          if (d < minD) { minD = d; }
-          if (d > maxD) { maxD = d; }
-          p._d = d;
+        [regular, low].forEach(function (list) {
+          list.forEach(function (p) {
+            var d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+            if (d < minD) { minD = d; }
+            if (d > maxD) { maxD = d; }
+            p._d = d;
+          });
         });
 
         var distRange = Math.max(1, maxD - minD);
 
-        points.forEach(function (p) {
-          var x = canvas.width / 2 + p.x * scale;
-          var y = canvas.height / 2 - p.y * scale;
-          var hue = ((p._d - minD) / distRange) * 240;
-          ctx.fillStyle = 'hsl(' + hue + ', 100%, 50%)';
-          ctx.fillRect(x, y, 2, 2);
-        });
+        function drawPoints(list, lightness) {
+          list.forEach(function (p) {
+            var x = canvas.width / 2 + p.x * scale;
+            var y = canvas.height / 2 - p.y * scale;
+            var hue = ((p._d - minD) / distRange) * 240;
+            ctx.fillStyle = 'hsl(' + hue + ', 100%, ' + lightness + '%)';
+            ctx.fillRect(x, y, 2, 2);
+          });
+        }
+
+        drawPoints(low, 30);
+        drawPoints(regular, 50);
 
         drawVehicle(scale);
       }
@@ -84,7 +93,7 @@ angular.module('beamng.apps')
                   length: data.bounds.length
                 };
               }
-              draw(data.points);
+              draw(data.points, data.groundPoints);
             });
           }
         );
