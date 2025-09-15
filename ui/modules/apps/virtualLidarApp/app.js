@@ -22,8 +22,8 @@ angular.module('beamng.apps')
           Math.round(carColor[2]) + ',0.5)';
         var bounds = carBounds || DEFAULT_BOUNDS;
         var s = typeof scale === 'number' ? scale : 1;
-        var carWidth = bounds.width * 0.85 * s;
-        var carLength = bounds.length * 0.85 * s;
+        var carWidth = bounds.width * 1.50 * s;
+        var carLength = bounds.length * 1.20 * s;
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
         ctx.restore();
