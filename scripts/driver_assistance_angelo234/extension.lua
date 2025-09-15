@@ -673,8 +673,10 @@ end
 
 local function getVehicleColor()
   local veh = be:getPlayerVehicle(0)
-  if veh and veh.getColor then
-    local c = veh:getColor()
+  if veh then
+    -- Some vehicle APIs expose color via a "color" field rather than a getter.
+    -- Fall back to veh:getColor() when available for older versions.
+    local c = veh.color or (veh.getColor and veh:getColor())
     if c then
       local r = c.x or c.r or 1
       local g = c.y or c.g or 1
