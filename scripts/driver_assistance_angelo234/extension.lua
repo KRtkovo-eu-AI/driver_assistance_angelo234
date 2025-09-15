@@ -330,6 +330,26 @@ local function updateVirtualLidar(dt, veh)
       veh:getID()
     )
 
+    -- cache properties of the player's vehicle for later filtering
+    local veh_props = extra_utils.getVehicleProperties(veh)
+    local self_bb = veh_props.bb
+    local self_center = self_bb:getCenter()
+    local self_axes = {
+      vec3(self_bb:getAxis(0)),
+      vec3(self_bb:getAxis(1)),
+      vec3(self_bb:getAxis(2))
+    }
+    local self_half = self_bb:getHalfExtents()
+    local self_margin = 0.25
+
+    -- return true if the world-space point lies within our own vehicle's bounds
+    local function insideSelf(pt)
+      local rel = pt - self_center
+      return math.abs(rel:dot(self_axes[1])) <= self_half.x + self_margin
+        and math.abs(rel:dot(self_axes[2])) <= self_half.y + self_margin
+        and math.abs(rel:dot(self_axes[3])) <= self_half.z + self_margin
+    end
+
     local detections = {}
     local processed = {[veh:getID()] = true}
 
@@ -391,7 +411,7 @@ local function updateVirtualLidar(dt, veh)
     virtual_lidar_point_cloud = {}
     for _, p in ipairs(hits) do
       local rel = p - origin
-      if rel:dot(up) >= groundThreshold then
+      if rel:dot(up) >= groundThreshold and not insideSelf(p) then
         virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
           x = rel:dot(right),
           y = rel:dot(dir),
