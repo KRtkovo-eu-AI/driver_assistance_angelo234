@@ -9,9 +9,9 @@ local sin, cos = math.sin, math.cos
 -- up: up direction vector
 -- maxDist: max scan distance
 -- hFov, vFov: horizontal and vertical field of view in radians
--- hRes, vRes: number of rays horizontally and vertically
 -- ignoreId: optional vehicle id to exclude from results
-local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, ignoreId)
+-- opts: optional table {hStart, hStep, vStart, vStep} to scan only a subset of rays
+local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, ignoreId, opts)
   local points = {}
   dir = dir:normalized()
   up = up:normalized()
@@ -21,10 +21,16 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
   right = right:normalized()
   minDist = minDist or 0
 
-  for i = 0, hRes - 1 do
+  opts = opts or {}
+  local hStart = opts.hStart or 0
+  local hStep = opts.hStep or 1
+  local vStart = opts.vStart or 0
+  local vStep = opts.vStep or 1
+
+  for i = hStart, hRes - 1, hStep do
     local hAng = -hFov * 0.5 + hFov * i / math.max(1, hRes - 1)
     local ch, sh = cos(hAng), sin(hAng)
-    for j = 0, vRes - 1 do
+    for j = vStart, vRes - 1, vStep do
       local vAng = -vFov * 0.5 + vFov * j / math.max(1, vRes - 1)
       local cv, sv = cos(vAng), sin(vAng)
       local rayDir = dir * (cv * ch) + right * (cv * sh) + up * sv

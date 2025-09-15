@@ -46,7 +46,18 @@ local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
+local VIRTUAL_LIDAR_PHASES = 12
 local virtual_lidar_point_cloud = {}
+
+local function resetVirtualLidarPointCloud()
+  virtual_lidar_point_cloud = {}
+  for i = 1, VIRTUAL_LIDAR_PHASES do
+    virtual_lidar_point_cloud[i] = {}
+  end
+end
+
+resetVirtualLidarPointCloud()
+local virtual_lidar_phase = 0
 
 M.curr_camera_mode = "orbit"
 M.prev_camera_mode = "orbit"
@@ -301,7 +312,7 @@ end
 
 local function updateVirtualLidar(dt, veh)
   if not extra_utils.getPart("lidar_angelo234") then
-    virtual_lidar_point_cloud = {}
+    resetVirtualLidarPointCloud()
     return
   end
   if not aeb_params then return end
@@ -327,7 +338,8 @@ local function updateVirtualLidar(dt, veh)
       60,
       15,
       0,
-      veh:getID()
+      veh:getID(),
+      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
     )
 
     -- cache properties of the player's vehicle for later filtering
@@ -408,17 +420,18 @@ local function updateVirtualLidar(dt, veh)
     end
 
     local groundThreshold = -1.5
-    virtual_lidar_point_cloud = {}
+    local current_cloud = {}
     for _, p in ipairs(hits) do
       local rel = p - origin
       if rel:dot(up) >= groundThreshold and not insideSelf(p) then
-        virtual_lidar_point_cloud[#virtual_lidar_point_cloud + 1] = {
+        current_cloud[#current_cloud + 1] = {
           x = rel:dot(right),
           y = rel:dot(dir),
           z = rel:dot(up)
         }
       end
     end
+    virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
 
     for _, d in ipairs(detections) do
       local rel = d.pos - origin
@@ -429,6 +442,7 @@ local function updateVirtualLidar(dt, veh)
       local ang = math.deg(math.atan2(x, y))
       logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
     end
+    virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
     virtual_lidar_update_timer = 0
   else
     virtual_lidar_update_timer = virtual_lidar_update_timer + dt
@@ -587,7 +601,13 @@ local function onUpdate(dt)
 end
 
 local function getVirtualLidarPointCloud()
-  return virtual_lidar_point_cloud
+  local combined = {}
+  for i = 1, #virtual_lidar_point_cloud do
+    for j = 1, #virtual_lidar_point_cloud[i] do
+      combined[#combined + 1] = virtual_lidar_point_cloud[i][j]
+    end
+  end
+  return combined
 end
 
 local function getLaneSensorData()
