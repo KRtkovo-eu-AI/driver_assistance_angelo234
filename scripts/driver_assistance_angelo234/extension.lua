@@ -511,9 +511,9 @@ local function updateVirtualLidar(dt, veh)
         if s > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
         return s
       end
-      local baseSpacing = clampSpacing(2 * planarDist * sin(VIRTUAL_LIDAR_H_STEP * 0.5))
+      local baseSpacing = clampSpacing(2 * planarDist * math.sin(VIRTUAL_LIDAR_H_STEP * 0.5))
       local diagDist = math.sqrt(planarDist * planarDist + heightOffset * heightOffset)
-      local verticalSpacing = clampSpacing(2 * diagDist * sin(VIRTUAL_LIDAR_V_STEP * 0.5))
+      local verticalSpacing = clampSpacing(2 * diagDist * math.sin(VIRTUAL_LIDAR_V_STEP * 0.5))
       local spacingX = baseSpacing
       local spacingY = math.max(baseSpacing, verticalSpacing)
       local function stepsForHalfSpan(halfSpan, spacing)
