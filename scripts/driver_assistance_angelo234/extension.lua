@@ -484,19 +484,29 @@ local function updateVirtualLidar(dt, veh)
       local bb = props.bb
       if not bb then return end
       local center = props.center_pos
-      local x = vec3(bb:getAxis(0)) * bb:getHalfExtents().x
-      local y = vec3(bb:getAxis(1)) * bb:getHalfExtents().y
-      local z = vec3(bb:getAxis(2)) * bb:getHalfExtents().z
-      for xi = -1, 1, 0.5 do
-        for yi = -1, 1, 0.5 do
-          local p = center + x * xi + y * yi + z
+      local half_extents = bb:getHalfExtents()
+      local axis_x = vec3(bb:getAxis(0))
+      local axis_y = vec3(bb:getAxis(1))
+      local axis_z = vec3(bb:getAxis(2))
+      local top = center + axis_z * half_extents.z
+      local raster_spacing = 0.5
+      local max_steps = 20
+      local function stepsFor(span)
+        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
+      end
+      local steps_x = stepsFor(half_extents.x * 2)
+      local steps_y = stepsFor(half_extents.y * 2)
+      for xi = -steps_x, steps_x do
+        local offset_x = axis_x * (half_extents.x * xi / steps_x)
+        for yi = -steps_y, steps_y do
+          local offset_y = axis_y * (half_extents.y * yi / steps_y)
+          local p = top + offset_x + offset_y
           local rel = p - origin
           if rel:length() < allowedDistance(rel) then
             vehicle_hits[#vehicle_hits + 1] = p
           end
         end
       end
-      local top = center + z
       local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
