@@ -19,6 +19,7 @@ local function update(dt, veh, system_params)
   if not extra_utils.getPart("lane_centering_assist_system_angelo234") then return end
   if override_timer > 0 then
     override_timer = override_timer - dt
+    if steering_pid then steering_pid:reset() end
     return
   end
 
@@ -26,26 +27,30 @@ local function update(dt, veh, system_params)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   if forward_speed <= 0 then
     latest_data = nil
+    if steering_pid then steering_pid:reset() end
     return
   end
 
   local sensor = lane_sensor.sense(veh)
   latest_data = sensor
-  if not sensor then return end
+  if not sensor then
+    if steering_pid then steering_pid:reset() end
+    return
+  end
   local params = system_params.lane_centering_params or {}
-  local heading_kp = params.heading_kp or 0.5
+  local heading_kp = params.heading_kp or 0.6
   local warn_ratio = params.warning_ratio or 0.8
   local steer_limit = params.steer_limit or 0.15
 
   if not steering_pid then
     steering_pid = newPIDStandard(
-      params.steer_kp or 0.25,
-      params.steer_ki or 0.05,
-      params.steer_kd or 0.25,
+      params.steer_kp or 0.35,
+      params.steer_ki or 0.08,
+      params.steer_kd or 0.3,
       -steer_limit,
       steer_limit
     )
-    local smooth = (params.steer_smoothing or 0.1) * 1000
+    local smooth = (params.steer_smoothing or 0.05) * 1000
     steering_smooth = newTemporalSmoothing(smooth, smooth)
   end
 
@@ -55,7 +60,7 @@ local function update(dt, veh, system_params)
 
   local half_width = lane_width * 0.5
   local norm_offset = offset / half_width
-  local deadzone = params.offset_deadzone or 0.005
+  local deadzone = params.offset_deadzone or 0.002
   if deadzone > 0 and math.abs(norm_offset) < deadzone then
     norm_offset = 0
   end
