@@ -12,7 +12,10 @@ M.fwd_aeb_params = {
     apply_parking_brake_speed = 16.7,
     braking_time_leeway = 1.5,
     braking_distance_leeway = 8,
-  
+
+    vehicle_relative_speed_threshold = 1.0,
+    obstacle_brake_acc_factor = 0.7,
+
     vehicle_search_radius = 200,
     
     min_distance_from_car = 1,
