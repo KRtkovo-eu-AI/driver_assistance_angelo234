@@ -47,7 +47,7 @@ local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
-local VIRTUAL_LIDAR_PHASES = 12
+local VIRTUAL_LIDAR_PHASES = 8
 local virtual_lidar_point_cloud = {}
 local virtual_lidar_frames = {}
 
@@ -342,45 +342,26 @@ local function updateVirtualLidar(dt, veh)
     local front_dist = max_dist
     local rear_dist = max_dist * 0.5
     local side_dist = rear_dist
-    local ANG_FRONT = 67.5
-    local ANG_SIDE = 112.5
+    local ANG_FRONT = 85
+    local ANG_SIDE = 130
     local vel = veh:getVelocity()
     local forward_speed = vel:dot(dir) * 3.6
     local hits
 
     if forward_speed > 35 then
-      local FRONT_PHASES = 8
-      local REAR_PHASES = VIRTUAL_LIDAR_PHASES - FRONT_PHASES
-      if virtual_lidar_phase < FRONT_PHASES then
-        hits = virtual_lidar.scan(
-          origin,
-          dir,
-          up,
-          front_dist,
-          math.rad(135),
-          math.rad(30),
-          40,
-          15,
-          0,
-          veh:getID(),
-          {hStart = virtual_lidar_phase, hStep = FRONT_PHASES}
-        )
-      else
-        local back_phase = virtual_lidar_phase - FRONT_PHASES
-        hits = virtual_lidar.scan(
-          origin,
-          -dir,
-          up,
-          rear_dist,
-          math.rad(225),
-          math.rad(30),
-          20,
-          15,
-          0,
-          veh:getID(),
-          {hStart = back_phase, hStep = REAR_PHASES}
-        )
-      end
+      hits = virtual_lidar.scan(
+        origin,
+        dir,
+        up,
+        front_dist,
+        math.rad(170),
+        math.rad(30),
+        40,
+        15,
+        0,
+        veh:getID(),
+        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+      )
     else
       hits = virtual_lidar.scan(
         origin,
