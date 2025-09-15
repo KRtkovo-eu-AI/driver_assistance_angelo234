@@ -38,8 +38,14 @@ local function update(dt, veh, system_params)
   local steer_limit = params.steer_limit or 0.15
 
   if not steering_pid then
-    steering_pid = newPIDStandard(params.steer_kp or 0.2, 0, params.steer_kd or 0.2, -steer_limit, steer_limit)
-    local smooth = (params.steer_smoothing or 0.2) * 1000
+    steering_pid = newPIDStandard(
+      params.steer_kp or 0.25,
+      params.steer_ki or 0.05,
+      params.steer_kd or 0.25,
+      -steer_limit,
+      steer_limit
+    )
+    local smooth = (params.steer_smoothing or 0.1) * 1000
     steering_smooth = newTemporalSmoothing(smooth, smooth)
   end
 
@@ -49,7 +55,10 @@ local function update(dt, veh, system_params)
 
   local half_width = lane_width * 0.5
   local norm_offset = offset / half_width
-  if math.abs(norm_offset) < 0.02 then norm_offset = 0 end
+  local deadzone = params.offset_deadzone or 0.005
+  if deadzone > 0 and math.abs(norm_offset) < deadzone then
+    norm_offset = 0
+  end
   local abs_off = math.abs(offset)
   local warn_zone = warn_ratio * half_width
 
