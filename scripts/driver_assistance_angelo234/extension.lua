@@ -802,73 +802,70 @@ local function onUpdate(dt)
   --p:finish(true)
 end
 
-local function getVirtualLidarPointCloud()
-  local veh = be:getPlayerVehicle(0)
-  if not veh then return {} end
+local function buildCurrentFrame(veh)
+  if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return nil end
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
-  dir.z = 0
+  local up = veh:getDirectionVectorUp()
+  if not pos or not dir or not up then return nil end
+  dir = vec3(dir.x, dir.y, 0)
+  if dir:length() < 1e-6 then return nil end
   dir = dir:normalized()
-  local up = veh:getDirectionVectorUp():normalized()
-  local right = dir:cross(up):normalized()
-  local curr = {origin = vec3(pos.x, pos.y, pos.z + 1.8), dir = dir, right = right, up = up}
+  if up:length() < 1e-6 then return nil end
+  up = up:normalized()
+  local right = dir:cross(up)
+  if right:length() < 1e-6 then return nil end
+  right = right:normalized()
+  return {
+    origin = vec3(pos.x, pos.y, pos.z + 1.8),
+    dir = dir,
+    right = right,
+    up = up
+  }
+end
+
+local function accumulateTransformedPoints(buffers, frames, curr, combined)
+  for i = 1, #buffers do
+    local frame = frames[i]
+    if frame then
+      local bucket = buffers[i]
+      for j = 1, #bucket do
+        combined[#combined + 1] = drift_proximity.apply(bucket[j], frame, curr)
+      end
+    end
+  end
+end
+
+local function resolveCurrentFrame(curr, veh)
+  if curr then return curr end
+  return buildCurrentFrame(veh or be:getPlayerVehicle(0))
+end
+
+local function getVirtualLidarPointCloud(curr, veh)
+  local frame = resolveCurrentFrame(curr, veh)
+  if not frame then return {} end
   local combined = {}
-  for i = 1, #virtual_lidar_point_cloud do
-    local frame = virtual_lidar_frames[i]
-    if frame then
-      for j = 1, #virtual_lidar_point_cloud[i] do
-        combined[#combined + 1] = drift_proximity.apply(virtual_lidar_point_cloud[i][j], frame, curr)
-      end
-    end
-  end
-  for i = 1, #front_lidar_point_cloud do
-    local frame = front_lidar_frames[i]
-    if frame then
-      for j = 1, #front_lidar_point_cloud[i] do
-        combined[#combined + 1] = drift_proximity.apply(front_lidar_point_cloud[i][j], frame, curr)
-      end
-    end
-  end
+  accumulateTransformedPoints(virtual_lidar_point_cloud, virtual_lidar_frames, frame, combined)
+  accumulateTransformedPoints(front_lidar_point_cloud, front_lidar_frames, frame, combined)
   if vehicle_lidar_frame then
     for i = 1, #vehicle_lidar_point_cloud do
-      combined[#combined + 1] = drift_proximity.apply(vehicle_lidar_point_cloud[i], vehicle_lidar_frame, curr)
+      combined[#combined + 1] = drift_proximity.apply(vehicle_lidar_point_cloud[i], vehicle_lidar_frame, frame)
     end
   end
   return combined
 end
 
-local function getVirtualLidarGroundPointCloud()
-  local veh = be:getPlayerVehicle(0)
-  if not veh then return {} end
-  local pos = veh:getPosition()
-  local dir = veh:getDirectionVector()
-  dir.z = 0
-  dir = dir:normalized()
-  local up = veh:getDirectionVectorUp():normalized()
-  local right = dir:cross(up):normalized()
-  local curr = {origin = vec3(pos.x, pos.y, pos.z + 1.8), dir = dir, right = right, up = up}
+local function getVirtualLidarGroundPointCloud(curr, veh)
+  local frame = resolveCurrentFrame(curr, veh)
+  if not frame then return {} end
   local combined = {}
-  for i = 1, #virtual_lidar_ground_point_cloud do
-    local frame = virtual_lidar_frames[i]
-    if frame then
-      for j = 1, #virtual_lidar_ground_point_cloud[i] do
-        combined[#combined + 1] = drift_proximity.apply(virtual_lidar_ground_point_cloud[i][j], frame, curr)
-      end
-    end
-  end
-  for i = 1, #front_lidar_ground_point_cloud do
-    local frame = front_lidar_frames[i]
-    if frame then
-      for j = 1, #front_lidar_ground_point_cloud[i] do
-        combined[#combined + 1] = drift_proximity.apply(front_lidar_ground_point_cloud[i][j], frame, curr)
-      end
-    end
-  end
+  accumulateTransformedPoints(virtual_lidar_ground_point_cloud, virtual_lidar_frames, frame, combined)
+  accumulateTransformedPoints(front_lidar_ground_point_cloud, front_lidar_frames, frame, combined)
   return combined
 end
 
-local function getVehicleColor()
-  local veh = be:getPlayerVehicle(0)
+local function getVehicleColor(veh)
+  veh = veh or be:getPlayerVehicle(0)
   if veh then
     -- Some vehicle APIs expose color via a "color" field rather than a getter.
     -- Fall back to veh:getColor() when available for older versions.
@@ -883,8 +880,8 @@ local function getVehicleColor()
   return {r = 255, g = 255, b = 255}
 end
 
-local function getPlayerVehicleBounds()
-  local veh = be:getPlayerVehicle(0)
+local function getPlayerVehicleBounds(veh)
+  veh = veh or be:getPlayerVehicle(0)
   if not veh then return nil end
   local props = extra_utils.getVehicleProperties(veh)
   if not props or not props.bb then return nil end
@@ -893,11 +890,19 @@ local function getPlayerVehicleBounds()
 end
 
 local function getVirtualLidarData()
+  local veh = be:getPlayerVehicle(0)
+  local frame = buildCurrentFrame(veh)
+  local points = {}
+  local groundPoints = {}
+  if frame then
+    points = getVirtualLidarPointCloud(frame, veh)
+    groundPoints = getVirtualLidarGroundPointCloud(frame, veh)
+  end
   return {
-    points = getVirtualLidarPointCloud(),
-    groundPoints = getVirtualLidarGroundPointCloud(),
-    color = getVehicleColor(),
-    bounds = getPlayerVehicleBounds()
+    points = points,
+    groundPoints = groundPoints,
+    color = getVehicleColor(veh),
+    bounds = getPlayerVehicleBounds(veh)
   }
 end
 

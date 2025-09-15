@@ -55,20 +55,31 @@ angular.module('beamng.apps')
 
         var distRange = Math.max(1, maxD - minD);
 
-        function drawPoints(list, lightness, alpha) {
-          var opacity = typeof alpha === 'number' ? alpha : 1;
+        function drawPoints(list, palette) {
+          var opts = palette || {};
+          var opacity = typeof opts.alpha === 'number' ? opts.alpha : 1;
+          var lightness = typeof opts.lightness === 'number' ? opts.lightness : 50;
+          var saturation = typeof opts.saturation === 'number' ? opts.saturation : 100;
           list.forEach(function (p) {
             var x = canvas.width / 2 + p.x * scale;
             var y = canvas.height / 2 - p.y * scale;
             var hue = ((p._d - minD) / distRange) * 240;
             ctx.fillStyle =
-              'hsla(' + hue + ', 100%, ' + lightness + '%, ' + opacity + ')';
+              'hsla(' +
+              hue +
+              ', ' +
+              saturation +
+              '%, ' +
+              lightness +
+              '%, ' +
+              opacity +
+              ')';
             ctx.fillRect(x, y, 2, 2);
           });
         }
 
-        drawPoints(low, 30, 0.45);
-        drawPoints(regular, 50, 1);
+        drawPoints(low, { lightness: 32, saturation: 42, alpha: 0.28 });
+        drawPoints(regular, { lightness: 52, saturation: 65, alpha: 0.9 });
 
         drawVehicle(scale);
       }
