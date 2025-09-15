@@ -18,8 +18,8 @@ angular.module('beamng.apps')
           Math.round(carColor[0]) + ',' +
           Math.round(carColor[1]) + ',' +
           Math.round(carColor[2]) + ',0.5)';
-        var carWidth = 10;
-        var carLength = 20;
+        var carWidth = 10 * 0.6;
+        var carLength = 20 * 0.6;
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
         ctx.restore();
@@ -76,7 +76,7 @@ angular.module('beamng.apps')
         );
       }
 
-      var interval = setInterval(update, 100);
+      var interval = setInterval(update, 33);
 
       $scope.$on('$destroy', function () {
         clearInterval(interval);

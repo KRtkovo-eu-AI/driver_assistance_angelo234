@@ -59,7 +59,6 @@ local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
 local VEHICLE_POINT_MIN_SPACING = 0.3
-local VEHICLE_POINT_MAX_SPACING = 2.5
 local VEHICLE_POINT_MAX_STEPS = 20
 local VIRTUAL_LIDAR_H_FOV = math.rad(360)
 local VIRTUAL_LIDAR_V_FOV = math.rad(30)
@@ -414,7 +413,7 @@ local function updateVirtualLidar(dt, veh)
   end
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
-  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+  if virtual_lidar_update_timer >= 1.0 / 60.0 then
     local pos = veh:getPosition()
     local dir = veh:getDirectionVector()
     local up = veh:getDirectionVectorUp()
@@ -488,43 +487,33 @@ local function updateVirtualLidar(dt, veh)
     end
 
     local function addVehicle(vehObj, props)
-      if not vehObj or not props then return end
-      if props.id == veh:getID() or processed[props.id] then return end
-      processed[props.id] = true
+      if not vehObj then return end
+      local freshProps = extra_utils.getVehicleProperties(vehObj)
+      if freshProps then
+        props = freshProps
+      end
+      if not props then return end
+      local id = props.id or vehObj:getID()
+      if id == veh:getID() or processed[id] then return end
+      processed[id] = true
       if extra_utils.isVehicleGhost(vehObj, props) then return end
       local bb = props.bb
       if not bb then return end
-      local center = props.center_pos
+      local center = props.center_pos or bb:getCenter()
       local half_extents = bb:getHalfExtents()
       local axis_x = vec3(bb:getAxis(0))
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
-      local relCenter = center - origin
       local relTop = top - origin
-      local forwardDist = relCenter:dot(dir)
-      local sideDist = relCenter:dot(right)
-      local planarDist = math.max(0.1, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
-      local heightOffset = math.abs(relTop:dot(up))
-      local function clampSpacing(s)
-        if s < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
-        if s > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
-        return s
-      end
-      local baseSpacing = clampSpacing(2 * planarDist * math.sin(VIRTUAL_LIDAR_H_STEP * 0.5))
-      local diagDist = math.sqrt(planarDist * planarDist + heightOffset * heightOffset)
-      local verticalSpacing = clampSpacing(2 * diagDist * math.sin(VIRTUAL_LIDAR_V_STEP * 0.5))
-      local spacingX = baseSpacing
-      local spacingY = math.max(baseSpacing, verticalSpacing)
-      local function stepsForHalfSpan(halfSpan, spacing)
-        local span = math.max(spacing, 1e-3)
-        local steps = math.floor(halfSpan / span + 0.5)
+      local function stepsForHalfSpan(halfSpan)
+        local steps = math.floor(halfSpan / VEHICLE_POINT_MIN_SPACING + 0.5)
         if steps < 1 then steps = 1 end
         if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
         return steps
       end
-      local steps_x = stepsForHalfSpan(half_extents.x, spacingX)
-      local steps_y = stepsForHalfSpan(half_extents.y, spacingY)
+      local steps_x = stepsForHalfSpan(half_extents.x)
+      local steps_y = stepsForHalfSpan(half_extents.y)
       for xi = -steps_x, steps_x do
         local offset_x = axis_x * (half_extents.x * xi / steps_x)
         for yi = -steps_y, steps_y do
