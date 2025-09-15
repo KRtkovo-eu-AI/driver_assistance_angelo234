@@ -25,18 +25,18 @@ angular.module('beamng.apps')
 
       function draw(data) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        var center = canvas.width / 2;
+        var carX = canvas.width / 2;
         if (!data || !data.lane_width) {
-          drawVehicle(center);
+          drawVehicle(carX);
           return;
         }
         var laneWidth = data.lane_width;
         var offset = data.lateral_offset || 0;
         var scale = canvas.width / laneWidth;
-        center = canvas.width / 2 - offset * scale;
+        var laneCenter = carX - offset * scale;
         var halfLane = laneWidth * 0.5 * scale;
-        var left = center - halfLane;
-        var right = center + halfLane;
+        var left = laneCenter - halfLane;
+        var right = laneCenter + halfLane;
         var bottom = canvas.height;
         var horizon = 0;
         var yaw = 0;
@@ -47,13 +47,26 @@ angular.module('beamng.apps')
         var shift0 = Math.tan(yaw) * bottom;
         var shift1 = Math.tan(yaw + curve) * bottom;
         var midShift = (shift0 + shift1) / 2;
+
         ctx.lineWidth = 2;
         ctx.strokeStyle = 'yellow';
         ctx.beginPath(); ctx.moveTo(left, bottom); ctx.quadraticCurveTo(left + midShift, bottom * 0.5, left + shift1, horizon); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(right, bottom); ctx.quadraticCurveTo(right + midShift, bottom * 0.5, right + shift1, horizon); ctx.stroke();
+
         ctx.strokeStyle = 'green';
-        ctx.beginPath(); ctx.moveTo(center, bottom); ctx.quadraticCurveTo(center + midShift, bottom * 0.5, center + shift1, horizon); ctx.stroke();
-        drawVehicle(center);
+        ctx.beginPath(); ctx.moveTo(laneCenter, bottom); ctx.quadraticCurveTo(laneCenter + midShift, bottom * 0.5, laneCenter + shift1, horizon); ctx.stroke();
+
+        ctx.strokeStyle = 'red';
+        ctx.beginPath(); ctx.moveTo(carX, bottom); ctx.lineTo(laneCenter, bottom); ctx.stroke();
+
+        if (data.future_dir) {
+          var fYaw = Math.atan2(data.future_dir.y, data.future_dir.x);
+          var fShift = Math.tan(fYaw) * bottom;
+          ctx.strokeStyle = 'blue';
+          ctx.beginPath(); ctx.moveTo(laneCenter, bottom); ctx.lineTo(laneCenter + fShift, horizon); ctx.stroke();
+        }
+
+        drawVehicle(carX);
       }
 
       function update() {

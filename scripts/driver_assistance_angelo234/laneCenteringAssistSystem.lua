@@ -19,20 +19,38 @@ local function update(dt, veh, system_params)
   if not extra_utils.getPart("lane_centering_assist_system_angelo234") then return end
   if override_timer > 0 then
     override_timer = override_timer - dt
+    if steering_pid then steering_pid:reset() end
+    return
+  end
+
+  local veh_props = extra_utils.getVehicleProperties(veh)
+  local forward_speed = veh_props.velocity:dot(veh_props.dir)
+  if forward_speed <= 0 then
+    latest_data = nil
+    if steering_pid then steering_pid:reset() end
     return
   end
 
   local sensor = lane_sensor.sense(veh)
   latest_data = sensor
-  if not sensor then return end
+  if not sensor then
+    if steering_pid then steering_pid:reset() end
+    return
+  end
   local params = system_params.lane_centering_params or {}
-  local heading_kp = params.heading_kp or 0.5
+  local heading_kp = params.heading_kp or 0.6
   local warn_ratio = params.warning_ratio or 0.8
   local steer_limit = params.steer_limit or 0.15
 
   if not steering_pid then
-    steering_pid = newPIDStandard(params.steer_kp or 0.1, 0, params.steer_kd or 0.1, -steer_limit, steer_limit)
-    local smooth = (params.steer_smoothing or 0.4) * 1000
+    steering_pid = newPIDStandard(
+      params.steer_kp or 0.35,
+      params.steer_ki or 0.08,
+      params.steer_kd or 0.3,
+      -steer_limit,
+      steer_limit
+    )
+    local smooth = (params.steer_smoothing or 0.05) * 1000
     steering_smooth = newTemporalSmoothing(smooth, smooth)
   end
 
@@ -42,12 +60,14 @@ local function update(dt, veh, system_params)
 
   local half_width = lane_width * 0.5
   local norm_offset = offset / half_width
-  if math.abs(norm_offset) < 0.02 then norm_offset = 0 end
+  local deadzone = params.offset_deadzone or 0.002
+  if deadzone > 0 and math.abs(norm_offset) < deadzone then
+    norm_offset = 0
+  end
   local abs_off = math.abs(offset)
   local warn_zone = warn_ratio * half_width
 
   -- Compute heading error using look-ahead direction when available
-  local veh_props = extra_utils.getVehicleProperties(veh)
   local desired_dir = sensor.future_dir or sensor.road_dir or veh_props.dir
   local heading_error = veh_props.dir:cross(desired_dir).z
 
@@ -73,8 +93,8 @@ local function update(dt, veh, system_params)
   local assist_weight = math.max(0, 1 - math.abs(raw_input) * 5)
 
   local disable_thresh = params.override_threshold or 0.2
-  if math.abs(raw_input) > disable_thresh then
-    override_timer = params.override_cooldown or 5
+  if forward_speed > 0 and math.abs(raw_input) > disable_thresh then
+    override_timer = params.override_cooldown or 10
     ui_message("Lane Centering Assist disengaged")
     return
   end

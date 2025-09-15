@@ -66,14 +66,16 @@ M.rev_cam_params = {
 }
 
 M.lane_centering_params = {
-    steer_kp = 0.1,
-    steer_kd = 0.1,
-    heading_kp = 0.5,
-    steer_smoothing = 0.4,
+    steer_kp = 0.35,
+    steer_ki = 0.08,
+    steer_kd = 0.3,
+    heading_kp = 0.6,
+    steer_smoothing = 0.05,
     warning_ratio = 0.8,
     steer_limit = 0.15,
     override_threshold = 0.2,
-    override_cooldown = 5,
+    override_cooldown = 10,
+    offset_deadzone = 0.002,
 }
 
 return M
