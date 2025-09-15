@@ -59,12 +59,16 @@ angular.module('beamng.apps')
       }
 
       function update() {
-        bngApi.engineLua("local e=extensions.driver_assistance_angelo234; return {points=e.getVirtualLidarPointCloud(), color=e.getVehicleColor()}", function (data) {
-          $scope.$evalAsync(function () {
-            if (data.color) { carColor = data.color; }
-            draw(data.points);
-          });
-        });
+        bngApi.engineLua(
+          'return {points=extensions.driver_assistance_angelo234.getVirtualLidarPointCloud(), ' +
+          'color=extensions.driver_assistance_angelo234.getVehicleColor()}',
+          function (data) {
+            $scope.$evalAsync(function () {
+              if (data.color) { carColor = data.color; }
+              draw(data.points);
+            });
+          }
+        );
       }
 
       var interval = setInterval(update, 100);
