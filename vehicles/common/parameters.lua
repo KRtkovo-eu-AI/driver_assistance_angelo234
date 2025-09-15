@@ -65,7 +65,7 @@ M.rev_cam_params = {
     }
 }
 
-M.lane_assist_params = {
+M.lane_centering_params = {
     steer_kp = 0.5,
     heading_kp = 1.0,
     steer_smoothing = 0.2,

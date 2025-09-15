@@ -11,7 +11,7 @@
 		["forward_collision_mitigation_angelo234",	"forward_collision_mitigation_angelo234", 	"Forward Collision Mitigation System"],
 		["reverse_collision_mitigation_angelo234",	"reverse_collision_mitigation_angelo234", 	"Reverse Collision Mitigation System"],	
                 ["obstacle_collision_mitigation_angelo234",     "obstacle_collision_mitigation_angelo234",      "Obstacle Collision Mitigation System"],
-                ["lane_assist_angelo234",                     "lane_assist_angelo234",                     "Lane Assist System"],
+                ["lane_centering_assist_angelo234",                     "lane_centering_assist_angelo234",                     "Lane Centering Assist System"],
 		["backup_cam_angelo234",    				"backup_cam_angelo234",						"Back-up Camera"],
 		["acc_angelo234",    						"acc_angelo234",							"Adaptive Cruise Control"],
 		["hill_start_assist_angelo234",    			"hill_start_assist_angelo234",				"Hill Start Assist"],

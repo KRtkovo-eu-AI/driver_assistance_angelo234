@@ -1,0 +1,10 @@
+{
+    "lane_centering_assist_system_angelo234": {
+        "information":{
+            "authors":"KRtekTM",
+            "name":"Lane Centering Assist",
+            "value":250,
+        },
+        "slotType" : "lane_centering_assist_system_angelo234",
+    },
+}

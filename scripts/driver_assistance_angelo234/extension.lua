@@ -20,7 +20,7 @@ local hsa_system = require('scripts/driver_assistance_angelo234/hillStartAssistS
 local auto_headlight_system = require('scripts/driver_assistance_angelo234/autoHeadlightSystem')
 local logger = require('scripts/driver_assistance_angelo234/logger')
 local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacleBrakingSystem')
-local lane_assist_system = require('scripts/driver_assistance_angelo234/laneAssistSystem')
+local lane_centering_system = require('scripts/driver_assistance_angelo234/laneCenteringAssistSystem')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 
 local first_update = true
@@ -37,7 +37,7 @@ local auto_headlight_system_on = false
 local prev_auto_headlight_system_on = false
 local acc_system_on = false
 local obstacle_aeb_system_on = true
-local lane_assist_system_on = true
+local lane_centering_assist_on = true
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -136,12 +136,12 @@ local function toggleObstacleAEBSystem()
   ui_message("Obstacle Collision Mitigation System switched " .. state)
 end
 
-local function toggleLaneAssistSystem()
-  if not extra_utils.getPart("lane_assist_angelo234") then return end
+local function toggleLaneCenteringSystem()
+  if not extra_utils.getPart("lane_centering_assist_angelo234") then return end
 
-  lane_assist_system_on = not lane_assist_system_on
-  local state = lane_assist_system_on and "ON" or "OFF"
-  ui_message("Lane Assist System switched " .. state)
+  lane_centering_assist_on = not lane_centering_assist_on
+  local state = lane_centering_assist_on and "ON" or "OFF"
+  ui_message("Lane Centering Assist System switched " .. state)
 end
 
 local function toggleAutoHeadlightSystem()
@@ -604,9 +604,9 @@ local function onUpdate(dt)
             )
           end
 
-          --Update Lane Assist System
-          if extra_utils.getPart("lane_assist_angelo234") and lane_assist_system_on then
-            lane_assist_system.update(
+          --Update Lane Centering Assist System
+          if extra_utils.getPart("lane_centering_assist_angelo234") and lane_centering_assist_on then
+            lane_centering_system.update(
               other_systems_timer * 2,
               my_veh,
               system_params
@@ -691,8 +691,8 @@ local function getVirtualLidarData()
   return {points = getVirtualLidarPointCloud(), color = getVehicleColor()}
 end
 
-local function getLaneSensorData()
-  return lane_assist_system.getSensorData()
+local function getLaneCenteringData()
+  return lane_centering_system.getLaneData()
 end
 
 local function onInit()
@@ -706,7 +706,7 @@ M.onHeadlightsOn = onHeadlightsOn
 M.toggleFCMSystem = toggleFCMSystem
 M.toggleRCMSystem = toggleRCMSystem
 M.toggleObstacleAEBSystem = toggleObstacleAEBSystem
-M.toggleLaneAssistSystem = toggleLaneAssistSystem
+M.toggleLaneCenteringSystem = toggleLaneCenteringSystem
 M.toggleAutoHeadlightSystem = toggleAutoHeadlightSystem
 M.setACCSystemOn = setACCSystemOn
 M.toggleACCSystem = toggleACCSystem
@@ -723,6 +723,6 @@ M.onInit = onInit
 M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
 M.getVehicleColor = getVehicleColor
 M.getVirtualLidarData = getVirtualLidarData
-M.getLaneSensorData = getLaneSensorData
+M.getLaneCenteringData = getLaneCenteringData
 
 return M
