@@ -55,18 +55,20 @@ angular.module('beamng.apps')
 
         var distRange = Math.max(1, maxD - minD);
 
-        function drawPoints(list, lightness) {
+        function drawPoints(list, lightness, alpha) {
+          var opacity = typeof alpha === 'number' ? alpha : 1;
           list.forEach(function (p) {
             var x = canvas.width / 2 + p.x * scale;
             var y = canvas.height / 2 - p.y * scale;
             var hue = ((p._d - minD) / distRange) * 240;
-            ctx.fillStyle = 'hsl(' + hue + ', 100%, ' + lightness + '%)';
+            ctx.fillStyle =
+              'hsla(' + hue + ', 100%, ' + lightness + '%, ' + opacity + ')';
             ctx.fillRect(x, y, 2, 2);
           });
         }
 
-        drawPoints(low, 30);
-        drawPoints(regular, 50);
+        drawPoints(low, 30, 0.45);
+        drawPoints(regular, 50, 1);
 
         drawVehicle(scale);
       }
