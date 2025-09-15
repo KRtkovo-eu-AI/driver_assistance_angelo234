@@ -337,13 +337,13 @@ local function updateVirtualLidar(dt, veh)
       right = right,
       up = up
     }
-    local max_dist = aeb_params.sensor_max_distance
-    -- keep full lidar range ahead, but halve reach for rear and side sectors
-    local front_dist = max_dist
-    local rear_dist = max_dist * 0.5
-    local side_dist = rear_dist
+    local base_dist = aeb_params.sensor_max_distance
+    -- boost forward reach by 60 m, keep rear at base range and sides at half power
+    local front_dist = base_dist + 60
+    local rear_dist = base_dist
+    local side_dist = base_dist * 0.5
     local ANG_FRONT = 85
-    local ANG_SIDE = 130
+    local ANG_REAR = 112.5
     local hits = virtual_lidar.scan(
       origin,
       dir,
@@ -386,7 +386,7 @@ local function updateVirtualLidar(dt, veh)
       local absAng = math.abs(ang)
       if absAng <= ANG_FRONT then
         return front_dist
-      elseif absAng >= ANG_SIDE then
+      elseif absAng >= ANG_REAR then
         return rear_dist
       else
         return side_dist
