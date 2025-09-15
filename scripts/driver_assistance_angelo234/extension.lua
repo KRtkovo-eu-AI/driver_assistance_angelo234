@@ -68,6 +68,8 @@ local VIRTUAL_LIDAR_H_FOV = math.rad(360)
 local VIRTUAL_LIDAR_V_FOV = math.rad(30)
 local VIRTUAL_LIDAR_H_RES = 60
 local VIRTUAL_LIDAR_V_RES = 15
+local VIRTUAL_LIDAR_MAX_RAYS = 80
+local FRONT_LIDAR_MAX_RAYS = 120
 local VIRTUAL_LIDAR_H_STEP = VIRTUAL_LIDAR_H_FOV / math.max(1, VIRTUAL_LIDAR_H_RES - 1)
 local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_RES - 1)
 local LIDAR_GROUND_THRESHOLD = -1.5
@@ -388,7 +390,11 @@ local function frontLidarLoop()
           15,
           0,
           veh:getID(),
-          {hStart = front_lidar_phase, hStep = FRONT_LIDAR_PHASES}
+          {
+            hStart = front_lidar_phase,
+            hStep = FRONT_LIDAR_PHASES,
+            maxRays = FRONT_LIDAR_MAX_RAYS
+          }
         )
         local groundThreshold = LIDAR_GROUND_THRESHOLD
         local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
@@ -469,7 +475,11 @@ local function updateVirtualLidar(dt, veh)
       VIRTUAL_LIDAR_V_RES,
       0,
       veh:getID(),
-      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+      {
+        hStart = virtual_lidar_phase,
+        hStep = VIRTUAL_LIDAR_PHASES,
+        maxRays = VIRTUAL_LIDAR_MAX_RAYS
+      }
     )
 
     -- cache properties of the player's vehicle for later filtering
