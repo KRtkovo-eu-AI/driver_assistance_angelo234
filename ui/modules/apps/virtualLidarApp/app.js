@@ -11,15 +11,19 @@ angular.module('beamng.apps')
       // Fixed world range for drawing (in meters). Keeps zoom stable.
       var FIXED_RANGE = 60;
       var carColor = [255, 255, 255];
+      var carBounds = null;
+      var DEFAULT_BOUNDS = { width: 2, length: 4 }; // meters
 
-      function drawVehicle() {
+      function drawVehicle(scale) {
         ctx.save();
         ctx.fillStyle = 'rgba(' +
           Math.round(carColor[0]) + ',' +
           Math.round(carColor[1]) + ',' +
           Math.round(carColor[2]) + ',0.5)';
-        var carWidth = 10;
-        var carLength = 20;
+        var bounds = carBounds || DEFAULT_BOUNDS;
+        var s = typeof scale === 'number' ? scale : 1;
+        var carWidth = bounds.width * 1.50 * s;
+        var carLength = bounds.length * 1.20 * s;
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
         ctx.restore();
@@ -27,8 +31,12 @@ angular.module('beamng.apps')
 
       function draw(points) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        var scale = Math.min(
+          canvas.width / (2 * FIXED_RANGE),
+          canvas.height / (2 * FIXED_RANGE)
+        );
         if (!points || !points.length) {
-          drawVehicle();
+          drawVehicle(scale);
           return;
         }
 
@@ -41,10 +49,6 @@ angular.module('beamng.apps')
           p._d = d;
         });
 
-        var scale = Math.min(
-          canvas.width / (2 * FIXED_RANGE),
-          canvas.height / (2 * FIXED_RANGE)
-        );
         var distRange = Math.max(1, maxD - minD);
 
         points.forEach(function (p) {
@@ -55,7 +59,7 @@ angular.module('beamng.apps')
           ctx.fillRect(x, y, 2, 2);
         });
 
-        drawVehicle();
+        drawVehicle(scale);
       }
 
       function update() {
@@ -69,6 +73,16 @@ angular.module('beamng.apps')
                   typeof data.color.g === 'number' ? data.color.g : 255,
                   typeof data.color.b === 'number' ? data.color.b : 255
                 ];
+              }
+              if (
+                data.bounds &&
+                typeof data.bounds.width === 'number' &&
+                typeof data.bounds.length === 'number'
+              ) {
+                carBounds = {
+                  width: data.bounds.width,
+                  length: data.bounds.length
+                };
               }
               draw(data.points);
             });

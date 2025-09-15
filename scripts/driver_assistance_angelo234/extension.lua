@@ -58,6 +58,16 @@ local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
+local VEHICLE_POINT_MIN_SPACING = 0.3
+local VEHICLE_POINT_MAX_SPACING = 2.0
+local VEHICLE_POINT_MAX_STEPS = 20
+local VIRTUAL_LIDAR_H_FOV = math.rad(360)
+local VIRTUAL_LIDAR_V_FOV = math.rad(30)
+local VIRTUAL_LIDAR_H_RES = 60
+local VIRTUAL_LIDAR_V_RES = 15
+local VIRTUAL_LIDAR_H_STEP = VIRTUAL_LIDAR_H_FOV / math.max(1, VIRTUAL_LIDAR_H_RES - 1)
+local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_RES - 1)
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_frames = {}
@@ -432,10 +442,10 @@ local function updateVirtualLidar(dt, veh)
       dir,
       up,
       front_dist,
-      math.rad(360),
-      math.rad(30),
-      60,
-      15,
+      VIRTUAL_LIDAR_H_FOV,
+      VIRTUAL_LIDAR_V_FOV,
+      VIRTUAL_LIDAR_H_RES,
+      VIRTUAL_LIDAR_V_RES,
       0,
       veh:getID(),
       {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
@@ -478,25 +488,45 @@ local function updateVirtualLidar(dt, veh)
     end
 
     local function addVehicle(vehObj, props)
-      if not vehObj or not props then return end
-      if props.id == veh:getID() or processed[props.id] then return end
-      processed[props.id] = true
+      if not vehObj then return end
+      local freshProps = extra_utils.getVehicleProperties(vehObj)
+      if freshProps then
+        props = freshProps
+      end
+      if not props then return end
+      local id = props.id or vehObj:getID()
+      if id == veh:getID() or processed[id] then return end
+      processed[id] = true
       if extra_utils.isVehicleGhost(vehObj, props) then return end
       local bb = props.bb
       if not bb then return end
-      local center = props.center_pos
+      local center = props.center_pos or bb:getCenter()
       local half_extents = bb:getHalfExtents()
       local axis_x = vec3(bb:getAxis(0))
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
-      local function stepsFor(span)
-        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
+      local relCenter = center - origin
+      local relTop = top - origin
+      local forwardDist = relCenter:dot(dir)
+      local sideDist = relCenter:dot(right)
+      local planarDist = math.max(0.5, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
+      local heightOffset = math.abs(relCenter:dot(up))
+      local function clampSpacing(value)
+        if value < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
+        if value > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
+        return value
       end
-      local steps_x = stepsFor(half_extents.x * 2)
-      local steps_y = stepsFor(half_extents.y * 2)
+      local spacing_x = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_H_STEP))
+      local spacing_y = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_V_STEP) + heightOffset * math.tan(VIRTUAL_LIDAR_V_STEP))
+      local function stepsForHalfSpan(halfSpan, spacing)
+        local steps = math.floor(halfSpan / math.max(spacing, VEHICLE_POINT_MIN_SPACING) + 0.5)
+        if steps < 1 then steps = 1 end
+        if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
+        return steps
+      end
+      local steps_x = stepsForHalfSpan(half_extents.x, spacing_x)
+      local steps_y = stepsForHalfSpan(half_extents.y, spacing_y)
       for xi = -steps_x, steps_x do
         local offset_x = axis_x * (half_extents.x * xi / steps_x)
         for yi = -steps_y, steps_y do
@@ -508,7 +538,6 @@ local function updateVirtualLidar(dt, veh)
           end
         end
       end
-      local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
         local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
@@ -794,8 +823,21 @@ local function getVehicleColor()
   return {r = 255, g = 255, b = 255}
 end
 
+local function getPlayerVehicleBounds()
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return nil end
+  local props = extra_utils.getVehicleProperties(veh)
+  if not props or not props.bb then return nil end
+  local half = props.bb:getHalfExtents()
+  return {width = half.x * 2, length = half.y * 2, height = half.z * 2}
+end
+
 local function getVirtualLidarData()
-  return {points = getVirtualLidarPointCloud(), color = getVehicleColor()}
+  return {
+    points = getVirtualLidarPointCloud(),
+    color = getVehicleColor(),
+    bounds = getPlayerVehicleBounds()
+  }
 end
 
 local function getLaneCenteringData()
