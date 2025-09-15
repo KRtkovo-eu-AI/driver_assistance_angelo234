@@ -431,10 +431,10 @@ local function updateVirtualLidar(dt, veh)
       up = up
     }
     local base_dist = aeb_params.sensor_max_distance
-    -- boost forward reach by 60 m, keep rear at base range and sides at half power
+    -- boost forward reach by 60 m while keeping rear and side coverage at the base range
     local front_dist = base_dist + 60
     local rear_dist = base_dist
-    local side_dist = base_dist * 0.5
+    local side_dist = rear_dist
     local ANG_FRONT = 85
     local ANG_REAR = 112.5
     local scan_hits = virtual_lidar.scan(
