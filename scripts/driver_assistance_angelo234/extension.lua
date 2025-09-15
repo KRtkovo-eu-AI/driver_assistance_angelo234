@@ -58,6 +58,115 @@ local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
+local scene_raster_settings = {
+  angleSpacing = math.rad(1.2),
+  minSpacing = 0.12,
+  maxSpacing = 1.0,
+  jitter = 0.45,
+  longitudinalJitter = 0.1,
+  offsets = {
+    {1, 0, 0.55},
+    {-1, 0, 0.55},
+    {0, 1, 0.55},
+    {0, -1, 0.55},
+    {1, 1, 0.38},
+    {-1, 1, 0.38},
+    {1, -1, 0.38},
+    {-1, -1, 0.38}
+  }
+}
+
+local vehicle_raster_settings = {
+  angleSpacing = math.rad(1.9),
+  minSpacing = 0.18,
+  maxSpacing = 1.6,
+  jitter = 0.3,
+  longitudinalJitter = 0.05,
+  gridJitter = 0.28,
+  offsets = {
+    {1, 0, 0.28},
+    {-1, 0, 0.28},
+    {0, 1, 0.28},
+    {0, -1, 0.28}
+  }
+}
+
+local function clamp(value, minValue, maxValue)
+  if value < minValue then
+    return minValue
+  end
+  if value > maxValue then
+    return maxValue
+  end
+  return value
+end
+
+local function rasterHash(rel, salt)
+  local seed = rel.x * 12.9898 + rel.y * 78.233 + rel.z * 37.719 + (salt or 0) * 91.467
+  local s = math.sin(seed)
+  return s - math.floor(s)
+end
+
+local function computeRasterSpacing(distance, settings)
+  local spacing = distance * math.tan(settings.angleSpacing)
+  return clamp(spacing, settings.minSpacing, settings.maxSpacing)
+end
+
+local function scatterRasterSamples(dest, rel, right, dir, up, limitFn, groundThreshold, settings, salt)
+  if not rel then return end
+  if rel:dot(up) < groundThreshold then return end
+  if not limitFn(rel) then return end
+
+  local dist = rel:length()
+  if dist <= 0 then return end
+
+  local spacing = computeRasterSpacing(dist, settings)
+  if spacing <= 0 then return end
+
+  local function appendPoint(relVec)
+    if relVec:dot(up) < groundThreshold then return end
+    if not limitFn(relVec) then return end
+    dest[#dest + 1] = {
+      x = relVec:dot(right),
+      y = relVec:dot(dir),
+      z = relVec:dot(up)
+    }
+  end
+
+  appendPoint(rel)
+
+  local viewDir = rel * (1 / dist)
+  local planeRight = viewDir:cross(up)
+  if planeRight:length() < 1e-6 then
+    planeRight = viewDir:cross(right)
+    if planeRight:length() < 1e-6 then
+      planeRight = viewDir:cross(dir)
+    end
+  end
+  local planeRightLen = planeRight:length()
+  if planeRightLen < 1e-6 then return end
+  planeRight = planeRight * (1 / planeRightLen)
+  local planeUp = planeRight:cross(viewDir)
+  local planeUpLen = planeUp:length()
+  if planeUpLen < 1e-6 then return end
+  planeUp = planeUp * (1 / planeUpLen)
+
+  local jitter = settings.jitter or 0
+  local forwardJitter = settings.longitudinalJitter or 0
+  local baseSalt = salt or 0
+  for idx, off in ipairs(settings.offsets or {}) do
+    local ox, oy, baseScale = off[1], off[2], off[3] or 1
+    local radiusNoise = rasterHash(rel, baseSalt + idx) * 2 - 1
+    local radius = spacing * (baseScale + radiusNoise * jitter)
+    if radius < spacing * 0.05 then
+      radius = spacing * 0.05
+    end
+    local along = (rasterHash(rel, baseSalt + idx + 53) - 0.5) * forwardJitter
+    local offset = planeRight * (ox * radius) + planeUp * (oy * radius) + viewDir * (along * spacing)
+    appendPoint(rel + offset)
+  end
+end
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_frames = {}
@@ -371,14 +480,23 @@ local function frontLidarLoop()
         )
         local groundThreshold = -1.5
         local current_cloud = {}
+        local function frontLimit(rel)
+          return rel:length() <= front_dist
+        end
         for _, p in ipairs(hits) do
           local rel = p - origin
-          if rel:dot(up) >= groundThreshold and rel:length() <= front_dist then
-            current_cloud[#current_cloud + 1] = {
-              x = rel:dot(right),
-              y = rel:dot(dir),
-              z = rel:dot(up)
-            }
+          if rel:dot(up) >= groundThreshold and frontLimit(rel) then
+            scatterRasterSamples(
+              current_cloud,
+              rel,
+              right,
+              dir,
+              up,
+              frontLimit,
+              groundThreshold,
+              scene_raster_settings,
+              front_lidar_phase * 17
+            )
           end
         end
         front_lidar_point_cloud_wip[front_lidar_phase + 1] = current_cloud
@@ -498,9 +616,9 @@ local function updateVirtualLidar(dt, veh)
       local top = center + axis_z * half_extents.z
       local center_rel = center - origin
       local distance_to_center = center_rel:length()
-      local min_spacing = 0.35
-      local max_spacing = 2.75
-      local angle_spacing = math.rad(3.0)
+      local min_spacing = vehicle_raster_settings.minSpacing
+      local max_spacing = vehicle_raster_settings.maxSpacing
+      local angle_spacing = vehicle_raster_settings.angleSpacing
       local spacing_from_angle = distance_to_center * math.tan(angle_spacing)
       local raster_spacing = math.max(min_spacing, math.min(max_spacing, spacing_from_angle))
       local max_steps = 24
@@ -512,7 +630,7 @@ local function updateVirtualLidar(dt, veh)
       end
       local steps_x = stepsFor(half_extents.x * 2)
       local steps_y = stepsFor(half_extents.y * 2)
-      local jitter_scale = 0.35
+      local jitter_scale = vehicle_raster_settings.gridJitter or 0.3
       local veh_seed = (props.id or (vehObj.getID and vehObj:getID()) or 0) * 0.001
       local function randUnit(ix, iy, axisIndex)
         local seed = veh_seed + ix * 0.161803 + iy * 0.314159 + axisIndex * 0.271828
@@ -581,14 +699,24 @@ local function updateVirtualLidar(dt, veh)
     end
 
     local current_cloud = {}
+    local function sceneLimit(rel)
+      if rel:length() > allowedDistance(rel) then return false end
+      return not insideSelf(origin + rel)
+    end
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
-      if rel:dot(up) >= groundThreshold and not insideSelf(p) and rel:length() <= allowedDistance(rel) then
-        current_cloud[#current_cloud + 1] = {
-          x = rel:dot(right),
-          y = rel:dot(dir),
-          z = rel:dot(up)
-        }
+      if rel:dot(up) >= groundThreshold and sceneLimit(rel) then
+        scatterRasterSamples(
+          current_cloud,
+          rel,
+          right,
+          dir,
+          up,
+          sceneLimit,
+          groundThreshold,
+          scene_raster_settings,
+          virtual_lidar_phase * 23
+        )
       end
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
@@ -677,8 +805,22 @@ local function updateVirtualLidar(dt, veh)
     end
 
     local veh_cloud = {}
+    local function vehicleLimit(rel)
+      return rel:length() <= allowedDistance(rel)
+    end
     for _, entry in ipairs(filtered_hits) do
-      veh_cloud[#veh_cloud + 1] = {x = entry.x, y = entry.y, z = entry.z}
+      local rel = right * entry.x + dir * entry.y + up * entry.z
+      scatterRasterSamples(
+        veh_cloud,
+        rel,
+        right,
+        dir,
+        up,
+        vehicleLimit,
+        groundThreshold,
+        vehicle_raster_settings,
+        entry.dist * 0.37
+      )
     end
     vehicle_lidar_point_cloud = veh_cloud
     vehicle_lidar_frame = curr_frame
