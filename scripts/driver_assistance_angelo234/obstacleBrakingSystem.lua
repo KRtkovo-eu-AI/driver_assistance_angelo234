@@ -6,6 +6,8 @@ local M = {}
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 
+local OBSTACLE_LIDAR_MAX_RAYS = 150
+
 -- system states: "ready", "braking", "holding"
 local system_state = "ready"
 local aeb_clear_timer = 0
@@ -58,7 +60,19 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
 
   local scan = {}
   if use_lidar then
-    scan = virtual_lidar.scan(origin, dir, up, maxDistance, math.rad(30), math.rad(20), 30, 10, 0, veh:getID())
+    scan = virtual_lidar.scan(
+      origin,
+      dir,
+      up,
+      maxDistance,
+      math.rad(30),
+      math.rad(20),
+      30,
+      10,
+      0,
+      veh:getID(),
+      {maxRays = OBSTACLE_LIDAR_MAX_RAYS}
+    )
     -- add points for nearby vehicles similar to sensor approach
     for i = 0, be:getObjectCount() - 1 do
       local other = be:getObject(i)
