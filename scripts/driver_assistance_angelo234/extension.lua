@@ -470,12 +470,13 @@ local function updateVirtualLidar(dt, veh)
 
     local H_ANG_STEP = math.rad(0.2)
     local V_ANG_STEP = math.rad(0.25)
-    local MAX_SURFACE_STEPS = 20
-    local BASE_SPACING_ANGLE = math.rad(0.35)
+    local MAX_SURFACE_STEPS = 28
+    local MIN_SURFACE_STEPS = 3
+    local BASE_SPACING_ANGLE = math.rad(0.3)
     local TAN_BASE_SPACING = math.tan(BASE_SPACING_ANGLE)
-    local DENSITY_FACTOR = 0.75
-    local MIN_SPACING = 0.12
-    local MAX_SPACING = 1.2
+    local DENSITY_FACTOR = 0.3
+    local MIN_SPACING = 0.09
+    local MAX_SPACING = 1.0
 
     local function computeSpacing(distance)
       local spacing = distance * TAN_BASE_SPACING * DENSITY_FACTOR
@@ -617,8 +618,12 @@ local function updateVirtualLidar(dt, veh)
         if surface.normal:dot(toSensor) > 0 then
           local dist = (surface.center - origin):length()
           local spacing = computeSpacing(dist)
-          local stepsA = math.max(1, math.min(MAX_SURFACE_STEPS, math.ceil(surface.spanA / spacing)))
-          local stepsB = math.max(1, math.min(MAX_SURFACE_STEPS, math.ceil(surface.spanB / spacing)))
+          local stepsA = math.ceil(surface.spanA / spacing)
+          local stepsB = math.ceil(surface.spanB / spacing)
+          if stepsA < MIN_SURFACE_STEPS then stepsA = MIN_SURFACE_STEPS end
+          if stepsB < MIN_SURFACE_STEPS then stepsB = MIN_SURFACE_STEPS end
+          if stepsA > MAX_SURFACE_STEPS then stepsA = MAX_SURFACE_STEPS end
+          if stepsB > MAX_SURFACE_STEPS then stepsB = MAX_SURFACE_STEPS end
           local halfA = surface.spanA * 0.5
           local halfB = surface.spanB * 0.5
           for ai = -stepsA, stepsA do
