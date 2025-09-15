@@ -17,6 +17,10 @@
       "control":"numpaddecimal"
     },
     {
+      "action":"toggle_lane_centering_assist",
+      "control":"numpadplus"
+    },
+    {
       "action":"toggle_acc",
       "control":"shift backslash"
     },
