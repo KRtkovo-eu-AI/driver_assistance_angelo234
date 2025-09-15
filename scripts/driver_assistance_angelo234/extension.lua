@@ -328,19 +328,58 @@ local function updateVirtualLidar(dt, veh)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
     local max_dist = aeb_params.sensor_max_distance
-    local hits = virtual_lidar.scan(
-      origin,
-      dir,
-      up,
-      max_dist,
-      math.rad(360),
-      math.rad(30),
-      60,
-      15,
-      0,
-      veh:getID(),
-      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
-    )
+    local vel = veh:getVelocity()
+    local forward_speed = vel:dot(dir) * 3.6
+    local hits
+
+    if forward_speed > 35 then
+      local FRONT_PHASES = 8
+      local REAR_PHASES = VIRTUAL_LIDAR_PHASES - FRONT_PHASES
+      if virtual_lidar_phase < FRONT_PHASES then
+        hits = virtual_lidar.scan(
+          origin,
+          dir,
+          up,
+          max_dist,
+          math.rad(135),
+          math.rad(30),
+          40,
+          15,
+          0,
+          veh:getID(),
+          {hStart = virtual_lidar_phase, hStep = FRONT_PHASES}
+        )
+      else
+        local back_phase = virtual_lidar_phase - FRONT_PHASES
+        hits = virtual_lidar.scan(
+          origin,
+          -dir,
+          up,
+          max_dist,
+          math.rad(225),
+          math.rad(30),
+          20,
+          15,
+          0,
+          veh:getID(),
+          {hStart = back_phase, hStep = REAR_PHASES}
+        )
+      end
+    else
+      hits = virtual_lidar.scan(
+        origin,
+        dir,
+        up,
+        max_dist,
+        math.rad(360),
+        math.rad(30),
+        60,
+        15,
+        0,
+        veh:getID(),
+        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+      )
+    end
 
     -- cache properties of the player's vehicle for later filtering
     local veh_props = extra_utils.getVehicleProperties(veh)
