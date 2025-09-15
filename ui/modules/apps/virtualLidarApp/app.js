@@ -9,19 +9,29 @@ angular.module('beamng.apps')
       var canvas = $element.find('canvas')[0];
       var ctx = canvas.getContext('2d');
 
+      function drawVehicle() {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        var carWidth = 10;
+        var carLength = 20;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
+        ctx.restore();
+      }
+
       function draw(points) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (!points || !points.length) { return; }
+        if (!points || !points.length) {
+          drawVehicle();
+          return;
+        }
 
-        var minX = points[0].x, maxX = points[0].x;
-        var minY = points[0].y, maxY = points[0].y;
+        var maxAbsX = 0, maxAbsY = 0;
         var minD = Infinity, maxD = -Infinity;
 
         points.forEach(function (p) {
-          if (p.x < minX) { minX = p.x; }
-          if (p.x > maxX) { maxX = p.x; }
-          if (p.y < minY) { minY = p.y; }
-          if (p.y > maxY) { maxY = p.y; }
+          if (Math.abs(p.x) > maxAbsX) { maxAbsX = Math.abs(p.x); }
+          if (Math.abs(p.y) > maxAbsY) { maxAbsY = Math.abs(p.y); }
 
           var d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
           if (d < minD) { minD = d; }
@@ -29,19 +39,22 @@ angular.module('beamng.apps')
           p._d = d;
         });
 
+        var range = Math.max(1, Math.max(maxAbsX, maxAbsY));
         var scale = Math.min(
-          canvas.width / Math.max(1, maxX - minX),
-          canvas.height / Math.max(1, maxY - minY)
+          canvas.width / (2 * range),
+          canvas.height / (2 * range)
         );
         var distRange = Math.max(1, maxD - minD);
 
         points.forEach(function (p) {
-          var x = (p.x - minX) * scale;
-          var y = canvas.height - (p.y - minY) * scale;
+          var x = canvas.width / 2 + p.x * scale;
+          var y = canvas.height / 2 - p.y * scale;
           var hue = ((p._d - minD) / distRange) * 240;
           ctx.fillStyle = 'hsl(' + hue + ', 100%, 50%)';
           ctx.fillRect(x, y, 2, 2);
         });
+
+        drawVehicle();
       }
 
       function update() {
