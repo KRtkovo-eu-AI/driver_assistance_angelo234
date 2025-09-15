@@ -685,6 +685,10 @@ local function getVehicleColor()
   return {255, 255, 255}
 end
 
+local function getVirtualLidarData()
+  return {points = getVirtualLidarPointCloud(), color = getVehicleColor()}
+end
+
 local function getLaneSensorData()
   return lane_assist_system.getSensorData()
 end
@@ -716,6 +720,7 @@ M.onUpdate = onUpdate
 M.onInit = onInit
 M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
 M.getVehicleColor = getVehicleColor
+M.getVirtualLidarData = getVirtualLidarData
 M.getLaneSensorData = getLaneSensorData
 
 return M

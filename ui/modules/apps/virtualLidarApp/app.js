@@ -60,8 +60,7 @@ angular.module('beamng.apps')
 
       function update() {
         bngApi.engineLua(
-          'return {points=extensions.driver_assistance_angelo234.getVirtualLidarPointCloud(), ' +
-          'color=extensions.driver_assistance_angelo234.getVehicleColor()}',
+          'extensions.driver_assistance_angelo234.getVirtualLidarData()',
           function (data) {
             $scope.$evalAsync(function () {
               if (data.color) { carColor = data.color; }
