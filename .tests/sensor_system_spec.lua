@@ -28,6 +28,9 @@ function extra_utils.getVehicleProperties(veh) return veh.props end
 function extra_utils.getCircularDistance(a, b) return (b.center_pos - a.center_pos):length() end
 function extra_utils.getWaypointStartEndAdvanced() return { start_wp_pos = vec(0,0,0), end_wp_pos = vec(1,0,0), wp_radius = 100 } end
 function extra_utils.checkIfOtherCarOnSameRoad() return true end
+function extra_utils.isVehicleGhost()
+  return false
+end
 
 package.loaded['scripts/driver_assistance_angelo234/extraUtils'] = extra_utils
 
