@@ -414,12 +414,13 @@ local function updateVirtualLidar(dt, veh)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
-    virtual_lidar_frames[virtual_lidar_phase + 1] = {
+    local curr_frame = {
       origin = origin,
       dir = dir,
       right = right,
       up = up
     }
+    virtual_lidar_frames[virtual_lidar_phase + 1] = curr_frame
     local base_dist = aeb_params.sensor_max_distance
     -- boost forward reach by 60 m, keep rear at base range and sides at half power
     local front_dist = base_dist + 60
@@ -427,15 +428,19 @@ local function updateVirtualLidar(dt, veh)
     local side_dist = base_dist * 0.5
     local ANG_FRONT = 85
     local ANG_REAR = 112.5
+    local hFov = math.rad(360)
+    local vFov = math.rad(30)
+    local hRes = 60
+    local vRes = 15
     local scan_hits = virtual_lidar.scan(
       origin,
       dir,
       up,
       front_dist,
-      math.rad(360),
-      math.rad(30),
-      60,
-      15,
+      hFov,
+      vFov,
+      hRes,
+      vRes,
       0,
       veh:getID(),
       {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
@@ -464,6 +469,7 @@ local function updateVirtualLidar(dt, veh)
     local detections = {}
     local processed = {[veh:getID()] = true}
     local vehicle_hits = {}
+    local groundThreshold = -1.5
 
     local function allowedDistance(rel)
       local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
@@ -484,27 +490,57 @@ local function updateVirtualLidar(dt, veh)
       if extra_utils.isVehicleGhost(vehObj, props) then return end
       local bb = props.bb
       if not bb then return end
-      local center = props.center_pos
+      local center = props.center_pos or bb:getCenter()
       local half_extents = bb:getHalfExtents()
       local axis_x = vec3(bb:getAxis(0))
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
+      local center_rel = center - origin
+      local distance_to_center = center_rel:length()
+      local min_spacing = 0.35
+      local max_spacing = 2.75
+      local angle_spacing = math.rad(3.0)
+      local spacing_from_angle = distance_to_center * math.tan(angle_spacing)
+      local raster_spacing = math.max(min_spacing, math.min(max_spacing, spacing_from_angle))
+      local max_steps = 24
       local function stepsFor(span)
+        if span <= 0 then
+          return 1
+        end
         return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
       end
       local steps_x = stepsFor(half_extents.x * 2)
       local steps_y = stepsFor(half_extents.y * 2)
+      local jitter_scale = 0.35
+      local veh_seed = (props.id or (vehObj.getID and vehObj:getID()) or 0) * 0.001
+      local function randUnit(ix, iy, axisIndex)
+        local seed = veh_seed + ix * 0.161803 + iy * 0.314159 + axisIndex * 0.271828
+        local s = math.sin(seed * 12.9898 + 78.233)
+        local frac = s - math.floor(s)
+        return frac * 2 - 1
+      end
       for xi = -steps_x, steps_x do
-        local offset_x = axis_x * (half_extents.x * xi / steps_x)
         for yi = -steps_y, steps_y do
-          local offset_y = axis_y * (half_extents.y * yi / steps_y)
-          local p = top + offset_x + offset_y
+          local base_x = half_extents.x * xi / steps_x
+          local base_y = half_extents.y * yi / steps_y
+          local jitter_x = randUnit(xi, yi, 0) * raster_spacing * jitter_scale
+          local jitter_y = randUnit(xi, yi, 1) * raster_spacing * jitter_scale
+          local local_x = math.max(-half_extents.x, math.min(half_extents.x, base_x + jitter_x))
+          local local_y = math.max(-half_extents.y, math.min(half_extents.y, base_y + jitter_y))
+          local p = top + axis_x * local_x + axis_y * local_y
           local rel = p - origin
-          if rel:length() < allowedDistance(rel) then
-            vehicle_hits[#vehicle_hits + 1] = p
+          local dist = rel:length()
+          if dist <= allowedDistance(rel) then
+            local local_z = rel:dot(up)
+            if local_z >= groundThreshold then
+              vehicle_hits[#vehicle_hits + 1] = {
+                x = rel:dot(right),
+                y = rel:dot(dir),
+                z = local_z,
+                dist = dist
+              }
+            end
           end
         end
       end
@@ -544,7 +580,6 @@ local function updateVirtualLidar(dt, veh)
       end
     end
 
-    local groundThreshold = -1.5
     local current_cloud = {}
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
@@ -558,19 +593,95 @@ local function updateVirtualLidar(dt, veh)
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
 
-    local veh_cloud = {}
-    for _, p in ipairs(vehicle_hits) do
-      local rel = p - origin
-      if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
-        veh_cloud[#veh_cloud + 1] = {
-          x = rel:dot(right),
-          y = rel:dot(dir),
-          z = rel:dot(up)
-        }
+    local hCount = hRes
+    local vCount = vRes
+    local hHalf = hFov * 0.5
+    local vHalf = vFov * 0.5
+    local hDenom = math.max(1, hCount - 1)
+    local vDenom = math.max(1, vCount - 1)
+
+    local function angularBinLocal(pt)
+      if not pt then return nil, 0 end
+      local x, y, z = pt.x, pt.y, pt.z
+      local horizSq = x * x + y * y
+      local distSq = horizSq + z * z
+      if distSq <= 0 then return nil, 0 end
+      local dist = math.sqrt(distSq)
+      local hAngle = math.atan2(x, y)
+      local vAngle = math.atan2(z, math.sqrt(horizSq))
+      if vAngle < -vHalf or vAngle > vHalf then return nil, dist end
+      local hNorm = (hAngle + hHalf) / hFov
+      hNorm = hNorm - math.floor(hNorm)
+      local vNorm = (vAngle + vHalf) / vFov
+      if vNorm < 0 or vNorm > 1 then return nil, dist end
+      local hIndex = math.floor(hNorm * hDenom + 0.5)
+      if hIndex < 0 then
+        hIndex = 0
+      elseif hIndex >= hCount then
+        hIndex = hCount - 1
+      end
+      local vIndex = math.floor(vNorm * vDenom + 0.5)
+      if vIndex < 0 then
+        vIndex = 0
+      elseif vIndex >= vCount then
+        vIndex = vCount - 1
+      end
+      return vIndex * hCount + hIndex, dist
+    end
+
+    local binDistances = {}
+    local function accumulateBins(clouds, frames, count)
+      if not clouds or not frames then return end
+      for i = 1, count do
+        local frame = frames[i]
+        local cloud = clouds[i]
+        if frame and cloud then
+          for j = 1, #cloud do
+            local transformed = drift_proximity.apply(cloud[j], frame, curr_frame)
+            if transformed then
+              local key, dist = angularBinLocal(transformed)
+              if key then
+                local existing = binDistances[key]
+                if not existing or dist < existing then
+                  binDistances[key] = dist
+                end
+              end
+            end
+          end
+        end
       end
     end
+
+    accumulateBins(virtual_lidar_point_cloud, virtual_lidar_frames, VIRTUAL_LIDAR_PHASES)
+    accumulateBins(front_lidar_point_cloud, front_lidar_frames, FRONT_LIDAR_PHASES)
+
+    table.sort(vehicle_hits, function(a, b)
+      return a.dist < b.dist
+    end)
+
+    local occlusionPadding = 0.4
+    local filtered_hits = {}
+    for _, entry in ipairs(vehicle_hits) do
+      if entry.z >= groundThreshold then
+        local key, dist = angularBinLocal(entry)
+        if key then
+          local existing = binDistances[key]
+          if not existing or dist <= existing + occlusionPadding then
+            filtered_hits[#filtered_hits + 1] = entry
+            if not existing or dist < existing then
+              binDistances[key] = dist
+            end
+          end
+        end
+      end
+    end
+
+    local veh_cloud = {}
+    for _, entry in ipairs(filtered_hits) do
+      veh_cloud[#veh_cloud + 1] = {x = entry.x, y = entry.y, z = entry.z}
+    end
     vehicle_lidar_point_cloud = veh_cloud
-    vehicle_lidar_frame = {origin = origin, dir = dir, right = right, up = up}
+    vehicle_lidar_frame = curr_frame
 
     for _, d in ipairs(detections) do
       local rel = d.pos - origin
