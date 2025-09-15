@@ -8,8 +8,9 @@
         "slotType" : "obstacle_collision_mitigation_angelo234",
         "slots": [
             ["type", "default", "description"],
-            ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle AEB"],
             ["lidar_angelo234", "", "Lidar"],
+            ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle AEB"],
+            ["lane_centering_assist_system_angelo234", "lane_centering_assist_system_angelo234", "Lane Centering Assist"]
         ],
     },
 }
