@@ -2,11 +2,7 @@
 -- If a copy of the bCDDL was not distributed with this
 -- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
 
---global table of all vehicles acceleration vectors
---veh_accs_angelo234[id][1] = lateral (-x = right, +x = left)
---veh_accs_angelo234[id][2] = longitudinal (-x = accelerating, +x = braking)
---veh_accs_angelo234[id][3] = up/down direction (-x = down, +x = up)
-veh_accs_angelo234 = {}
+rawset(_G, "veh_accs_angelo234", _G.veh_accs_angelo234 or {})
 
 local M = {}
 
@@ -252,34 +248,38 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
 
   --Get properties of my vehicle
   local throttle_cmd =
-    "if input.throttle ~= nil then obj:queueGameEngineLua('input_throttle_angelo234 = ' .. input.throttle ) end"
+    "if input.throttle ~= nil then obj:queueGameEngineLua('rawset(_G, \\\"input_throttle_angelo234\\\", ' .. input.throttle .. ')') end"
   my_veh:queueLuaCommand(throttle_cmd)
   local brake_cmd =
-    "if input.brake ~= nil then obj:queueGameEngineLua('input_brake_angelo234 = ' .. input.brake ) end"
+    "if input.brake ~= nil then obj:queueGameEngineLua('rawset(_G, \\\"input_brake_angelo234\\\", ' .. input.brake .. ')') end"
   my_veh:queueLuaCommand(brake_cmd)
   local clutch_cmd =
-    "if input.clutch ~= nil then obj:queueGameEngineLua('input_clutch_angelo234 = ' .. input.clutch ) end"
+    "if input.clutch ~= nil then obj:queueGameEngineLua('rawset(_G, \\\"input_clutch_angelo234\\\", ' .. input.clutch .. ')') end"
   my_veh:queueLuaCommand(clutch_cmd)
   local parking_cmd =
-    "if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. " ..
-    "input.parkingbrake ) end"
+    "if input.parkingbrake ~= nil then obj:queueGameEngineLua('rawset(_G, \\\"input_parkingbrake_angelo234\\\", ' .. input.parkingbrake .. ')') end"
   my_veh:queueLuaCommand(parking_cmd)
 
-  local electrics_cmd =
-    'obj:queueGameEngineLua("electrics_values_angelo234 = (\'" .. jsonEncode(electrics.values) .. "\')")'
-  my_veh:queueLuaCommand(electrics_cmd)
+  if electrics and electrics.values then
+    local electrics_cmd = string.format(
+      "obj:queueGameEngineLua('rawset(_G, \\\"electrics_values_angelo234\\\", %q)')",
+      jsonEncode(electrics.values))
+    my_veh:queueLuaCommand(electrics_cmd)
+  end
   local ang_cmd =
-    "obj:queueGameEngineLua('angular_speed_angelo234 = ' .. obj:getYawAngularVelocity() )"
+    "obj:queueGameEngineLua('rawset(_G, \\\"angular_speed_angelo234\\\", ' .. obj:getYawAngularVelocity() .. ')')"
   my_veh:queueLuaCommand(ang_cmd)
   local rot_cmd =
-    "obj:queueGameEngineLua('rotation_angelo234 = ' .. vec3(obj:getRollPitchYaw()):__tostring() )"
+    "obj:queueGameEngineLua('rawset(_G, \\\"rotation_angelo234\\\", ' .. vec3(obj:getRollPitchYaw()):__tostring() .. ')')"
   my_veh:queueLuaCommand(rot_cmd)
 
   --Gets whether gearbox is in arcade or realistic mode
-  local gear_cmd =
-    'if controller.mainController.onSerialize ~= nil then obj:queueGameEngineLua("gearbox_mode_angelo234 = (\'" .. ' ..
-    'jsonEncode(controller.mainController.onSerialize()) .. "\')") end'
-  my_veh:queueLuaCommand(gear_cmd)
+  if controller and controller.mainController and controller.mainController.onSerialize then
+    local gear_cmd = string.format(
+      "obj:queueGameEngineLua('rawset(_G, \\\"gearbox_mode_angelo234\\\", %q)')",
+      jsonEncode(controller.mainController.onSerialize()))
+    my_veh:queueLuaCommand(gear_cmd)
+  end
 
   if electrics_values_angelo234 == nil then
     return false
