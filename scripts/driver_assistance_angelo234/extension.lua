@@ -671,6 +671,20 @@ local function getVirtualLidarPointCloud()
   return combined
 end
 
+local function getVehicleColor()
+  local veh = be:getPlayerVehicle(0)
+  if veh and veh.getColor then
+    local c = veh:getColor()
+    if c then
+      local r = c.x or c.r or 1
+      local g = c.y or c.g or 1
+      local b = c.z or c.b or 1
+      return {r * 255, g * 255, b * 255}
+    end
+  end
+  return {255, 255, 255}
+end
+
 local function getLaneSensorData()
   return lane_assist_system.getSensorData()
 end
@@ -701,6 +715,7 @@ M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
 M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
+M.getVehicleColor = getVehicleColor
 M.getLaneSensorData = getLaneSensorData
 
 return M
