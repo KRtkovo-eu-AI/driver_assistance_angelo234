@@ -22,6 +22,7 @@ local logger = require('scripts/driver_assistance_angelo234/logger')
 local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacleBrakingSystem')
 local lane_centering_system = require('scripts/driver_assistance_angelo234/laneCenteringAssistSystem')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
+local drift_proximity = require('scripts/driver_assistance_angelo234/driftProximity')
 
 local first_update = true
 
@@ -46,18 +47,39 @@ local other_systems_timer = 0
 local hsa_system_update_timer = 0
 local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
-local VIRTUAL_LIDAR_PHASES = 12
+local VIRTUAL_LIDAR_PHASES = 8
+local FRONT_LIDAR_PHASES = 4
 local virtual_lidar_point_cloud = {}
+local virtual_lidar_frames = {}
+local front_lidar_point_cloud = {}
+local front_lidar_frames = {}
+local front_lidar_point_cloud_wip = {}
+local front_lidar_frames_wip = {}
 
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
+  virtual_lidar_frames = {}
+  front_lidar_point_cloud = {}
+  front_lidar_frames = {}
+  front_lidar_point_cloud_wip = {}
+  front_lidar_frames_wip = {}
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
+    virtual_lidar_frames[i] = nil
+  end
+  for i = 1, FRONT_LIDAR_PHASES do
+    front_lidar_point_cloud[i] = {}
+    front_lidar_frames[i] = nil
+    front_lidar_point_cloud_wip[i] = {}
+    front_lidar_frames_wip[i] = nil
   end
 end
 
 resetVirtualLidarPointCloud()
 local virtual_lidar_phase = 0
+local front_lidar_phase = 0
+local front_lidar_update_timer = 0
+local front_lidar_thread = nil
 
 M.curr_camera_mode = "orbit"
 M.prev_camera_mode = "orbit"
@@ -308,6 +330,67 @@ local function processVELuaData()
   angular_speed_angelo234 = yawSmooth:get(angular_speed_angelo234)
 end
 
+local function frontLidarLoop()
+  while true do
+    local dt, veh = coroutine.yield()
+    if extra_utils.getPart("lidar_angelo234") and aeb_params and veh and veh.getPosition and veh.getDirectionVector and veh.getDirectionVectorUp then
+      front_lidar_update_timer = front_lidar_update_timer + dt
+      if front_lidar_update_timer >= 1.0 / 20.0 then
+        local pos = veh:getPosition()
+        local dir = veh:getDirectionVector()
+        local up = veh:getDirectionVectorUp()
+        dir.z = 0
+        dir = dir:normalized()
+        up = up:normalized()
+        local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+        local right = dir:cross(up):normalized()
+        front_lidar_frames_wip[front_lidar_phase + 1] = {
+          origin = origin,
+          dir = dir,
+          right = right,
+          up = up
+        }
+        local base_dist = aeb_params.sensor_max_distance
+        local front_dist = base_dist + 60
+        local hits = virtual_lidar.scan(
+          origin,
+          dir,
+          up,
+          front_dist,
+          math.rad(170),
+          math.rad(30),
+          60,
+          15,
+          0,
+          veh:getID(),
+          {hStart = front_lidar_phase, hStep = FRONT_LIDAR_PHASES}
+        )
+        local groundThreshold = -1.5
+        local current_cloud = {}
+        for _, p in ipairs(hits) do
+          local rel = p - origin
+          if rel:dot(up) >= groundThreshold and rel:length() <= front_dist then
+            current_cloud[#current_cloud + 1] = {
+              x = rel:dot(right),
+              y = rel:dot(dir),
+              z = rel:dot(up)
+            }
+          end
+        end
+        front_lidar_point_cloud_wip[front_lidar_phase + 1] = current_cloud
+        front_lidar_phase = (front_lidar_phase + 1) % FRONT_LIDAR_PHASES
+        if front_lidar_phase == 0 then
+          front_lidar_point_cloud, front_lidar_point_cloud_wip = front_lidar_point_cloud_wip, front_lidar_point_cloud
+          front_lidar_frames, front_lidar_frames_wip = front_lidar_frames_wip, front_lidar_frames
+        end
+        front_lidar_update_timer = 0
+      end
+    end
+  end
+end
+
+front_lidar_thread = coroutine.create(frontLidarLoop)
+
 --local p = LuaProfiler("my profiler")
 
 local function updateVirtualLidar(dt, veh)
@@ -327,65 +410,32 @@ local function updateVirtualLidar(dt, veh)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
-    local max_dist = aeb_params.sensor_max_distance
-    -- keep full lidar range ahead, but halve reach for rear and side sectors
-    local front_dist = max_dist
-    local rear_dist = max_dist * 0.5
-    local side_dist = rear_dist
-    local ANG_FRONT = 67.5
-    local ANG_SIDE = 112.5
-    local vel = veh:getVelocity()
-    local forward_speed = vel:dot(dir) * 3.6
-    local hits
-
-    if forward_speed > 35 then
-      local FRONT_PHASES = 8
-      local REAR_PHASES = VIRTUAL_LIDAR_PHASES - FRONT_PHASES
-      if virtual_lidar_phase < FRONT_PHASES then
-        hits = virtual_lidar.scan(
-          origin,
-          dir,
-          up,
-          front_dist,
-          math.rad(135),
-          math.rad(30),
-          40,
-          15,
-          0,
-          veh:getID(),
-          {hStart = virtual_lidar_phase, hStep = FRONT_PHASES}
-        )
-      else
-        local back_phase = virtual_lidar_phase - FRONT_PHASES
-        hits = virtual_lidar.scan(
-          origin,
-          -dir,
-          up,
-          rear_dist,
-          math.rad(225),
-          math.rad(30),
-          20,
-          15,
-          0,
-          veh:getID(),
-          {hStart = back_phase, hStep = REAR_PHASES}
-        )
-      end
-    else
-      hits = virtual_lidar.scan(
-        origin,
-        dir,
-        up,
-        front_dist,
-        math.rad(360),
-        math.rad(30),
-        60,
-        15,
-        0,
-        veh:getID(),
-        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
-      )
-    end
+    virtual_lidar_frames[virtual_lidar_phase + 1] = {
+      origin = origin,
+      dir = dir,
+      right = right,
+      up = up
+    }
+    local base_dist = aeb_params.sensor_max_distance
+    -- boost forward reach by 60 m, keep rear at base range and sides at half power
+    local front_dist = base_dist + 60
+    local rear_dist = base_dist
+    local side_dist = base_dist * 0.5
+    local ANG_FRONT = 85
+    local ANG_REAR = 112.5
+    local hits = virtual_lidar.scan(
+      origin,
+      dir,
+      up,
+      front_dist,
+      math.rad(360),
+      math.rad(30),
+      60,
+      15,
+      0,
+      veh:getID(),
+      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+    )
 
     -- cache properties of the player's vehicle for later filtering
     local veh_props = extra_utils.getVehicleProperties(veh)
@@ -415,7 +465,7 @@ local function updateVirtualLidar(dt, veh)
       local absAng = math.abs(ang)
       if absAng <= ANG_FRONT then
         return front_dist
-      elseif absAng >= ANG_SIDE then
+      elseif absAng >= ANG_REAR then
         return rear_dist
       else
         return side_dist
@@ -533,6 +583,10 @@ local function onUpdate(dt)
 
   --Process data gathered from Vehicle Lua to be usable in our context
   processVELuaData()
+
+  if front_lidar_thread and coroutine.status(front_lidar_thread) ~= "dead" then
+    coroutine.resume(front_lidar_thread, dt, my_veh)
+  end
 
   if not be:getEnabled() or not system_params then return end
 
@@ -662,10 +716,30 @@ local function onUpdate(dt)
 end
 
 local function getVirtualLidarPointCloud()
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return {} end
+  local pos = veh:getPosition()
+  local dir = veh:getDirectionVector()
+  dir.z = 0
+  dir = dir:normalized()
+  local up = veh:getDirectionVectorUp():normalized()
+  local right = dir:cross(up):normalized()
+  local curr = {origin = vec3(pos.x, pos.y, pos.z + 1.8), dir = dir, right = right, up = up}
   local combined = {}
   for i = 1, #virtual_lidar_point_cloud do
-    for j = 1, #virtual_lidar_point_cloud[i] do
-      combined[#combined + 1] = virtual_lidar_point_cloud[i][j]
+    local frame = virtual_lidar_frames[i]
+    if frame then
+      for j = 1, #virtual_lidar_point_cloud[i] do
+        combined[#combined + 1] = drift_proximity.apply(virtual_lidar_point_cloud[i][j], frame, curr)
+      end
+    end
+  end
+  for i = 1, #front_lidar_point_cloud do
+    local frame = front_lidar_frames[i]
+    if frame then
+      for j = 1, #front_lidar_point_cloud[i] do
+        combined[#combined + 1] = drift_proximity.apply(front_lidar_point_cloud[i][j], frame, curr)
+      end
     end
   end
   return combined
@@ -728,5 +802,9 @@ M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
 M.getVehicleColor = getVehicleColor
 M.getVirtualLidarData = getVirtualLidarData
 M.getLaneCenteringData = getLaneCenteringData
+M._resetVirtualLidarPointCloud = resetVirtualLidarPointCloud
+M._virtual_lidar_point_cloud = function() return virtual_lidar_point_cloud end
+M._front_lidar_point_cloud = function() return front_lidar_point_cloud end
+M._setFrontLidarThread = function(th) front_lidar_thread = th end
 
 return M
