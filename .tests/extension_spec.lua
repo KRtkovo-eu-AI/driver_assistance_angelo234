@@ -38,6 +38,33 @@ describe('extension', function()
     end
 
     local extension = require('scripts/driver_assistance_angelo234/extension')
+    extension._setFrontLidarThread(nil)
+    assert.has_no.errors(function() extension.onUpdate(0.1) end)
+  end)
+
+  it('initializes lidar buffers for both sweeps', function()
+    package.loaded['scripts/driver_assistance_angelo234/extraUtils'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/sensorSystem'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/forwardCollisionMitigationSystem'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/reverseCollisionMitigationSystem'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/accSystem'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/hillStartAssistSystem'] = {}
+    package.loaded['scripts/driver_assistance_angelo234/autoHeadlightSystem'] = {
+      onHeadlightsOff = function() end,
+      onHeadlightsOn = function() end,
+      systemSwitchedOn = function() end,
+      update = function() end,
+    }
+    package.loaded['scripts/driver_assistance_angelo234/laneCenteringAssistSystem'] = { getLaneData = function() return nil end }
+
+    _G.be = { getPlayerVehicle = function() return nil end }
+    _G.newExponentialSmoothing = function() return { get = function(self, v) return v end } end
+
+    local extension = require('scripts/driver_assistance_angelo234/extension')
+    extension._resetVirtualLidarPointCloud()
+    extension._setFrontLidarThread(nil)
+    assert.equal(8, #extension._virtual_lidar_point_cloud())
+    assert.equal(4, #extension._front_lidar_point_cloud())
     assert.has_no.errors(function() extension.onUpdate(0.1) end)
   end)
 
@@ -100,6 +127,7 @@ describe('extension', function()
     _G.gearbox_mode_angelo234 = 'dummy'
 
     local extension = require('scripts/driver_assistance_angelo234/extension')
+    extension._setFrontLidarThread(nil)
     extension.onExtensionLoaded()
 
     extension.onUpdate(0.3)
@@ -165,6 +193,7 @@ describe('extension', function()
     _G.gearbox_mode_angelo234 = 'dummy'
 
     local extension = require('scripts/driver_assistance_angelo234/extension')
+    extension._setFrontLidarThread(nil)
     extension.onExtensionLoaded()
     extension.onUpdate(0.3)
     extension.onUpdate(0.3)
