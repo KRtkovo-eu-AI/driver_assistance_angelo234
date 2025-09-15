@@ -58,6 +58,16 @@ local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
+local VEHICLE_POINT_MIN_SPACING = 0.3
+local VEHICLE_POINT_MAX_SPACING = 2.5
+local VEHICLE_POINT_MAX_STEPS = 20
+local VIRTUAL_LIDAR_H_FOV = math.rad(360)
+local VIRTUAL_LIDAR_V_FOV = math.rad(30)
+local VIRTUAL_LIDAR_H_RES = 60
+local VIRTUAL_LIDAR_V_RES = 15
+local VIRTUAL_LIDAR_H_STEP = VIRTUAL_LIDAR_H_FOV / math.max(1, VIRTUAL_LIDAR_H_RES - 1)
+local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_RES - 1)
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_frames = {}
@@ -432,10 +442,10 @@ local function updateVirtualLidar(dt, veh)
       dir,
       up,
       front_dist,
-      math.rad(360),
-      math.rad(30),
-      60,
-      15,
+      VIRTUAL_LIDAR_H_FOV,
+      VIRTUAL_LIDAR_V_FOV,
+      VIRTUAL_LIDAR_H_RES,
+      VIRTUAL_LIDAR_V_RES,
       0,
       veh:getID(),
       {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
@@ -490,13 +500,31 @@ local function updateVirtualLidar(dt, veh)
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
-      local function stepsFor(span)
-        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
+      local relCenter = center - origin
+      local relTop = top - origin
+      local forwardDist = relCenter:dot(dir)
+      local sideDist = relCenter:dot(right)
+      local planarDist = math.max(0.1, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
+      local heightOffset = math.abs(relTop:dot(up))
+      local function clampSpacing(s)
+        if s < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
+        if s > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
+        return s
       end
-      local steps_x = stepsFor(half_extents.x * 2)
-      local steps_y = stepsFor(half_extents.y * 2)
+      local baseSpacing = clampSpacing(2 * planarDist * sin(VIRTUAL_LIDAR_H_STEP * 0.5))
+      local diagDist = math.sqrt(planarDist * planarDist + heightOffset * heightOffset)
+      local verticalSpacing = clampSpacing(2 * diagDist * sin(VIRTUAL_LIDAR_V_STEP * 0.5))
+      local spacingX = baseSpacing
+      local spacingY = math.max(baseSpacing, verticalSpacing)
+      local function stepsForHalfSpan(halfSpan, spacing)
+        local span = math.max(spacing, 1e-3)
+        local steps = math.floor(halfSpan / span + 0.5)
+        if steps < 1 then steps = 1 end
+        if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
+        return steps
+      end
+      local steps_x = stepsForHalfSpan(half_extents.x, spacingX)
+      local steps_y = stepsForHalfSpan(half_extents.y, spacingY)
       for xi = -steps_x, steps_x do
         local offset_x = axis_x * (half_extents.x * xi / steps_x)
         for yi = -steps_y, steps_y do
@@ -508,7 +536,6 @@ local function updateVirtualLidar(dt, veh)
           end
         end
       end
-      local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
         local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
