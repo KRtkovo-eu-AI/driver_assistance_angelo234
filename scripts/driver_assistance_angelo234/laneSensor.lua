@@ -157,12 +157,25 @@ local lane_width, lateral_offset, road_dir, future_dir, curvature
     M.prev_curvature = M.prev_curvature and (M.prev_curvature + (curvature - M.prev_curvature) * 0.1) or curvature
   end
 
+  local left_world_pts = {}
+  for i = 1, #left_pts do
+    local p = left_pts[i]
+    left_world_pts[i] = origin + forward * p[1] + right * p[2]
+  end
+  local right_world_pts = {}
+  for i = 1, #right_pts do
+    local p = right_pts[i]
+    right_world_pts[i] = origin + forward * p[1] + right * p[2]
+  end
+
   return {
     lane_width = M.prev_width,
     lateral_offset = M.prev_offset,
     road_dir = M.prev_dir,
     future_dir = M.prev_future_dir,
-    curvature = M.prev_curvature
+    curvature = M.prev_curvature,
+    left_edge = left_world_pts,
+    right_edge = right_world_pts
   }
 end
 

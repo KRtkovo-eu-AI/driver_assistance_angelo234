@@ -9,8 +9,9 @@ angular.module('beamng.apps')
       var canvas = $element.find('canvas')[0];
       var ctx = canvas.getContext('2d');
       var carColor = [255, 255, 255];
+      var scale = 5; // pixels per meter
 
-      function drawVehicle(x) {
+      function drawVehicle(cx, cy) {
         ctx.save();
         ctx.fillStyle = 'rgba(' +
           Math.round(carColor[0]) + ',' +
@@ -18,42 +19,33 @@ angular.module('beamng.apps')
           Math.round(carColor[2]) + ',0.5)';
         var carWidth = 10;
         var carLength = 20;
-        ctx.translate(x, canvas.height - carLength);
-        ctx.fillRect(-carWidth / 2, 0, carWidth, carLength);
+        ctx.translate(cx, cy);
+        ctx.fillRect(-carWidth / 2, -carLength / 2, carWidth, carLength);
         ctx.restore();
+      }
+
+      function drawLine(points, style) {
+        if (!points || points.length < 2) return;
+        ctx.strokeStyle = style;
+        ctx.beginPath();
+        for (var i = 0; i < points.length; i++) {
+          var f = points[i][0];
+          var l = points[i][1];
+          var x = canvas.width / 2 + l * scale;
+          var y = canvas.height / 2 - f * scale;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
       }
 
       function draw(data) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        var center = canvas.width / 2;
-        if (!data || !data.lane_width) {
-          drawVehicle(center);
-          return;
+        if (data) {
+          drawLine(data.left_line, 'yellow');
+          drawLine(data.right_line, 'yellow');
+          drawLine(data.center_line, 'white');
         }
-        var laneWidth = data.lane_width;
-        var offset = data.lateral_offset || 0;
-        var scale = canvas.width / laneWidth;
-        center = canvas.width / 2 - offset * scale;
-        var halfLane = laneWidth * 0.5 * scale;
-        var left = center - halfLane;
-        var right = center + halfLane;
-        var bottom = canvas.height;
-        var horizon = 0;
-        var yaw = 0;
-        if (data.road_dir) {
-          yaw = Math.atan2(data.road_dir.y, data.road_dir.x);
-        }
-        var curve = data.curvature || 0;
-        var shift0 = Math.tan(yaw) * bottom;
-        var shift1 = Math.tan(yaw + curve) * bottom;
-        var midShift = (shift0 + shift1) / 2;
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'yellow';
-        ctx.beginPath(); ctx.moveTo(left, bottom); ctx.quadraticCurveTo(left + midShift, bottom * 0.5, left + shift1, horizon); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(right, bottom); ctx.quadraticCurveTo(right + midShift, bottom * 0.5, right + shift1, horizon); ctx.stroke();
-        ctx.strokeStyle = 'green';
-        ctx.beginPath(); ctx.moveTo(center, bottom); ctx.quadraticCurveTo(center + midShift, bottom * 0.5, center + shift1, horizon); ctx.stroke();
-        drawVehicle(center);
+        drawVehicle(canvas.width / 2, canvas.height / 2);
       }
 
       function update() {
@@ -78,3 +70,4 @@ angular.module('beamng.apps')
     }]
   };
 }]);
+

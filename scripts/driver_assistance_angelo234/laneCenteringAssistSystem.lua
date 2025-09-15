@@ -12,6 +12,8 @@ local warning_played = false
 local steering_pid = nil
 local steering_smooth = nil
 local override_timer = 0
+local left_history = {}
+local right_history = {}
 
 -- Apply PID control with smoothing to keep vehicle centered and aligned with lane
 local function update(dt, veh, system_params)
@@ -23,8 +25,63 @@ local function update(dt, veh, system_params)
   end
 
   local sensor = lane_sensor.sense(veh)
-  latest_data = sensor
   if not sensor then return end
+  local veh_props = extra_utils.getVehicleProperties(veh)
+
+  if sensor.left_edge then
+    for i = 1, #sensor.left_edge do
+      left_history[#left_history + 1] = sensor.left_edge[i]
+    end
+  end
+  if sensor.right_edge then
+    for i = 1, #sensor.right_edge do
+      right_history[#right_history + 1] = sensor.right_edge[i]
+    end
+  end
+
+  local pos = veh_props.center_pos
+  local dir = extra_utils.toNormXYVec(veh_props.dir)
+  local right = extra_utils.toNormXYVec(veh_props.dir_right)
+
+  local function prune(history)
+    local res = {}
+    for i = 1, #history do
+      local rel = history[i] - pos
+      local fwd = rel:dot(dir)
+      if fwd > -20 and fwd < 60 then
+        res[#res + 1] = history[i]
+      end
+    end
+    return res
+  end
+
+  left_history = prune(left_history)
+  right_history = prune(right_history)
+
+  local function toLocal(history)
+    local pts = {}
+    for i = 1, #history do
+      local rel = history[i] - pos
+      pts[#pts + 1] = {rel:dot(dir), rel:dot(right)}
+    end
+    table.sort(pts, function(a, b) return a[1] < b[1] end)
+    return pts
+  end
+
+  local left_local = toLocal(left_history)
+  local right_local = toLocal(right_history)
+  local center_line = {}
+  local n = math.min(#left_local, #right_local)
+  for i = 1, n do
+    center_line[i] = {(left_local[i][1] + right_local[i][1]) * 0.5,
+                      (left_local[i][2] + right_local[i][2]) * 0.5}
+  end
+
+  sensor.left_line = left_local
+  sensor.right_line = right_local
+  sensor.center_line = center_line
+  latest_data = sensor
+
   local params = system_params.lane_centering_params or {}
   local heading_kp = params.heading_kp or 0.5
   local warn_ratio = params.warning_ratio or 0.8
@@ -47,7 +104,6 @@ local function update(dt, veh, system_params)
   local warn_zone = warn_ratio * half_width
 
   -- Compute heading error using look-ahead direction when available
-  local veh_props = extra_utils.getVehicleProperties(veh)
   local desired_dir = sensor.future_dir or sensor.road_dir or veh_props.dir
   local heading_error = veh_props.dir:cross(desired_dir).z
 
