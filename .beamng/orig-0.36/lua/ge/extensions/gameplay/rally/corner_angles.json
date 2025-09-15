@@ -1,0 +1,84 @@
+{
+    "pacenoteStyles": [
+        {
+            "name": "1(hard) to 6(easy)",
+            "angles": [
+                {
+                    "cornerCall": "_deadzone",
+                    "fromAngleDegrees": 0,
+                    "toAngleDegrees": 3
+                },
+                {
+                    "cornerCall": "6",
+                    "fromAngleDegrees": 3,
+                    "toAngleDegrees": 20
+                },
+                {
+                    "cornerCall": "5",
+                    "fromAngleDegrees": 20,
+                    "toAngleDegrees": 40
+                },
+                {
+                    "cornerCall": "4",
+                    "fromAngleDegrees": 40,
+                    "toAngleDegrees": 60
+                },
+                {
+                    "cornerCall": "3",
+                    "fromAngleDegrees": 60,
+                    "toAngleDegrees": 80
+                },
+                {
+                    "cornerCall": "2",
+                    "fromAngleDegrees": 80,
+                    "toAngleDegrees": 100
+                },
+                {
+                    "cornerCall": "1",
+                    "fromAngleDegrees": 100,
+                    "toAngleDegrees": 10000
+                }
+            ]
+        },
+        {
+            "name": "6(hard) to 1(easy)",
+            "angles": [
+                {
+                    "cornerCall": "_deadzone",
+                    "fromAngleDegrees": 0,
+                    "toAngleDegrees": 3
+                },
+                {
+                    "cornerCall": "1",
+                    "fromAngleDegrees": 3,
+                    "toAngleDegrees": 20
+                },
+                {
+                    "cornerCall": "2",
+                    "fromAngleDegrees": 20,
+                    "toAngleDegrees": 40
+                },
+                {
+                    "cornerCall": "3",
+                    "fromAngleDegrees": 40,
+                    "toAngleDegrees": 60
+                },
+                {
+                    "cornerCall": "4",
+                    "fromAngleDegrees": 60,
+                    "toAngleDegrees": 80
+                },
+                {
+                    "cornerCall": "5",
+                    "fromAngleDegrees": 80,
+                    "toAngleDegrees": 100
+                },
+                {
+                    "cornerCall": "6",
+                    "fromAngleDegrees": 100,
+                    "toAngleDegrees": 10000
+                }
+            ]
+        }
+    ]
+}

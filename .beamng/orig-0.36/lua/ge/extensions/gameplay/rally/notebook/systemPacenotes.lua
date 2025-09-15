@@ -1,0 +1,191 @@
+-- This Source Code Form is subject to the terms of the bCDDL, v. 1.1.
+-- If a copy of the bCDDL was not distributed with this
+-- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
+
+
+-- local M = {}
+
+
+-- local staticPacenotes = {
+--   {
+--     name = "damage_1",
+--     text = {
+--       english = "We just took some damage!",
+--     },
+--     chill = false
+--   },
+--   {
+--     name = "go_1",
+--     text = {
+--       english = "go."
+--     }
+--   },
+--   {
+--     name = "countdown1_1",
+--     text = {
+--       english = "one"
+--     }
+--   },
+--   {
+--     name = "countdown2_1",
+--     text = {
+--       english = "two"
+--     }
+--   },
+--   {
+--     name = "countdown3_1",
+--     text = {
+--       english = "three"
+--     }
+--   },
+--   {
+--     name = "countdown4_1",
+--     text = {
+--       english = "four"
+--     }
+--   },
+--   {
+--     name = "countdown5_1",
+--     text = {
+--       english = "five"
+--     }
+--   },
+--   {
+--     name = "finish_1",
+--     text = {
+--       english = "Good job, stop the car at stop control."
+--     }
+--   },
+--   {
+--     name = "finish_2",
+--     text = {
+--       english = "Stop the car and let me out!",
+--     },
+--     weight = 0.3
+--   },
+--   {
+--     name = "finish_3",
+--     text = {
+--       english = "I'm going to get out now.",
+--     },
+--     weight = 0.2
+--   },
+--   {
+--     name = "finish_4",
+--     text = {
+--       english = "I'm going back to my desk job.",
+--     },
+--     weight = 0.2
+--   },
+--   {
+--     name = "finish_5",
+--     text = {
+--       english = "I'm actually surprised we made it.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "finish_6",
+--     text = {
+--       english = "This is literally unbearable.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteintro_1",
+--     text = {
+--       english = "The first note is:",
+--     },
+--     weight = 0.6
+--   },
+--   {
+--     name = "firstnoteintro_2",
+--     text = {
+--       english = "Here's the first note:",
+--     },
+--     weight = 0.3
+--   },
+--   {
+--     name = "firstnoteoutro_1",
+--     text = {
+--       english = "Good luck.",
+--     },
+--     weight = 0.5
+--   },
+--   {
+--     name = "firstnoteoutro_2",
+--     text = {
+--       english = "Dont destroy the car again.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteoutro_3",
+--     text = {
+--       english = "Dont destroy another racecar.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteoutro_4",
+--     text = {
+--       english = "Let's see if we can make it past the first corner.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteoutro_5",
+--     text = {
+--       english = "The fire extinguisher is empty!",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteoutro_6",
+--     text = {
+--       english = "R.I.P., car.",
+--     },
+--     weight = 0.1
+--   },
+--   {
+--     name = "firstnoteoutro_7",
+--     text = {
+--       english = "I'm scared.",
+--     },
+--     weight = 0.1
+--   }
+-- }
+
+-- M.getCopy = function(langs)
+--   local spCopy = deepcopy(staticPacenotes)
+--   local out = {}
+
+--   for i, sp in ipairs(spCopy) do
+--     local notes = {}
+
+--     for _,lang in ipairs(langs) do
+--       notes[lang.language] = {
+--         note = {
+--           freeform = sp.text[lang.language]
+--         }
+--       }
+--     end
+
+--     local newSp = {
+--       oldId = i,
+--       name = sp.name,
+--       metadata = {
+--         static = true, -- legacy field
+--         system = true,
+--         chill = sp.chill,
+--         weight = sp.weight
+--       },
+--       ['notes'] = notes
+--     }
+--     table.insert(out, newSp)
+--   end
+
+--   return out
+-- end
+
+-- return M

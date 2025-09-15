@@ -1,0 +1,21 @@
+{
+  "EnablePostFX": "0",
+
+  "DOF": {
+    "Enable": "0",
+    "EnableDebugMode" : "0",
+  },
+
+  "HDR1": {
+    "Enable": "0",
+    "ColorCorrectionRamp2": "lua/ge/client/postFx/default_color_ramp.png",
+  },
+
+  "SSAO": {
+    "Enable": "0",
+  },
+
+  "LightRays": {
+    "Enable": "0",
+  }
+}
