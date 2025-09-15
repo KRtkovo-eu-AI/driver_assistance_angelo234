@@ -464,6 +464,60 @@ local function updateVirtualLidar(dt, veh)
     local detections = {}
     local processed = {[veh:getID()] = true}
     local vehicle_hits = {}
+    local pendingVehicles = {}
+    local occlusionCells = {}
+    local groundThreshold = -1.5
+
+    local H_ANG_STEP = math.rad(0.2)
+    local V_ANG_STEP = math.rad(0.25)
+    local MAX_SURFACE_STEPS = 20
+    local BASE_SPACING_ANGLE = math.rad(0.35)
+    local TAN_BASE_SPACING = math.tan(BASE_SPACING_ANGLE)
+    local DENSITY_FACTOR = 0.75
+    local MIN_SPACING = 0.12
+    local MAX_SPACING = 1.2
+
+    local function computeSpacing(distance)
+      local spacing = distance * TAN_BASE_SPACING * DENSITY_FACTOR
+      if spacing < MIN_SPACING then spacing = MIN_SPACING end
+      if spacing > MAX_SPACING then spacing = MAX_SPACING end
+      return spacing
+    end
+
+    local function occlusionKey(rel)
+      local planarX = rel:dot(right)
+      local planarY = rel:dot(dir)
+      local horiz = math.atan2(planarX, planarY)
+      local planarLen = math.sqrt(planarX * planarX + planarY * planarY)
+      local vert
+      if planarLen < 1e-6 then
+        vert = rel:dot(up) >= 0 and math.pi / 2 or -math.pi / 2
+      else
+        vert = math.atan2(rel:dot(up), planarLen)
+      end
+      local hKey = math.floor(horiz / H_ANG_STEP)
+      local vKey = math.floor(vert / V_ANG_STEP)
+      return hKey .. ':' .. vKey, rel:length()
+    end
+
+    local function registerOcclusion(rel)
+      local key, dist = occlusionKey(rel)
+      local existing = occlusionCells[key]
+      if not existing or dist < existing then
+        occlusionCells[key] = dist
+      end
+    end
+
+    local function occlusionAllows(rel, spacing)
+      local key, dist = occlusionKey(rel)
+      local margin = math.max(spacing * 0.5, 0.05)
+      local existing = occlusionCells[key]
+      if not existing or dist + margin < existing then
+        occlusionCells[key] = dist
+        return true
+      end
+      return false
+    end
 
     local function allowedDistance(rel)
       local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
@@ -477,7 +531,16 @@ local function updateVirtualLidar(dt, veh)
       end
     end
 
-    local function addVehicle(vehObj, props)
+    for _, p in ipairs(scan_hits) do
+      if not insideSelf(p) then
+        local rel = p - origin
+        if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
+          registerOcclusion(rel)
+        end
+      end
+    end
+
+    local function queueVehicle(vehObj, props)
       if not vehObj or not props then return end
       if props.id == veh:getID() or processed[props.id] then return end
       processed[props.id] = true
@@ -485,29 +548,94 @@ local function updateVirtualLidar(dt, veh)
       local bb = props.bb
       if not bb then return end
       local center = props.center_pos
+      if not center then
+        local bbCenter = bb:getCenter()
+        center = vec3(bbCenter.x, bbCenter.y, bbCenter.z)
+      end
+      pendingVehicles[#pendingVehicles + 1] = {
+        veh = vehObj,
+        props = props,
+        bb = bb,
+        center = center
+      }
+    end
+
+    local function rasterVehicle(entry)
+      local vehObj = entry.veh
+      local bb = entry.bb
+      local center = entry.center
       local half_extents = bb:getHalfExtents()
       local axis_x = vec3(bb:getAxis(0))
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
-      local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
-      local function stepsFor(span)
-        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
-      end
-      local steps_x = stepsFor(half_extents.x * 2)
-      local steps_y = stepsFor(half_extents.y * 2)
-      for xi = -steps_x, steps_x do
-        local offset_x = axis_x * (half_extents.x * xi / steps_x)
-        for yi = -steps_y, steps_y do
-          local offset_y = axis_y * (half_extents.y * yi / steps_y)
-          local p = top + offset_x + offset_y
-          local rel = p - origin
-          if rel:length() < allowedDistance(rel) then
-            vehicle_hits[#vehicle_hits + 1] = p
+
+      local surfaces = {
+        {
+          center = center + axis_x * half_extents.x,
+          axisA = axis_y,
+          spanA = half_extents.y * 2,
+          axisB = axis_z,
+          spanB = half_extents.z * 2,
+          normal = axis_x
+        },
+        {
+          center = center - axis_x * half_extents.x,
+          axisA = axis_y,
+          spanA = half_extents.y * 2,
+          axisB = axis_z,
+          spanB = half_extents.z * 2,
+          normal = axis_x * -1
+        },
+        {
+          center = center + axis_y * half_extents.y,
+          axisA = axis_x,
+          spanA = half_extents.x * 2,
+          axisB = axis_z,
+          spanB = half_extents.z * 2,
+          normal = axis_y
+        },
+        {
+          center = center - axis_y * half_extents.y,
+          axisA = axis_x,
+          spanA = half_extents.x * 2,
+          axisB = axis_z,
+          spanB = half_extents.z * 2,
+          normal = axis_y * -1
+        },
+        {
+          center = center + axis_z * half_extents.z,
+          axisA = axis_x,
+          spanA = half_extents.x * 2,
+          axisB = axis_y,
+          spanB = half_extents.y * 2,
+          normal = axis_z
+        }
+      }
+
+      for _, surface in ipairs(surfaces) do
+        local toSensor = origin - surface.center
+        if surface.normal:dot(toSensor) > 0 then
+          local dist = (surface.center - origin):length()
+          local spacing = computeSpacing(dist)
+          local stepsA = math.max(1, math.min(MAX_SURFACE_STEPS, math.ceil(surface.spanA / spacing)))
+          local stepsB = math.max(1, math.min(MAX_SURFACE_STEPS, math.ceil(surface.spanB / spacing)))
+          local halfA = surface.spanA * 0.5
+          local halfB = surface.spanB * 0.5
+          for ai = -stepsA, stepsA do
+            local offsetA = surface.axisA * (halfA * ai / stepsA)
+            for bi = -stepsB, stepsB do
+              local offsetB = surface.axisB * (halfB * bi / stepsB)
+              local point = surface.center + offsetA + offsetB
+              local rel = point - origin
+              if rel:length() <= allowedDistance(rel) and occlusionAllows(rel, spacing) then
+                vehicle_hits[#vehicle_hits + 1] = point
+              end
+            end
           end
         end
       end
+
+      local top = center + axis_z * half_extents.z
       local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
@@ -519,7 +647,7 @@ local function updateVirtualLidar(dt, veh)
     if front_sensor_data and front_sensor_data[2] then
       for _, data in ipairs(front_sensor_data[2]) do
         if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
-          addVehicle(data.other_veh, data.other_veh_props)
+          queueVehicle(data.other_veh, data.other_veh_props)
         end
       end
     end
@@ -529,7 +657,7 @@ local function updateVirtualLidar(dt, veh)
       if vehRear then
         local propsRear = extra_utils.getVehicleProperties(vehRear)
         if not extra_utils.isVehicleGhost(vehRear, propsRear) then
-          addVehicle(vehRear, propsRear)
+          queueVehicle(vehRear, propsRear)
         end
       end
     end
@@ -539,12 +667,21 @@ local function updateVirtualLidar(dt, veh)
       if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
         local otherProps = extra_utils.getVehicleProperties(other)
         if not extra_utils.isVehicleGhost(other, otherProps) then
-          addVehicle(other, otherProps)
+          queueVehicle(other, otherProps)
         end
       end
     end
 
-    local groundThreshold = -1.5
+    table.sort(pendingVehicles, function(a, b)
+      local relA = a.center - origin
+      local relB = b.center - origin
+      return relA:dot(relA) < relB:dot(relB)
+    end)
+
+    for _, entry in ipairs(pendingVehicles) do
+      rasterVehicle(entry)
+    end
+
     local current_cloud = {}
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
