@@ -22,6 +22,7 @@ local logger = require('scripts/driver_assistance_angelo234/logger')
 local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacleBrakingSystem')
 local lane_centering_system = require('scripts/driver_assistance_angelo234/laneCenteringAssistSystem')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
+local drift_proximity = require('scripts/driver_assistance_angelo234/driftProximity')
 
 local first_update = true
 
@@ -48,11 +49,14 @@ local auto_headlight_system_update_timer = 0
 local virtual_lidar_update_timer = 0
 local VIRTUAL_LIDAR_PHASES = 12
 local virtual_lidar_point_cloud = {}
+local virtual_lidar_frames = {}
 
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
+  virtual_lidar_frames = {}
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
+    virtual_lidar_frames[i] = nil
   end
 end
 
@@ -327,6 +331,12 @@ local function updateVirtualLidar(dt, veh)
     local origin = vec3(pos.x, pos.y, pos.z + 1.8)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
+    virtual_lidar_frames[virtual_lidar_phase + 1] = {
+      origin = origin,
+      dir = dir,
+      right = right,
+      up = up
+    }
     local max_dist = aeb_params.sensor_max_distance
     -- keep full lidar range ahead, but halve reach for rear and side sectors
     local front_dist = max_dist
@@ -662,10 +672,22 @@ local function onUpdate(dt)
 end
 
 local function getVirtualLidarPointCloud()
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return {} end
+  local pos = veh:getPosition()
+  local dir = veh:getDirectionVector()
+  dir.z = 0
+  dir = dir:normalized()
+  local up = veh:getDirectionVectorUp():normalized()
+  local right = dir:cross(up):normalized()
+  local curr = {origin = vec3(pos.x, pos.y, pos.z + 1.8), dir = dir, right = right, up = up}
   local combined = {}
   for i = 1, #virtual_lidar_point_cloud do
-    for j = 1, #virtual_lidar_point_cloud[i] do
-      combined[#combined + 1] = virtual_lidar_point_cloud[i][j]
+    local frame = virtual_lidar_frames[i]
+    if frame then
+      for j = 1, #virtual_lidar_point_cloud[i] do
+        combined[#combined + 1] = drift_proximity.apply(virtual_lidar_point_cloud[i][j], frame, curr)
+      end
     end
   end
   return combined

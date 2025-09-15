@@ -11,6 +11,8 @@ describe('extension', function()
     package.loaded['scripts/driver_assistance_angelo234/accSystem'] = nil
     package.loaded['scripts/driver_assistance_angelo234/hillStartAssistSystem'] = nil
     package.loaded['scripts/driver_assistance_angelo234/autoHeadlightSystem'] = nil
+    package.loaded['scripts/driver_assistance_angelo234/laneCenteringAssistSystem'] = nil
+    package.loaded['controlSystems'] = nil
   end)
 
   it('does not call missing init functions on first update', function()
@@ -27,6 +29,7 @@ describe('extension', function()
       systemSwitchedOn = function() end,
       update = function() end,
     }
+    package.loaded['scripts/driver_assistance_angelo234/laneCenteringAssistSystem'] = { getLaneData = function() return nil end }
 
     _G.be = { getPlayerVehicle = function() return nil end }
 
@@ -69,6 +72,7 @@ describe('extension', function()
       systemSwitchedOn = function() end,
       update = function(_, _, vehs) passed_vehs = vehs end,
     }
+    package.loaded['scripts/driver_assistance_angelo234/laneCenteringAssistSystem'] = { getLaneData = function() return nil end }
 
     _G.be = {
       getPlayerVehicle = function()
@@ -134,6 +138,7 @@ describe('extension', function()
     package.loaded['scripts/driver_assistance_angelo234/obstacleBrakingSystem'] = {
       update = function() aeb_called = aeb_called + 1 end
     }
+    package.loaded['scripts/driver_assistance_angelo234/laneCenteringAssistSystem'] = { getLaneData = function() return nil end }
 
     _G.be = {
       getPlayerVehicle = function()
