@@ -344,39 +344,19 @@ local function updateVirtualLidar(dt, veh)
     local side_dist = rear_dist
     local ANG_FRONT = 85
     local ANG_SIDE = 130
-    local vel = veh:getVelocity()
-    local forward_speed = vel:dot(dir) * 3.6
-    local hits
-
-    if forward_speed > 35 then
-      hits = virtual_lidar.scan(
-        origin,
-        dir,
-        up,
-        front_dist,
-        math.rad(170),
-        math.rad(30),
-        40,
-        15,
-        0,
-        veh:getID(),
-        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
-      )
-    else
-      hits = virtual_lidar.scan(
-        origin,
-        dir,
-        up,
-        front_dist,
-        math.rad(360),
-        math.rad(30),
-        60,
-        15,
-        0,
-        veh:getID(),
-        {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
-      )
-    end
+    local hits = virtual_lidar.scan(
+      origin,
+      dir,
+      up,
+      front_dist,
+      math.rad(360),
+      math.rad(30),
+      60,
+      15,
+      0,
+      veh:getID(),
+      {hStart = virtual_lidar_phase, hStep = VIRTUAL_LIDAR_PHASES}
+    )
 
     -- cache properties of the player's vehicle for later filtering
     local veh_props = extra_utils.getVehicleProperties(veh)
