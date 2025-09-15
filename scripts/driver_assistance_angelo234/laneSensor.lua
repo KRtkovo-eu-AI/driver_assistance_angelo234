@@ -137,24 +137,33 @@ local lane_width, lateral_offset, road_dir, future_dir, curvature
       local lane_center = 0.5 * (left_lat + right_lat)
       local lidar_offset = -lane_center
 
-      lane_width = lane_width and (lane_width * 0.7 + lidar_width * 0.3) or lidar_width
-      lateral_offset = lateral_offset and (lateral_offset * 0.7 + lidar_offset * 0.3) or lidar_offset
-      road_dir = road_dir and (road_dir + lidar_dir):normalized() or lidar_dir
-      future_dir = future_dir and (future_dir + lidar_future_dir):normalized() or lidar_future_dir
-      curvature = curvature and (curvature + lidar_curvature) * 0.5 or lidar_curvature
+      lane_width = lane_width and (lane_width * 0.85 + lidar_width * 0.15) or lidar_width
+      lateral_offset = lateral_offset and (lateral_offset * 0.85 + lidar_offset * 0.15) or lidar_offset
+      road_dir = road_dir and (road_dir * 0.85 + lidar_dir * 0.15):normalized() or lidar_dir
+      future_dir = future_dir and (future_dir * 0.85 + lidar_future_dir * 0.15):normalized() or lidar_future_dir
+      curvature = curvature and (curvature * 0.85 + lidar_curvature * 0.15) or lidar_curvature
+    end
+  end
+
+  if lane_width and lateral_offset then
+    local half = lane_width * 0.5
+    if lateral_offset > half then
+      lateral_offset = half
+    elseif lateral_offset < -half then
+      lateral_offset = -half
     end
   end
 
   if not lane_width or not lateral_offset or not road_dir then return nil end
 
-  M.prev_width = M.prev_width and (M.prev_width + (lane_width - M.prev_width) * 0.1) or lane_width
-  M.prev_offset = M.prev_offset and (M.prev_offset + (lateral_offset - M.prev_offset) * 0.1) or lateral_offset
-  M.prev_dir = M.prev_dir and (M.prev_dir + (road_dir - M.prev_dir) * 0.1):normalized() or road_dir
+  M.prev_width = M.prev_width and (M.prev_width + (lane_width - M.prev_width) * 0.05) or lane_width
+  M.prev_offset = M.prev_offset and (M.prev_offset + (lateral_offset - M.prev_offset) * 0.05) or lateral_offset
+  M.prev_dir = M.prev_dir and (M.prev_dir + (road_dir - M.prev_dir) * 0.05):normalized() or road_dir
   if future_dir then
-    M.prev_future_dir = M.prev_future_dir and (M.prev_future_dir + (future_dir - M.prev_future_dir) * 0.1):normalized() or future_dir
+    M.prev_future_dir = M.prev_future_dir and (M.prev_future_dir + (future_dir - M.prev_future_dir) * 0.05):normalized() or future_dir
   end
   if curvature then
-    M.prev_curvature = M.prev_curvature and (M.prev_curvature + (curvature - M.prev_curvature) * 0.1) or curvature
+    M.prev_curvature = M.prev_curvature and (M.prev_curvature + (curvature - M.prev_curvature) * 0.05) or curvature
   end
 
   return {

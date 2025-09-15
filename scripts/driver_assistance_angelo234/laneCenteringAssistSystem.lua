@@ -22,6 +22,13 @@ local function update(dt, veh, system_params)
     return
   end
 
+  local veh_props = extra_utils.getVehicleProperties(veh)
+  local forward_speed = veh_props.velocity:dot(veh_props.dir)
+  if forward_speed <= 0 then
+    latest_data = nil
+    return
+  end
+
   local sensor = lane_sensor.sense(veh)
   latest_data = sensor
   if not sensor then return end
@@ -31,8 +38,8 @@ local function update(dt, veh, system_params)
   local steer_limit = params.steer_limit or 0.15
 
   if not steering_pid then
-    steering_pid = newPIDStandard(params.steer_kp or 0.1, 0, params.steer_kd or 0.1, -steer_limit, steer_limit)
-    local smooth = (params.steer_smoothing or 0.4) * 1000
+    steering_pid = newPIDStandard(params.steer_kp or 0.2, 0, params.steer_kd or 0.2, -steer_limit, steer_limit)
+    local smooth = (params.steer_smoothing or 0.2) * 1000
     steering_smooth = newTemporalSmoothing(smooth, smooth)
   end
 
@@ -47,7 +54,6 @@ local function update(dt, veh, system_params)
   local warn_zone = warn_ratio * half_width
 
   -- Compute heading error using look-ahead direction when available
-  local veh_props = extra_utils.getVehicleProperties(veh)
   local desired_dir = sensor.future_dir or sensor.road_dir or veh_props.dir
   local heading_error = veh_props.dir:cross(desired_dir).z
 
@@ -73,8 +79,8 @@ local function update(dt, veh, system_params)
   local assist_weight = math.max(0, 1 - math.abs(raw_input) * 5)
 
   local disable_thresh = params.override_threshold or 0.2
-  if math.abs(raw_input) > disable_thresh then
-    override_timer = params.override_cooldown or 5
+  if forward_speed > 0 and math.abs(raw_input) > disable_thresh then
+    override_timer = params.override_cooldown or 10
     ui_message("Lane Centering Assist disengaged")
     return
   end
