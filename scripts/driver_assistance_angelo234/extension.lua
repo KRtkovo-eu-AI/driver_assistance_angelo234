@@ -55,6 +55,8 @@ local front_lidar_point_cloud = {}
 local front_lidar_frames = {}
 local front_lidar_point_cloud_wip = {}
 local front_lidar_frames_wip = {}
+local vehicle_lidar_point_cloud = {}
+local vehicle_lidar_frame = nil
 
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
@@ -63,6 +65,8 @@ local function resetVirtualLidarPointCloud()
   front_lidar_frames = {}
   front_lidar_point_cloud_wip = {}
   front_lidar_frames_wip = {}
+  vehicle_lidar_point_cloud = {}
+  vehicle_lidar_frame = nil
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
     virtual_lidar_frames[i] = nil
@@ -423,7 +427,7 @@ local function updateVirtualLidar(dt, veh)
     local side_dist = base_dist * 0.5
     local ANG_FRONT = 85
     local ANG_REAR = 112.5
-    local hits = virtual_lidar.scan(
+    local scan_hits = virtual_lidar.scan(
       origin,
       dir,
       up,
@@ -459,6 +463,7 @@ local function updateVirtualLidar(dt, veh)
 
     local detections = {}
     local processed = {[veh:getID()] = true}
+    local vehicle_hits = {}
 
     local function allowedDistance(rel)
       local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
@@ -482,20 +487,13 @@ local function updateVirtualLidar(dt, veh)
       local x = vec3(bb:getAxis(0)) * bb:getHalfExtents().x
       local y = vec3(bb:getAxis(1)) * bb:getHalfExtents().y
       local z = vec3(bb:getAxis(2)) * bb:getHalfExtents().z
-      local corners = {
-        center + x + y + z,
-        center + x - y + z,
-        center - x + y + z,
-        center - x - y + z,
-        center + x + y - z,
-        center + x - y - z,
-        center - x + y - z,
-        center - x - y - z
-      }
-      for _, c in ipairs(corners) do
-        local rel = c - origin
-        if rel:length() < allowedDistance(rel) then
-          hits[#hits + 1] = c
+      for xi = -1, 1, 0.5 do
+        for yi = -1, 1, 0.5 do
+          local p = center + x * xi + y * yi + z
+          local rel = p - origin
+          if rel:length() < allowedDistance(rel) then
+            vehicle_hits[#vehicle_hits + 1] = p
+          end
         end
       end
       local top = center + z
@@ -532,7 +530,7 @@ local function updateVirtualLidar(dt, veh)
 
     local groundThreshold = -1.5
     local current_cloud = {}
-    for _, p in ipairs(hits) do
+    for _, p in ipairs(scan_hits) do
       local rel = p - origin
       if rel:dot(up) >= groundThreshold and not insideSelf(p) and rel:length() <= allowedDistance(rel) then
         current_cloud[#current_cloud + 1] = {
@@ -543,6 +541,20 @@ local function updateVirtualLidar(dt, veh)
       end
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
+
+    local veh_cloud = {}
+    for _, p in ipairs(vehicle_hits) do
+      local rel = p - origin
+      if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
+        veh_cloud[#veh_cloud + 1] = {
+          x = rel:dot(right),
+          y = rel:dot(dir),
+          z = rel:dot(up)
+        }
+      end
+    end
+    vehicle_lidar_point_cloud = veh_cloud
+    vehicle_lidar_frame = {origin = origin, dir = dir, right = right, up = up}
 
     for _, d in ipairs(detections) do
       local rel = d.pos - origin
@@ -740,6 +752,11 @@ local function getVirtualLidarPointCloud()
       for j = 1, #front_lidar_point_cloud[i] do
         combined[#combined + 1] = drift_proximity.apply(front_lidar_point_cloud[i][j], frame, curr)
       end
+    end
+  end
+  if vehicle_lidar_frame then
+    for i = 1, #vehicle_lidar_point_cloud do
+      combined[#combined + 1] = drift_proximity.apply(vehicle_lidar_point_cloud[i], vehicle_lidar_frame, curr)
     end
   end
   return combined
