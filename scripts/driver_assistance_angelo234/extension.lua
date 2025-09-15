@@ -427,6 +427,7 @@ local function updateVirtualLidar(dt, veh)
     local side_dist = base_dist * 0.5
     local ANG_FRONT = 85
     local ANG_REAR = 112.5
+    local groundThreshold = -1.5
     local scan_hits = virtual_lidar.scan(
       origin,
       dir,
@@ -463,7 +464,17 @@ local function updateVirtualLidar(dt, veh)
 
     local detections = {}
     local processed = {[veh:getID()] = true}
-    local vehicle_hits = {}
+    local vehicle_candidates = {}
+
+    local BASE_ANGULAR_RES = math.rad(0.6)
+    local ANGULAR_FACTOR = math.tan(BASE_ANGULAR_RES)
+    local MIN_POINT_SPACING = 0.15
+    local MAX_POINT_SPACING = 1.25
+    local MAX_FACE_STEPS = 32
+
+    local OCCLUSION_AZ_RES = math.rad(0.35)
+    local OCCLUSION_EL_RES = math.rad(0.35)
+    local OCCLUSION_EPS = 0.05
 
     local function allowedDistance(rel)
       local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
@@ -474,6 +485,57 @@ local function updateVirtualLidar(dt, veh)
         return rear_dist
       else
         return side_dist
+      end
+    end
+
+    local function pointSpacing(distance)
+      local spacing = distance * ANGULAR_FACTOR
+      if spacing < MIN_POINT_SPACING then spacing = MIN_POINT_SPACING end
+      if spacing > MAX_POINT_SPACING then spacing = MAX_POINT_SPACING end
+      return spacing
+    end
+
+    local function stepsForSpan(span, spacing)
+      local steps = math.ceil(span / spacing)
+      if steps < 1 then steps = 1 end
+      if steps > MAX_FACE_STEPS then steps = MAX_FACE_STEPS end
+      return steps
+    end
+
+    local function addCandidate(rel)
+      local rel_up = rel:dot(up)
+      if rel_up < groundThreshold then return end
+      local dist = rel:length()
+      if dist > allowedDistance(rel) then return end
+      local rel_right = rel:dot(right)
+      local rel_dir = rel:dot(dir)
+      vehicle_candidates[#vehicle_candidates + 1] = {
+        right = rel_right,
+        dir = rel_dir,
+        up = rel_up,
+        dist = dist
+      }
+    end
+
+    local function sampleFace(face_center, axis_u, half_u, axis_v, half_v, normal, spacing_multiplier)
+      local to_lidar = origin - face_center
+      if to_lidar:dot(normal) <= 0 then return end
+      local distance = to_lidar:length()
+      if distance <= 0 then return end
+      local spacing = pointSpacing(distance)
+      if spacing_multiplier then spacing = spacing * spacing_multiplier end
+      local steps_u = stepsForSpan(half_u * 2, spacing)
+      local steps_v = stepsForSpan(half_v * 2, spacing)
+      addCandidate(face_center - origin)
+      for ui = 0, steps_u do
+        local frac_u = -1 + 2 * (ui / steps_u)
+        local offset_u = axis_u * (half_u * frac_u)
+        for vi = 0, steps_v do
+          local frac_v = -1 + 2 * (vi / steps_v)
+          local offset_v = axis_v * (half_v * frac_v)
+          local p = face_center + offset_u + offset_v
+          addCandidate(p - origin)
+        end
       end
     end
 
@@ -490,24 +552,16 @@ local function updateVirtualLidar(dt, veh)
       local axis_y = vec3(bb:getAxis(1))
       local axis_z = vec3(bb:getAxis(2))
       local top = center + axis_z * half_extents.z
-      local raster_spacing = 0.5
-      local max_steps = 20
-      local function stepsFor(span)
-        return math.max(1, math.min(max_steps, math.ceil(span / raster_spacing)))
-      end
-      local steps_x = stepsFor(half_extents.x * 2)
-      local steps_y = stepsFor(half_extents.y * 2)
-      for xi = -steps_x, steps_x do
-        local offset_x = axis_x * (half_extents.x * xi / steps_x)
-        for yi = -steps_y, steps_y do
-          local offset_y = axis_y * (half_extents.y * yi / steps_y)
-          local p = top + offset_x + offset_y
-          local rel = p - origin
-          if rel:length() < allowedDistance(rel) then
-            vehicle_hits[#vehicle_hits + 1] = p
-          end
-        end
-      end
+      sampleFace(top, axis_x, half_extents.x, axis_y, half_extents.y, axis_z, 2.0)
+      local right_face_center = center + axis_x * half_extents.x
+      local left_face_center = center - axis_x * half_extents.x
+      local front_face_center = center + axis_y * half_extents.y
+      local rear_face_center = center - axis_y * half_extents.y
+      sampleFace(right_face_center, axis_y, half_extents.y, axis_z, half_extents.z, axis_x)
+      sampleFace(left_face_center, axis_y, half_extents.y, axis_z, half_extents.z, axis_x * -1)
+      sampleFace(front_face_center, axis_x, half_extents.x, axis_z, half_extents.z, axis_y)
+      sampleFace(rear_face_center, axis_x, half_extents.x, axis_z, half_extents.z, axis_y * -1)
+
       local relTop = top - origin
       if relTop:length() <= allowedDistance(relTop) then
         local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
@@ -544,7 +598,6 @@ local function updateVirtualLidar(dt, veh)
       end
     end
 
-    local groundThreshold = -1.5
     local current_cloud = {}
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
@@ -558,14 +611,32 @@ local function updateVirtualLidar(dt, veh)
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
 
+    table.sort(vehicle_candidates, function(a, b) return a.dist < b.dist end)
+
+    local occlusion_bins = {}
+    local inv_az_res = 1 / OCCLUSION_AZ_RES
+    local inv_el_res = 1 / OCCLUSION_EL_RES
+
     local veh_cloud = {}
-    for _, p in ipairs(vehicle_hits) do
-      local rel = p - origin
-      if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
+    for _, candidate in ipairs(vehicle_candidates) do
+      local horiz = math.sqrt(candidate.right * candidate.right + candidate.dir * candidate.dir)
+      local az = math.atan2(candidate.right, candidate.dir)
+      local el
+      if horiz > 1e-6 then
+        el = math.atan2(candidate.up, horiz)
+      else
+        el = candidate.up >= 0 and math.pi / 2 or -math.pi / 2
+      end
+      local az_key = math.floor(az * inv_az_res + 0.5)
+      local el_key = math.floor(el * inv_el_res + 0.5)
+      local key = az_key .. ':' .. el_key
+      local prev = occlusion_bins[key]
+      if not prev or candidate.dist < prev - OCCLUSION_EPS then
+        occlusion_bins[key] = candidate.dist
         veh_cloud[#veh_cloud + 1] = {
-          x = rel:dot(right),
-          y = rel:dot(dir),
-          z = rel:dot(up)
+          x = candidate.right,
+          y = candidate.dir,
+          z = candidate.up
         }
       end
     end
