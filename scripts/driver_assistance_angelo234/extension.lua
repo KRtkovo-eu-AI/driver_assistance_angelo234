@@ -328,9 +328,10 @@ local function updateVirtualLidar(dt, veh)
     -- In BeamNG's left-handed system, forward × up yields the vehicle's right
     local right = dir:cross(up):normalized()
     local max_dist = aeb_params.sensor_max_distance
+    -- keep full lidar range ahead, but halve reach for rear and side sectors
     local front_dist = max_dist
     local rear_dist = max_dist * 0.5
-    local side_dist = max_dist * 0.25
+    local side_dist = rear_dist
     local ANG_FRONT = 67.5
     local ANG_SIDE = 112.5
     local vel = veh:getVelocity()
