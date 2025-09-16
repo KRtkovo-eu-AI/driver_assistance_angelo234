@@ -99,6 +99,8 @@ angular.module('beamng.apps')
         finalSteer: '—',
         pathPoints: '—',
         curvatureRadius: '—',
+        branchCount: '—',
+        branchInfo: '—',
         warning: false
       }
 
@@ -201,10 +203,39 @@ angular.module('beamng.apps')
             vm.pathTruncated = (truncated || coverageLimited) ? 'Yes' : 'No'
             var pointCount = path.center && path.center.length
             vm.pathPoints = pointCount ? pointCount : '—'
+            var branches = path.branches || []
+            if (branches.length) {
+              vm.branchCount = branches.length.toString()
+              var left = 0
+              var right = 0
+              var forward = 0
+              for (var b = 0; b < branches.length; b++) {
+                var branch = branches[b]
+                if (branch && typeof branch.turn === 'number') {
+                  if (branch.turn > 0.05) {
+                    left++
+                  } else if (branch.turn < -0.05) {
+                    right++
+                  } else {
+                    forward++
+                  }
+                }
+              }
+              var parts = []
+              if (forward) parts.push(forward + ' straight')
+              if (left) parts.push(left + ' left')
+              if (right) parts.push(right + ' right')
+              vm.branchInfo = parts.length ? parts.join(' • ') : branches.length + ' options'
+            } else {
+              vm.branchCount = '0'
+              vm.branchInfo = '—'
+            }
           } else {
             vm.lookahead = vm.lookaheadTarget = '—'
             vm.pathCoverage = vm.pathSegments = vm.pathTruncated = '—'
             vm.pathPoints = '—'
+            vm.branchCount = '—'
+            vm.branchInfo = '—'
           }
           vm.speed = formatNumber(lane.speed, 1)
           if (typeof lane.curvature === 'number' && isFinite(lane.curvature)) {
@@ -222,6 +253,8 @@ angular.module('beamng.apps')
           vm.pathCoverage = vm.pathSegments = vm.pathTruncated = vm.speed = '—'
           vm.pathPoints = '—'
           vm.curvatureRadius = '—'
+          vm.branchCount = '—'
+          vm.branchInfo = '—'
         }
 
         if (assist && assist.steering) {
@@ -327,6 +360,17 @@ angular.module('beamng.apps')
           var absX = Math.abs(pt.x)
           if (absX > maxLateral) maxLateral = absX
         }
+        var branchList = path.branches || []
+        for (var bi = 0; bi < branchList.length; bi++) {
+          var branchPath = branchList[bi] && branchList[bi].center
+          if (!branchPath) continue
+          for (var bj = 0; bj < branchPath.length; bj++) {
+            var bp = branchPath[bj]
+            if (bp.y > maxForward) maxForward = bp.y
+            var bAbsX = Math.abs(bp.x)
+            if (bAbsX > maxLateral) maxLateral = bAbsX
+          }
+        }
 
         var scaleY = (height * 0.65) / (maxForward + 5)
         var scaleX = (width * 0.4) / (maxLateral + (lane.width || 3))
@@ -338,6 +382,27 @@ angular.module('beamng.apps')
         plotPath(path.right, 'rgba(255, 255, 0, 0.8)', boundaryWidth, carX, carY, scale)
         var centerColor = vm.warning ? 'rgba(255, 120, 120, 0.9)' : 'rgba(60, 220, 120, 0.9)'
         plotPath(path.center, centerColor, Math.max(1.8, 2.2 * pixelScale), carX, carY, scale)
+
+        if (branchList.length) {
+          ctx.save()
+          var dash = Math.max(3, 4 * pixelScale)
+          ctx.setLineDash([dash, dash])
+          for (var bi2 = 0; bi2 < branchList.length; bi2++) {
+            var branch = branchList[bi2]
+            if (!branch || !branch.center || branch.center.length < 2) continue
+            var hueColor = 'rgba(160, 180, 255, 0.6)'
+            if (typeof branch.turn === 'number') {
+              if (branch.turn > 0.05) {
+                hueColor = 'rgba(255, 200, 120, 0.7)'
+              } else if (branch.turn < -0.05) {
+                hueColor = 'rgba(120, 200, 255, 0.7)'
+              }
+            }
+            plotPath(branch.center, hueColor, Math.max(1.1, 1.5 * pixelScale), carX, carY, scale)
+          }
+          ctx.setLineDash([])
+          ctx.restore()
+        }
 
         if (path.center && path.center.length > 1) {
           ctx.fillStyle = 'rgba(180, 220, 255, 0.28)'

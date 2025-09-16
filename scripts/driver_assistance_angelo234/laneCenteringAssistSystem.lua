@@ -37,7 +37,8 @@ local activation_handler = nil
 local lane_state = {
   prev_wps = nil,
   desired_offset = nil,
-  lane_width = nil
+  lane_width = nil,
+  prev_path_nodes = nil
 }
 
 local function resetControllers()
@@ -294,7 +295,329 @@ local function selectNextSegment(veh_props, current_wps, params, _preferred_offs
   return extra_utils.getWaypointSegmentFromNodes(veh_props, veh_props, current_wps.end_wp, best_wp)
 end
 
-local function gatherPath(veh_props, initial_wps, desired_offset, params)
+local function buildSegmentsFromNodeList(nodes, veh_props)
+  if not nodes or #nodes < 2 then return {} end
+  local segments = {}
+  for i = 1, #nodes - 1 do
+    local seg = extra_utils.getWaypointSegmentFromNodes(veh_props, veh_props, nodes[i], nodes[i + 1])
+    if seg then
+      segments[#segments + 1] = seg
+    end
+  end
+  return segments
+end
+
+local function computeBranchOrientation(prev_node, node, next_node, veh_dir)
+  if not node or not next_node then return 0, 0 end
+  local node_pos = extra_utils.getWaypointPosition(node)
+  local next_pos = extra_utils.getWaypointPosition(next_node)
+  if not node_pos or not next_pos then return 0, 0 end
+
+  local base_dir = nil
+  if prev_node then
+    local prev_pos = extra_utils.getWaypointPosition(prev_node)
+    if prev_pos then
+      base_dir = extra_utils.toNormXYVec(node_pos - prev_pos)
+    end
+  end
+  if not base_dir or base_dir:length() < 1e-6 then
+    if veh_dir then
+      base_dir = extra_utils.toNormXYVec(veh_dir)
+    else
+      base_dir = extra_utils.toNormXYVec(next_pos - node_pos)
+    end
+  end
+
+  local branch_dir = extra_utils.toNormXYVec(next_pos - node_pos)
+  if branch_dir:length() < 1e-6 then
+    return 0, 0
+  end
+
+  local align = base_dir:dot(branch_dir)
+  local turn = base_dir.x * branch_dir.y - base_dir.y * branch_dir.x
+  return align, turn
+end
+
+local function gatherBranchSpecs(map_data, nodes, params, veh_props, branch_length)
+  if not map_data or not map_data.getPathTWithState or not nodes then return {} end
+
+  local specs = {}
+  local per_node = params.branch_max_per_node or 3
+  local total_cap = params.branch_total_cap or 12
+  local seen = {}
+  local added = 0
+  branch_length = branch_length or params.branch_lookahead or 60
+
+  for idx = 2, #nodes - 1 do
+    local current = nodes[idx]
+    local prev = nodes[idx - 1]
+    local next_node = nodes[idx + 1]
+    local neighbors = extra_utils.getGraphLinks(current)
+    if neighbors then
+      local count = 0
+      for neighbor, link in pairs(neighbors) do
+        if neighbor ~= prev then
+          if not link or link.drivability == nil or link.drivability > 0 then
+            local key = string.format("%s|%s", tostring(current), tostring(neighbor))
+            if not seen[key] then
+              seen[key] = true
+              local branch_nodes = {current}
+              local state_path = {current, neighbor}
+              local waypoint_pos = extra_utils.getWaypointPosition(neighbor)
+              local branch_path = map_data:getPathTWithState(neighbor, waypoint_pos or veh_props.center_pos, branch_length, state_path)
+              local last_node = current
+              if branch_path and #branch_path > 0 then
+                for j = 1, #branch_path do
+                  local bn = branch_path[j]
+                  if bn ~= last_node then
+                    branch_nodes[#branch_nodes + 1] = bn
+                    last_node = bn
+                  end
+                end
+              else
+                branch_nodes[#branch_nodes + 1] = neighbor
+              end
+
+              if #branch_nodes >= 2 then
+                local align, turn = computeBranchOrientation(prev, current, branch_nodes[2], veh_props.dir)
+                specs[#specs + 1] = {
+                  originIndex = idx,
+                  nodes = branch_nodes,
+                  align = align,
+                  turn = turn,
+                  source = current,
+                  target = branch_nodes[2],
+                  isMain = neighbor == next_node
+                }
+                count = count + 1
+                added = added + 1
+                if total_cap and total_cap > 0 and added >= total_cap then
+                  return specs
+                end
+                if per_node and per_node > 0 and count >= per_node then
+                  break
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return specs
+end
+
+local function buildSegmentPlan(veh_props, initial_wps, params, target_length)
+  local map_data = extra_utils.getGraphData()
+  if not map_data or not map_data.getPathTWithState then return nil end
+
+  local state_node = initial_wps.end_wp
+  if not state_node then return nil end
+
+  local prev_path = lane_state.prev_path_nodes
+  local use_prev = prev_path and prev_path[#prev_path] == state_node
+
+  local heading_keep = params.prev_path_heading_keep or 0
+  if use_prev and heading_keep > 0 and #prev_path >= 2 then
+    local last_pos = extra_utils.getWaypointPosition(prev_path[#prev_path])
+    local prev_pos = extra_utils.getWaypointPosition(prev_path[#prev_path - 1])
+    if last_pos and prev_pos then
+      local prev_dir = extra_utils.toNormXYVec(last_pos - prev_pos)
+      if prev_dir:length() > 0 then
+        local heading = prev_dir:dot(extra_utils.toNormXYVec(veh_props.dir))
+        if heading < heading_keep then
+          use_prev = false
+        end
+      end
+    end
+  end
+
+  local state
+  if use_prev then
+    state = prev_path
+  else
+    state = extra_utils.toNormXYVec(veh_props.dir)
+  end
+
+  local branch_extra = params.branch_lookahead or 60
+  if branch_extra < 20 then branch_extra = 20 end
+  local lookahead_goal = target_length + branch_extra
+  local path_nodes = map_data:getPathTWithState(state_node, veh_props.center_pos, lookahead_goal, state)
+  if not path_nodes or #path_nodes == 0 then
+    lane_state.prev_path_nodes = nil
+    return nil
+  end
+
+  lane_state.prev_path_nodes = path_nodes
+
+  local nodes = {initial_wps.start_wp}
+  local last_node = initial_wps.start_wp
+  for i = 1, #path_nodes do
+    local node = path_nodes[i]
+    if node ~= last_node then
+      nodes[#nodes + 1] = node
+      last_node = node
+    end
+  end
+
+  local segments = buildSegmentsFromNodeList(nodes, veh_props)
+  if #segments == 0 then
+    return nil
+  end
+
+  local segment_length_hint = params.segment_length_hint or 5
+  if segment_length_hint < 0.5 then segment_length_hint = 0.5 end
+  local segments_cap = params.path_segments_cap or 0
+  local segment_goal = ceil(target_length / segment_length_hint)
+
+  local limit_cap = segments_cap > 0 and segments_cap or #segments
+  local plan = {
+    nodes = nodes,
+    segments = segments,
+    segment_goal = segment_goal,
+    segment_limit = math.min(#segments, limit_cap),
+    segment_cap = segments_cap > 0 and segments_cap or nil,
+    segment_step = params.path_segments_extend or segment_goal,
+    branch_length = branch_extra
+  }
+
+  plan.branches = gatherBranchSpecs(map_data, nodes, params, veh_props, branch_extra)
+
+  return plan
+end
+
+local function buildPathGeometryFromSegments(veh_props, segments_list, desired_offset, params, target_length)
+  if not segments_list or #segments_list == 0 then return nil end
+
+  local subdivisions = max(1, params.curve_subdivisions or 6)
+  local curvature_samples = params.curvature_samples or 8
+  local future_dir_distance = params.future_dir_distance or 18
+
+  local centers_world = {}
+  local lane_width_sum = 0
+  local lane_width_count = 0
+  local lane_width_est = segments_list[1].lane_width or 0
+  local preferred_offset = desired_offset or 0
+  local total_length = 0
+  local segments_used = 0
+  local last_dir = nil
+  local last_wps = nil
+
+  for i = 1, #segments_list do
+    local wps = segments_list[i]
+    local start_pos = wps.start_wp_pos and vec3(wps.start_wp_pos.x, wps.start_wp_pos.y, veh_props.center_pos.z)
+    local end_pos = wps.end_wp_pos and vec3(wps.end_wp_pos.x, wps.end_wp_pos.y, veh_props.center_pos.z)
+    if start_pos and end_pos then
+      local seg_vec = end_pos - start_pos
+      local seg_len = seg_vec:length()
+      if seg_len > 1e-6 then
+        local seg_dir = vec3(seg_vec.x / seg_len, seg_vec.y / seg_len, 0)
+        local seg_right = vec3(seg_dir.y, -seg_dir.x, 0)
+        lane_width_est = wps.lane_width or lane_width_est
+        if wps.lane_width and wps.lane_width > 0 then
+          lane_width_sum = lane_width_sum + wps.lane_width
+          lane_width_count = lane_width_count + 1
+        end
+        local offsets = buildLaneOffsets(wps.lane_width or lane_width_est, wps.num_of_lanes or 1)
+        preferred_offset = selectOffset(offsets, preferred_offset)
+
+        local start_center = vec3(start_pos.x + seg_right.x * preferred_offset, start_pos.y + seg_right.y * preferred_offset, start_pos.z)
+        local end_center = vec3(end_pos.x + seg_right.x * preferred_offset, end_pos.y + seg_right.y * preferred_offset, end_pos.z)
+
+        if #centers_world == 0 then
+          centers_world[1] = start_center
+        end
+
+        local prev_point = centers_world[#centers_world]
+        if (end_center - prev_point):squaredLength() > 1e-6 then
+          centers_world[#centers_world + 1] = end_center
+          total_length = total_length + (end_center - prev_point):length()
+        end
+
+        segments_used = segments_used + 1
+        last_dir = seg_dir
+        last_wps = wps
+
+        if target_length and target_length > 0 and total_length >= target_length then
+          break
+        end
+      end
+    end
+  end
+
+  if #centers_world < 2 then return nil end
+
+  local lane_width = lane_width_est
+  if lane_width_count > 0 then
+    lane_width = lane_width_sum / lane_width_count
+  end
+  if not lane_width or lane_width <= 0 then
+    lane_width = params.default_lane_width or 3.5
+  end
+  local half_width = lane_width * 0.5
+
+  local smoothed = smoothCenterline(centers_world, subdivisions)
+  local path_length = computePathLength(smoothed)
+
+  local accumulated = 0
+  local future_dir = nil
+  local future_distance = future_dir_distance
+  if future_distance > path_length then
+    future_distance = path_length * 0.8
+  end
+  for i = 2, #smoothed do
+    local seg_len = (smoothed[i] - smoothed[i - 1]):length()
+    if seg_len > 1e-6 then
+      accumulated = accumulated + seg_len
+      if not future_dir and accumulated >= future_distance then
+        future_dir = extra_utils.toNormXYVec(smoothed[i] - smoothed[i - 1])
+      end
+    end
+  end
+  if not future_dir and #smoothed >= 2 then
+    future_dir = extra_utils.toNormXYVec(smoothed[#smoothed] - smoothed[#smoothed - 1])
+  end
+
+  local normals = computeNormals(smoothed)
+  local center_local, left_local, right_local = convertSamplesToLocal(smoothed, normals, veh_props, half_width)
+
+  local lane_dir_norm = nil
+  if #smoothed >= 2 then
+    lane_dir_norm = extra_utils.toNormXYVec(smoothed[2] - smoothed[1])
+  end
+  if (not lane_dir_norm or lane_dir_norm:length() < 1e-6) and last_dir then
+    lane_dir_norm = last_dir
+  end
+  if not lane_dir_norm then
+    lane_dir_norm = extra_utils.toNormXYVec(veh_props.dir)
+  end
+
+  local curvature = computeAverageCurvature(center_local, curvature_samples)
+  local sample_spacing = (#center_local > 1) and (path_length / (#center_local - 1)) or 0
+  local truncated = target_length and (path_length + 1e-6 < target_length) or false
+
+  return {
+    center = center_local,
+    left = left_local,
+    right = right_local,
+    dir = lane_dir_norm,
+    future_dir = future_dir,
+    curvature = curvature,
+    length = path_length,
+    offset = preferred_offset or 0,
+    lane_width = lane_width,
+    sample_spacing = sample_spacing,
+    segments_used = segments_used,
+    covered_length = total_length,
+    last_wps = last_wps,
+    truncated = truncated,
+    lane_width_sum = lane_width_sum,
+    lane_width_count = lane_width_count
+  }
+end
+
+local function gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
   if not initial_wps then return nil end
 
   local lookahead_base = params.lookahead_base or 22
@@ -494,8 +817,94 @@ local function gatherPath(veh_props, initial_wps, desired_offset, params)
     segment_goal = initial_segments,
     segment_cap = segments_cap > 0 and segments_cap or nil,
     segment_step = segments_extension,
-    truncated = total_length < target_length
+    truncated = total_length < target_length,
+    covered_length = total_length,
+    branches = {},
+    nodes = nil
   }
+end
+
+local function gatherPath(veh_props, initial_wps, desired_offset, params)
+  if not initial_wps then return nil end
+
+  local lookahead_base = params.lookahead_base or 22
+  local lookahead_min = params.lookahead_min or lookahead_base
+  if lookahead_min < 0 then lookahead_min = 0 end
+  if lookahead_base < lookahead_min then
+    lookahead_base = lookahead_min
+  end
+
+  local lookahead_speed_gain = params.lookahead_speed_gain or 1.6
+  local lookahead_max = params.lookahead_max or 120
+  if lookahead_max < lookahead_min then
+    lookahead_max = lookahead_min
+  end
+
+  local target_length = lookahead_base + veh_props.speed * lookahead_speed_gain
+  if target_length < lookahead_min then
+    target_length = lookahead_min
+  end
+  target_length = clamp(target_length, lookahead_min, lookahead_max)
+
+  local segment_length_hint = params.segment_length_hint or 5
+  if segment_length_hint < 0.5 then
+    segment_length_hint = 0.5
+  end
+
+  local segments_cap = params.path_segments_cap or 0
+
+  local base_segments = params.path_segments or 20
+  if base_segments < 1 then base_segments = 1 end
+  if segments_cap > 0 and base_segments > segments_cap then
+    base_segments = segments_cap
+  end
+
+  local dynamic_segments = ceil(target_length / segment_length_hint)
+  local initial_segments = max(base_segments, dynamic_segments)
+
+  local segments_extension = params.path_segments_extend or base_segments
+  if segments_extension < 1 then segments_extension = 1 end
+
+  local plan = buildSegmentPlan(veh_props, initial_wps, params, target_length)
+  if plan and plan.segments and #plan.segments > 0 then
+    local geometry = buildPathGeometryFromSegments(veh_props, plan.segments, desired_offset, params, target_length)
+    if geometry then
+      local path = geometry
+      path.segment_count = geometry.segments_used or #plan.segments
+      path.segment_limit = plan.segment_limit or #plan.segments
+      path.segment_goal = plan.segment_goal or initial_segments
+      path.segment_cap = plan.segment_cap or (segments_cap > 0 and segments_cap or nil)
+      path.segment_step = plan.segment_step or segments_extension
+      path.target_length = target_length
+      path.truncated = geometry.truncated or (geometry.length + 1e-6 < target_length)
+      path.nodes = plan.nodes
+
+      local branches = {}
+      if plan.branches then
+        for _, spec in ipairs(plan.branches) do
+          if not spec.isMain then
+            local branch_segments = buildSegmentsFromNodeList(spec.nodes, veh_props)
+            if branch_segments and #branch_segments > 1 then
+              local branch_geom = buildPathGeometryFromSegments(veh_props, branch_segments, geometry.offset, params, plan.branch_length or target_length)
+              if branch_geom then
+                branch_geom.originIndex = spec.originIndex
+                branch_geom.align = spec.align
+                branch_geom.turn = spec.turn
+                branch_geom.nodes = spec.nodes
+                branches[#branches + 1] = branch_geom
+              end
+            end
+          end
+        end
+      end
+
+      path.branches = branches
+      return path
+    end
+  end
+
+  lane_state.prev_path_nodes = nil
+  return gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
 end
 
 local function computeLaneModel(veh_props, params)
@@ -595,13 +1004,16 @@ local function computeLaneModel(veh_props, params)
       right = path.right,
       length = path.length or 0,
       targetLength = path.target_length or 0,
+      coveredLength = path.covered_length or path.length or 0,
       segments = path.segment_count or 0,
       sampleSpacing = path.sample_spacing or 0,
       truncated = path.truncated or false,
       segmentLimit = path.segment_limit or 0,
       segmentGoal = path.segment_goal or 0,
       segmentCap = path.segment_cap,
-      segmentStep = path.segment_step or 0
+      segmentStep = path.segment_step or 0,
+      branches = path.branches or {},
+      nodes = path.nodes
     },
     speed = veh_props.speed,
     xnorm = xnorm
@@ -661,6 +1073,7 @@ local function update(dt, veh, system_params, enabled)
     lane_state.prev_wps = nil
     lane_state.desired_offset = nil
     lane_state.lane_width = nil
+    lane_state.prev_path_nodes = nil
     warning_played = false
     latest_data = {status = status}
     resetControllers()
@@ -697,6 +1110,10 @@ local function update(dt, veh, system_params, enabled)
   end
   assist_info.steering.driver = raw_input
 
+  if abs(raw_input) > (disable_threshold * 0.6) then
+    lane_state.prev_path_nodes = nil
+  end
+
   if not user_enabled then
     status.reason = "user_disabled"
   elseif override_timer > 0 then
@@ -715,6 +1132,7 @@ local function update(dt, veh, system_params, enabled)
     assist_ready = false
     override_timer = params.override_cooldown or 5
     warning_played = false
+    lane_state.prev_path_nodes = nil
     resetControllers()
     if activation_handler then
       activation_handler(false, "driver_override")
