@@ -1143,14 +1143,16 @@ local function update(dt, veh, system_params, enabled)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
 
-  local driver_input = rawget(_G, "input_steering_angelo234")
+  local driver_input = rawget(_G, "input_steering_driver_angelo234")
+    or rawget(_G, "input_steering_angelo234")
   if driver_input == nil then
     local estimated = 0
     if electrics_values_angelo234 then
       estimated = (electrics_values_angelo234["steering_input"] or 0) - last_assist_delta
     end
-    driver_input = clamp(estimated, -1, 1)
+    driver_input = estimated
   end
+  driver_input = clamp(driver_input or 0, -1, 1)
   assist_info.steering.driver = driver_input
 
   if abs(driver_input) > (disable_threshold * 0.6) then

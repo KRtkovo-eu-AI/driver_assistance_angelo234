@@ -370,8 +370,36 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     "if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. " ..
     "input.parkingbrake ) end"
   my_veh:queueLuaCommand(parking_cmd)
-  local steering_cmd =
-    "if input.steering ~= nil then obj:queueGameEngineLua('input_steering_angelo234 = ' .. input.steering ) end"
+  local steering_cmd = [[
+    local driver = 0
+    if input.lastInputs and input.lastInputs.local and input.lastInputs.local.steering ~= nil then
+      driver = input.lastInputs.local.steering
+    end
+
+    if type(driver) ~= 'number' then
+      driver = tonumber(driver) or 0
+    end
+    obj:queueGameEngineLua(string.format("input_steering_driver_angelo234 = %.6f", driver or 0))
+
+    local assist = 0
+    if input.lastInputs and input.lastInputs.lane_centering and input.lastInputs.lane_centering.steering ~= nil then
+      assist = input.lastInputs.lane_centering.steering
+    end
+    if type(assist) ~= 'number' then
+      assist = tonumber(assist) or 0
+    end
+    obj:queueGameEngineLua(string.format("input_steering_assist_angelo234 = %.6f", assist or 0))
+
+    if input.steering ~= nil then
+      local combined = input.steering
+      if type(combined) ~= 'number' then
+        combined = tonumber(combined) or 0
+      end
+      obj:queueGameEngineLua(string.format("input_steering_angelo234 = %.6f", combined))
+    else
+      obj:queueGameEngineLua("input_steering_angelo234 = 0")
+    end
+  ]]
   my_veh:queueLuaCommand(steering_cmd)
 
   local electrics_cmd =
