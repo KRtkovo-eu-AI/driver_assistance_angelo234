@@ -9,6 +9,72 @@ angular.module('beamng.apps')
       var canvas = $element.find('canvas')[0]
       var ctx = canvas.getContext('2d')
       var carColor = [255, 255, 255]
+      var containerEl = $element[0]
+      var resizeObserver = null
+      var resizeScheduled = false
+      var windowResizeHandler = null
+
+      function scheduleFrame(callback) {
+        var raf = (typeof window !== 'undefined' && window.requestAnimationFrame) || null
+        if (raf) {
+          raf(callback)
+        } else {
+          setTimeout(callback, 16)
+        }
+      }
+
+      function computeScale(rect) {
+        if (!rect || rect.width <= 0) return 1
+        var widthScale = rect.width / 280
+        var heightScale = rect.height > 0 ? rect.height / 240 : widthScale
+        var scale = Math.min(widthScale, heightScale)
+        if (!isFinite(scale) || scale <= 0) scale = 1
+        if (scale < 0.85) scale = 0.85
+        if (scale > 1.6) scale = 1.6
+        return scale
+      }
+
+      function applyLayoutScale() {
+        if (!containerEl || !containerEl.style) return
+        var rect = containerEl.getBoundingClientRect()
+        if (!rect || !rect.width) return
+        var scale = computeScale(rect)
+        containerEl.style.setProperty('--lca-scale', scale.toFixed(3))
+      }
+
+      function syncCanvasSize() {
+        if (!canvas) return { width: 0, height: 0 }
+        var width = canvas.clientWidth
+        var height = canvas.clientHeight
+        if (!width || !height) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          return { width: width || 0, height: height || 0 }
+        }
+
+        var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1
+        var pixelWidth = Math.round(width * dpr)
+        var pixelHeight = Math.round(height * dpr)
+        if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+          canvas.width = pixelWidth
+          canvas.height = pixelHeight
+        }
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        return { width: width, height: height }
+      }
+
+      function handleResize() {
+        applyLayoutScale()
+        syncCanvasSize()
+      }
+
+      function scheduleResize() {
+        if (resizeScheduled) return
+        resizeScheduled = true
+        scheduleFrame(function () {
+          resizeScheduled = false
+          handleResize()
+        })
+      }
 
       var vm = $scope.vm = {
         statusText: 'Not installed',
@@ -122,20 +188,21 @@ angular.module('beamng.apps')
         }
       }
 
-      function drawVehicle(x, y) {
+      function drawVehicle(x, y, sizeScale) {
+        var scale = sizeScale || 1
         ctx.save()
         ctx.fillStyle = 'rgba(' +
           Math.round(carColor[0]) + ',' +
           Math.round(carColor[1]) + ',' +
           Math.round(carColor[2]) + ',0.6)'
-        var carWidth = 14
-        var carLength = 28
+        var carWidth = 14 * scale
+        var carLength = 28 * scale
         ctx.translate(x, y)
         ctx.fillRect(-carWidth / 2, -carLength, carWidth, carLength)
         ctx.restore()
       }
 
-      function drawArrow(baseX, baseY, dirX, dirY, length, color) {
+      function drawArrow(baseX, baseY, dirX, dirY, length, color, thickness) {
         var magnitude = Math.sqrt(dirX * dirX + dirY * dirY)
         if (!isFinite(magnitude) || magnitude < 1e-5) return
         var normX = dirX / magnitude
@@ -146,7 +213,7 @@ angular.module('beamng.apps')
         var tipY = baseY + canvasDirY * length
 
         ctx.strokeStyle = color
-        ctx.lineWidth = 2
+        ctx.lineWidth = thickness || 2
         ctx.beginPath()
         ctx.moveTo(baseX, baseY)
         ctx.lineTo(tipX, tipY)
@@ -184,17 +251,25 @@ angular.module('beamng.apps')
       }
 
       function draw(data) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        var view = syncCanvasSize()
+        var width = view.width
+        var height = view.height
+        if (!width || !height) {
+          return
+        }
 
-        var carX = canvas.width / 2
-        var carY = canvas.height * 0.78
+        ctx.clearRect(0, 0, width, height)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+        ctx.fillRect(0, 0, width, height)
+
+        var carX = width / 2
+        var carY = height * 0.78
+        var pixelScale = Math.max(0.75, Math.min(width / 320, 1.6))
 
         var lane = data && data.lane
         var path = lane && lane.path
         if (!path || !path.center || path.center.length < 2) {
-          drawVehicle(carX, carY)
+          drawVehicle(carX, carY, pixelScale)
           return
         }
 
@@ -207,22 +282,24 @@ angular.module('beamng.apps')
           if (absX > maxLateral) maxLateral = absX
         }
 
-        var scaleY = (canvas.height * 0.65) / (maxForward + 5)
-        var scaleX = (canvas.width * 0.4) / (maxLateral + (lane.width || 3))
+        var scaleY = (height * 0.65) / (maxForward + 5)
+        var scaleX = (width * 0.4) / (maxLateral + (lane.width || 3))
         var scale = Math.min(scaleX, scaleY)
         if (!isFinite(scale) || scale <= 0) scale = 6
 
-        plotPath(path.left, 'rgba(255, 255, 0, 0.8)', 2, carX, carY, scale)
-        plotPath(path.right, 'rgba(255, 255, 0, 0.8)', 2, carX, carY, scale)
+        var boundaryWidth = Math.max(1.6, 2 * pixelScale)
+        plotPath(path.left, 'rgba(255, 255, 0, 0.8)', boundaryWidth, carX, carY, scale)
+        plotPath(path.right, 'rgba(255, 255, 0, 0.8)', boundaryWidth, carX, carY, scale)
         var centerColor = vm.warning ? 'rgba(255, 120, 120, 0.9)' : 'rgba(60, 220, 120, 0.9)'
-        plotPath(path.center, centerColor, 2, carX, carY, scale)
+        plotPath(path.center, centerColor, Math.max(1.8, 2.2 * pixelScale), carX, carY, scale)
 
         if (path.center && path.center.length > 1) {
           ctx.fillStyle = 'rgba(180, 220, 255, 0.28)'
-          for (var i = 0; i < path.center.length; i += 2) {
-            var pt = path.center[i]
+          var markerRadius = Math.max(1.2, 1.5 * pixelScale)
+          for (var j = 0; j < path.center.length; j += 2) {
+            var marker = path.center[j]
             ctx.beginPath()
-            ctx.arc(carX + pt.x * scale, carY - pt.y * scale, 1.5, 0, Math.PI * 2)
+            ctx.arc(carX + marker.x * scale, carY - marker.y * scale, markerRadius, 0, Math.PI * 2)
             ctx.fill()
           }
 
@@ -233,8 +310,9 @@ angular.module('beamng.apps')
             carY - tail.y * scale,
             tail.x - tailPrev.x,
             tail.y - tailPrev.y,
-            14,
-            'rgba(140, 200, 255, 0.85)'
+            14 * pixelScale,
+            'rgba(140, 200, 255, 0.85)',
+            Math.max(1.5, 2 * pixelScale)
           )
         }
 
@@ -244,7 +322,7 @@ angular.module('beamng.apps')
         if (laneOffset && typeof laneOffset.error === 'number') {
           var targetX = -laneOffset.error * scale
           ctx.strokeStyle = 'rgba(255, 90, 90, 0.9)'
-          ctx.lineWidth = 2
+          ctx.lineWidth = Math.max(1.6, 2 * pixelScale)
           ctx.beginPath()
           ctx.moveTo(carX, carY)
           ctx.lineTo(carX + targetX, carY)
@@ -252,15 +330,15 @@ angular.module('beamng.apps')
 
           ctx.fillStyle = 'rgba(120, 160, 255, 0.9)'
           ctx.beginPath()
-          ctx.arc(carX - laneOffset.error * scale, carY, 4, 0, Math.PI * 2)
+          ctx.arc(carX - laneOffset.error * scale, carY, Math.max(3, 4 * pixelScale), 0, Math.PI * 2)
           ctx.fill()
 
           if (typeof laneOffset.target === 'number') {
             ctx.strokeStyle = 'rgba(200, 200, 255, 0.6)'
-            ctx.lineWidth = 1.5
+            ctx.lineWidth = Math.max(1, 1.2 * pixelScale)
             ctx.beginPath()
             ctx.moveTo(carX - laneOffset.target * scale, carY)
-            ctx.lineTo(carX - laneOffset.target * scale, carY - 12)
+            ctx.lineTo(carX - laneOffset.target * scale, carY - 12 * pixelScale)
             ctx.stroke()
           }
         }
@@ -268,15 +346,30 @@ angular.module('beamng.apps')
         if (assist && typeof assist.target === 'number' && typeof assist.weight === 'number') {
           var vector = assist.target * assist.weight
           ctx.strokeStyle = 'rgba(0, 180, 255, 0.9)'
-          ctx.lineWidth = 3
+          ctx.lineWidth = Math.max(2, 3 * pixelScale)
           ctx.beginPath()
-          ctx.moveTo(carX, carY - 6)
-          ctx.lineTo(carX + vector * scale * 10, carY - 26)
+          ctx.moveTo(carX, carY - 6 * pixelScale)
+          ctx.lineTo(carX + vector * scale * 10, carY - 26 * pixelScale)
           ctx.stroke()
         }
 
-        drawVehicle(carX, carY)
+        drawVehicle(carX, carY, pixelScale)
       }
+
+      if (typeof window !== 'undefined') {
+        if (window.ResizeObserver) {
+          resizeObserver = new ResizeObserver(function () {
+            scheduleResize()
+          })
+          resizeObserver.observe(containerEl)
+        } else {
+          windowResizeHandler = function () {
+            scheduleResize()
+          }
+          window.addEventListener('resize', windowResizeHandler)
+        }
+      }
+      scheduleResize()
 
       function update() {
         bngApi.engineLua('extensions.driver_assistance_angelo234.getLaneCenteringData()', function (data) {
@@ -297,6 +390,14 @@ angular.module('beamng.apps')
       var interval = setInterval(update, 100)
       $scope.$on('$destroy', function () {
         clearInterval(interval)
+        if (resizeObserver) {
+          resizeObserver.disconnect()
+          resizeObserver = null
+        }
+        if (typeof window !== 'undefined' && windowResizeHandler) {
+          window.removeEventListener('resize', windowResizeHandler)
+          windowResizeHandler = null
+        }
       })
     }]
   }

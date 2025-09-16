@@ -1,19 +1,100 @@
 <div class="bngApp lca-container" layout="column">
   <style>
-    .lca-container { padding: 6px; color: #f0f0f0; font-family: 'Roboto', sans-serif; }
-    .lca-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-    .lca-status { padding: 4px 8px; border-radius: 4px; font-weight: 600; min-width: 110px; text-align: center; }
+    .lca-container {
+      --lca-scale: 1;
+      box-sizing: border-box;
+      color: #f0f0f0;
+      font-family: 'Roboto', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      gap: 8px;
+      gap: calc(8px * var(--lca-scale));
+      padding: 10px;
+      padding: calc(10px * var(--lca-scale));
+      font-size: 14px;
+      font-size: calc(14px * var(--lca-scale));
+      line-height: 1.4;
+    }
+
+    .lca-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      gap: calc(10px * var(--lca-scale));
+    }
+
+    .lca-status {
+      padding: 6px 12px;
+      padding: calc(6px * var(--lca-scale)) calc(12px * var(--lca-scale));
+      border-radius: 6px;
+      border-radius: calc(6px * var(--lca-scale));
+      font-weight: 600;
+      min-width: 120px;
+      min-width: calc(120px * var(--lca-scale));
+      text-align: center;
+    }
+
     .lca-status-ready { background: rgba(60, 120, 255, 0.25); border-left: 4px solid #4ca3ff; }
     .lca-status-active { background: rgba(40, 180, 80, 0.35); border-left: 4px solid #39d66c; }
     .lca-status-idle { background: rgba(180, 180, 180, 0.2); border-left: 4px solid #d0d0d0; }
     .lca-status-warning { background: rgba(230, 150, 40, 0.35); border-left: 4px solid #ffb347; }
     .lca-status-missing { background: rgba(200, 60, 60, 0.35); border-left: 4px solid #ff6b6b; }
-    .lca-header-metrics { display: flex; gap: 12px; font-size: 11px; opacity: 0.85; }
-    .lca-status-detail { font-size: 11px; margin-top: 2px; opacity: 0.8; }
-    .lca-info { margin-top: 6px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; font-size: 11px; opacity: 0.9; }
-    .lca-warning { grid-column: span 2; color: #ffb347; font-weight: bold; }
-    .lca-visual { position: relative; width: 100%; margin-bottom: 6px; }
-    .lca-visual canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: rgba(0, 0, 0, 0.25); }
+
+    .lca-status-detail {
+      font-size: 0.85em;
+      margin-top: 4px;
+      margin-top: calc(4px * var(--lca-scale));
+      opacity: 0.8;
+    }
+
+    .lca-header-metrics {
+      flex: 1 1 220px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+      gap: calc(8px * var(--lca-scale));
+      font-size: 0.88em;
+      opacity: 0.88;
+      text-align: right;
+      align-items: center;
+    }
+
+    .lca-visual {
+      position: relative;
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 200px;
+      min-height: calc(200px * var(--lca-scale));
+    }
+
+    .lca-visual canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border-radius: calc(8px * var(--lca-scale));
+      background: rgba(0, 0, 0, 0.35);
+      box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.35);
+      box-shadow: inset 0 0 calc(12px * var(--lca-scale)) rgba(0, 0, 0, 0.35);
+    }
+
+    .lca-info {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 6px 14px;
+      gap: calc(6px * var(--lca-scale)) calc(14px * var(--lca-scale));
+      font-size: 0.88em;
+      opacity: 0.92;
+    }
+
+    .lca-warning {
+      grid-column: 1 / -1;
+      color: #ffb347;
+      font-weight: 600;
+    }
   </style>
   <div class="lca-header">
     <div>
