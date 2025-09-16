@@ -76,6 +76,14 @@ M.lane_centering_params = {
     override_threshold = 0.2,
     override_cooldown = 10,
     offset_deadzone = 0.002,
+    lookahead_base = 22,
+    lookahead_speed_gain = 1.6,
+    lookahead_max = 80,
+    path_segments = 12,
+    curvature_feedforward = 0.45,
+    assist_weight_gain = 4.0,
+    min_active_speed = 1.0,
+    lane_offset_smooth = 0.2,
 }
 
 return M
