@@ -2,14 +2,14 @@
     "obstacle_collision_mitigation_angelo234": {
         "information":{
             "authors":"KRtekTM",
-            "name":"Obstacle Collision Mitigation System",
+            "name":"Self-driving Assist",
             "value":250,
         },
         "slotType" : "obstacle_collision_mitigation_angelo234",
         "slots": [
             ["type", "default", "description"],
             ["lidar_angelo234", "lidar_angelo234", "Lidar"],
-            ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle AEB"],
+            ["obstacle_aeb_angelo234", "obstacle_aeb_angelo234", "Obstacle Collision AEB"],
             ["lane_centering_assist_system_angelo234", "lane_centering_assist_system_angelo234", "Lane Centering Assist"]
         ],
     },
