@@ -27,6 +27,8 @@ angular.module('beamng.apps')
         assistWeight: '—',
         driverInput: '—',
         finalSteer: '—',
+        pathPoints: '—',
+        curvatureRadius: '—',
         warning: false
       }
 
@@ -92,9 +94,22 @@ angular.module('beamng.apps')
           vm.curvature = formatNumber(lane.curvature, 4)
           vm.lookahead = formatNumber((lane.path && lane.path.length) || 0, 1)
           vm.speed = formatNumber(lane.speed, 1)
+          var pointCount = lane.path && lane.path.center && lane.path.center.length
+          vm.pathPoints = pointCount ? pointCount : '—'
+          if (typeof lane.curvature === 'number' && isFinite(lane.curvature)) {
+            if (Math.abs(lane.curvature) > 1e-4) {
+              vm.curvatureRadius = formatNumber(1 / Math.abs(lane.curvature), 1)
+            } else {
+              vm.curvatureRadius = '∞'
+            }
+          } else {
+            vm.curvatureRadius = '—'
+          }
         } else {
           vm.laneWidth = vm.offsetCurrent = vm.offsetTarget = vm.offsetError = '—'
           vm.offsetNormalized = vm.headingError = vm.curvature = vm.lookahead = vm.speed = '—'
+          vm.pathPoints = '—'
+          vm.curvatureRadius = '—'
         }
 
         if (assist && assist.steering) {
@@ -118,6 +133,40 @@ angular.module('beamng.apps')
         ctx.translate(x, y)
         ctx.fillRect(-carWidth / 2, -carLength, carWidth, carLength)
         ctx.restore()
+      }
+
+      function drawArrow(baseX, baseY, dirX, dirY, length, color) {
+        var magnitude = Math.sqrt(dirX * dirX + dirY * dirY)
+        if (!isFinite(magnitude) || magnitude < 1e-5) return
+        var normX = dirX / magnitude
+        var normY = dirY / magnitude
+        var canvasDirX = normX
+        var canvasDirY = -normY
+        var tipX = baseX + canvasDirX * length
+        var tipY = baseY + canvasDirY * length
+
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(baseX, baseY)
+        ctx.lineTo(tipX, tipY)
+        ctx.stroke()
+
+        var headSize = Math.min(6, length * 0.35)
+        var leftDirX = -canvasDirY
+        var leftDirY = canvasDirX
+        var leftX = tipX - canvasDirX * headSize + leftDirX * headSize * 0.5
+        var leftY = tipY - canvasDirY * headSize + leftDirY * headSize * 0.5
+        var rightX = tipX - canvasDirX * headSize - leftDirX * headSize * 0.5
+        var rightY = tipY - canvasDirY * headSize - leftDirY * headSize * 0.5
+
+        ctx.fillStyle = color
+        ctx.beginPath()
+        ctx.moveTo(tipX, tipY)
+        ctx.lineTo(leftX, leftY)
+        ctx.lineTo(rightX, rightY)
+        ctx.closePath()
+        ctx.fill()
       }
 
       function plotPath(points, color, width, carX, carY, scale) {
@@ -167,6 +216,27 @@ angular.module('beamng.apps')
         plotPath(path.right, 'rgba(255, 255, 0, 0.8)', 2, carX, carY, scale)
         var centerColor = vm.warning ? 'rgba(255, 120, 120, 0.9)' : 'rgba(60, 220, 120, 0.9)'
         plotPath(path.center, centerColor, 2, carX, carY, scale)
+
+        if (path.center && path.center.length > 1) {
+          ctx.fillStyle = 'rgba(180, 220, 255, 0.28)'
+          for (var i = 0; i < path.center.length; i += 2) {
+            var pt = path.center[i]
+            ctx.beginPath()
+            ctx.arc(carX + pt.x * scale, carY - pt.y * scale, 1.5, 0, Math.PI * 2)
+            ctx.fill()
+          }
+
+          var tail = path.center[path.center.length - 1]
+          var tailPrev = path.center[path.center.length - 2]
+          drawArrow(
+            carX + tail.x * scale,
+            carY - tail.y * scale,
+            tail.x - tailPrev.x,
+            tail.y - tailPrev.y,
+            14,
+            'rgba(140, 200, 255, 0.85)'
+          )
+        }
 
         var laneOffset = lane.offset || {}
         var assist = data && data.assist && data.assist.steering

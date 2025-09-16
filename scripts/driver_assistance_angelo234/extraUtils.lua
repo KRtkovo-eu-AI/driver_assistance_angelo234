@@ -14,6 +14,11 @@ local abs = math.abs
 local sqrt = math.sqrt
 local floor = math.floor
 local ceil = math.ceil
+local function clamp(value, low, high)
+  if value < low then return low end
+  if value > high then return high end
+  return value
+end
 
 local map_nodes = map.getMap().nodes
 local findClosestRoad = map.findClosestRoad
@@ -534,6 +539,39 @@ local function getWaypointStartEndAdvanced(my_veh_props, veh_props, position, pa
   return min_wp_props_angle[2]
 end
 
+local function getWaypointSegmentFromNodes(my_veh_props, veh_props, start_wp, end_wp)
+  if not start_wp or not end_wp then return nil end
+
+  local start_wp_pos = getWaypointPosition(start_wp)
+  local end_wp_pos = getWaypointPosition(end_wp)
+
+  if not start_wp_pos or not end_wp_pos then
+    return nil
+  end
+
+  local lat_dist_from_wp = 0
+
+  if veh_props and veh_props.center_pos then
+    local start_xy = start_wp_pos:z0()
+    local end_xy = end_wp_pos:z0()
+    local veh_xy = veh_props.center_pos:z0()
+    local seg_vec = end_xy - start_xy
+    local seg_len_sq = seg_vec:squaredLength()
+
+    if seg_len_sq > 1e-9 then
+      local xnorm = clamp((veh_xy - start_xy):dot(seg_vec) / seg_len_sq, 0, 1)
+      local lane_point = start_xy + seg_vec * xnorm
+      local seg_dir = toNormXYVec(seg_vec)
+      if seg_dir:length() > 1e-6 then
+        local right = vec3(seg_dir.y, -seg_dir.x, 0)
+        lat_dist_from_wp = (veh_xy - lane_point):dot(right)
+      end
+    end
+  end
+
+  return getWaypointsProperties(veh_props or my_veh_props, start_wp, end_wp, start_wp_pos, end_wp_pos, lat_dist_from_wp)
+end
+
 --Check if other car is on the same road as me (not lane)
 local function checkIfOtherCarOnSameRoad(my_veh_props, other_veh_props, wps_props)
   --Calculate distance to get from my waypoint to other vehicle's waypoint using graphpath
@@ -638,7 +676,13 @@ M.getWaypointPosition = getWaypointPosition
 M.getLaneWidth = getLaneWidth
 M.getWhichSideOfWaypointsCarIsOn = getWhichSideOfWaypointsCarIsOn
 M.getWaypointStartEnd = getWaypointStartEnd
+M.getWaypointsProperties = getWaypointsProperties
 M.getWaypointStartEndAdvanced = getWaypointStartEndAdvanced
+M.getWaypointSegmentFromNodes = getWaypointSegmentFromNodes
+M.getMapNode = function(id)
+  if not map_nodes then return nil end
+  return map_nodes[id]
+end
 M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
