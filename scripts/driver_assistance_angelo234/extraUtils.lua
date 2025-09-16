@@ -21,13 +21,28 @@ local function clamp(value, low, high)
   return value
 end
 
+local graph_data
+local graph_positions
+local graph_radius
+local graph_links
+
+local function refreshGraphData()
+  graph_data = mapmgr and mapmgr.mapData or graph_data
+  if graph_data and graph_data.graph then
+    graph_positions = graph_data.positions
+    graph_radius = graph_data.radius
+    graph_links = graph_data.graph
+  else
+    graph_positions = nil
+    graph_radius = nil
+    graph_links = nil
+  end
+end
+
 local map_nodes = map.getMap().nodes
-refreshGraphData()
-local graph_data = nil
-local graph_positions = nil
-local graph_radius = nil
-local graph_links = nil
 local findClosestRoad = map.findClosestRoad
+
+refreshGraphData()
 
 local function getPart(partName)
   local vehData = core_vehicle_manager.getPlayerVehicleData()
@@ -344,19 +359,6 @@ local function getFuturePositionXYWithAcc(veh_props, time, acc_vec, rel_car_pos)
   end
 
   return veh_pos_future
-end
-
-local function refreshGraphData()
-  graph_data = mapmgr and mapmgr.mapData or graph_data
-  if graph_data and graph_data.graph then
-    graph_positions = graph_data.positions
-    graph_radius = graph_data.radius
-    graph_links = graph_data.graph
-  else
-    graph_positions = nil
-    graph_radius = nil
-    graph_links = nil
-  end
 end
 
 local function getWaypointPosition(wp)
