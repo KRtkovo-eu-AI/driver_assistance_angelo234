@@ -88,6 +88,10 @@ angular.module('beamng.apps')
         headingError: '—',
         curvature: '—',
         lookahead: '—',
+        lookaheadTarget: '—',
+        pathCoverage: '—',
+        pathSegments: '—',
+        pathTruncated: '—',
         speed: '—',
         assistForce: '—',
         assistWeight: '—',
@@ -158,10 +162,51 @@ angular.module('beamng.apps')
           vm.offsetNormalized = formatNumber(lane.offset.normalized, 2)
           vm.headingError = formatNumber((lane.heading.error || 0) * 180 / Math.PI, 1)
           vm.curvature = formatNumber(lane.curvature, 4)
-          vm.lookahead = formatNumber((lane.path && lane.path.length) || 0, 1)
+          var path = lane.path
+          if (path) {
+            var pathLength = path.length
+            var pathTarget = path.targetLength
+            vm.lookahead = formatNumber(pathLength, 1)
+            vm.lookaheadTarget = formatNumber(pathTarget, 1)
+            var coveragePercent = null
+            if (typeof pathLength === 'number' && typeof pathTarget === 'number' && isFinite(pathLength) && isFinite(pathTarget) && pathTarget > 0) {
+              coveragePercent = Math.min(999, (pathLength / pathTarget) * 100)
+            }
+            vm.pathCoverage = coveragePercent !== null ? coveragePercent.toFixed(0) + '%' : '—'
+            var segmentCount = path.segments
+            var segmentLimit = path.segmentLimit
+            var segmentGoal = path.segmentGoal
+            var segmentCap = path.segmentCap
+            var segmentStep = path.segmentStep
+            if (typeof segmentCount === 'number' && isFinite(segmentCount)) {
+              var segmentLabel = segmentCount.toString()
+              if (typeof segmentLimit === 'number' && isFinite(segmentLimit) && segmentLimit > 0) {
+                segmentLabel += ' / ' + segmentLimit
+              }
+              if (typeof segmentGoal === 'number' && isFinite(segmentGoal) && segmentGoal > 0 && (!segmentLimit || segmentGoal !== segmentLimit)) {
+                segmentLabel += ' (goal ' + segmentGoal + ')'
+              }
+              if (typeof segmentCap === 'number' && isFinite(segmentCap) && (!segmentLimit || segmentCap > segmentLimit)) {
+                segmentLabel += ' [cap ' + segmentCap + ']'
+              }
+              if (typeof segmentStep === 'number' && isFinite(segmentStep) && segmentStep > 0 && (!segmentCap || (typeof segmentLimit === 'number' && segmentLimit < segmentCap))) {
+                segmentLabel += ' {step ' + segmentStep + '}'
+              }
+              vm.pathSegments = segmentLabel
+            } else {
+              vm.pathSegments = '—'
+            }
+            var truncated = !!path.truncated
+            var coverageLimited = coveragePercent !== null && coveragePercent < 100
+            vm.pathTruncated = (truncated || coverageLimited) ? 'Yes' : 'No'
+            var pointCount = path.center && path.center.length
+            vm.pathPoints = pointCount ? pointCount : '—'
+          } else {
+            vm.lookahead = vm.lookaheadTarget = '—'
+            vm.pathCoverage = vm.pathSegments = vm.pathTruncated = '—'
+            vm.pathPoints = '—'
+          }
           vm.speed = formatNumber(lane.speed, 1)
-          var pointCount = lane.path && lane.path.center && lane.path.center.length
-          vm.pathPoints = pointCount ? pointCount : '—'
           if (typeof lane.curvature === 'number' && isFinite(lane.curvature)) {
             if (Math.abs(lane.curvature) > 1e-4) {
               vm.curvatureRadius = formatNumber(1 / Math.abs(lane.curvature), 1)
@@ -173,7 +218,8 @@ angular.module('beamng.apps')
           }
         } else {
           vm.laneWidth = vm.offsetCurrent = vm.offsetTarget = vm.offsetError = '—'
-          vm.offsetNormalized = vm.headingError = vm.curvature = vm.lookahead = vm.speed = '—'
+          vm.offsetNormalized = vm.headingError = vm.curvature = vm.lookahead = vm.lookaheadTarget = '—'
+          vm.pathCoverage = vm.pathSegments = vm.pathTruncated = vm.speed = '—'
           vm.pathPoints = '—'
           vm.curvatureRadius = '—'
         }

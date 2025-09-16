@@ -9,6 +9,7 @@ local abs = math.abs
 local max = math.max
 local min = math.min
 local sqrt = math.sqrt
+local ceil = math.ceil
 local huge = math.huge
 local clamp = function(value, low, high)
   if value < low then return low end
@@ -296,13 +297,47 @@ end
 local function gatherPath(veh_props, initial_wps, desired_offset, params)
   if not initial_wps then return nil end
 
-  local max_segments = params.path_segments or 20
-  if max_segments < 1 then max_segments = 1 end
-
   local lookahead_base = params.lookahead_base or 22
+  local lookahead_min = params.lookahead_min or lookahead_base
+  if lookahead_min < 0 then lookahead_min = 0 end
+  if lookahead_base < lookahead_min then
+    lookahead_base = lookahead_min
+  end
+
   local lookahead_speed_gain = params.lookahead_speed_gain or 1.6
   local lookahead_max = params.lookahead_max or 120
-  local target_length = clamp(lookahead_base + veh_props.speed * lookahead_speed_gain, lookahead_base * 0.5, lookahead_max)
+  if lookahead_max < lookahead_min then
+    lookahead_max = lookahead_min
+  end
+
+  local target_length = lookahead_base + veh_props.speed * lookahead_speed_gain
+  if target_length < lookahead_min then
+    target_length = lookahead_min
+  end
+  target_length = clamp(target_length, lookahead_min, lookahead_max)
+
+  local segment_length_hint = params.segment_length_hint or 5
+  if segment_length_hint < 0.5 then
+    segment_length_hint = 0.5
+  end
+
+  local segments_cap = params.path_segments_cap or 0
+
+  local base_segments = params.path_segments or 20
+  if base_segments < 1 then base_segments = 1 end
+  if segments_cap > 0 and base_segments > segments_cap then
+    base_segments = segments_cap
+  end
+
+  local dynamic_segments = ceil(target_length / segment_length_hint)
+  local initial_segments = max(base_segments, dynamic_segments)
+
+  local hard_cap = segments_cap > 0 and segments_cap or huge
+
+  local max_segments = min(initial_segments, hard_cap)
+
+  local segments_extension = params.path_segments_extend or base_segments
+  if segments_extension < 1 then segments_extension = 1 end
 
   local subdivisions = max(1, params.curve_subdivisions or 6)
   local curvature_samples = params.curvature_samples or 8
@@ -319,7 +354,21 @@ local function gatherPath(veh_props, initial_wps, desired_offset, params)
   local preferred_offset = desired_offset or 0
   local last_dir = nil
 
-  while current_wps and segments < max_segments and total_length < target_length do
+  while current_wps and total_length < target_length do
+    if segments >= max_segments then
+      if max_segments >= hard_cap then
+        break
+      end
+      local new_limit = max_segments + segments_extension
+      if new_limit > hard_cap then
+        new_limit = hard_cap
+      end
+      if new_limit <= max_segments then
+        break
+      end
+      max_segments = new_limit
+    end
+
     local seg_vec = current_wps.end_wp_pos - current_wps.start_wp_pos
     local seg_dir = extra_utils.toNormXYVec(seg_vec)
     if seg_dir:length() < 1e-6 then break end
@@ -438,7 +487,14 @@ local function gatherPath(veh_props, initial_wps, desired_offset, params)
     offset = preferred_offset or 0,
     last_wps = current_wps,
     lane_width = half_width * 2,
-    sample_spacing = (#center_local > 1) and (path_length / (#center_local - 1)) or 0
+    sample_spacing = (#center_local > 1) and (path_length / (#center_local - 1)) or 0,
+    target_length = target_length,
+    segment_count = segments,
+    segment_limit = max_segments,
+    segment_goal = initial_segments,
+    segment_cap = segments_cap > 0 and segments_cap or nil,
+    segment_step = segments_extension,
+    truncated = total_length < target_length
   }
 end
 
@@ -537,7 +593,15 @@ local function computeLaneModel(veh_props, params)
       center = path.center,
       left = path.left,
       right = path.right,
-      length = path.length or 0
+      length = path.length or 0,
+      targetLength = path.target_length or 0,
+      segments = path.segment_count or 0,
+      sampleSpacing = path.sample_spacing or 0,
+      truncated = path.truncated or false,
+      segmentLimit = path.segment_limit or 0,
+      segmentGoal = path.segment_goal or 0,
+      segmentCap = path.segment_cap,
+      segmentStep = path.segment_step or 0
     },
     speed = veh_props.speed,
     xnorm = xnorm
