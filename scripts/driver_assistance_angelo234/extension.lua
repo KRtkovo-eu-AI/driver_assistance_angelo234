@@ -40,7 +40,7 @@ local auto_headlight_system_on = false
 local prev_auto_headlight_system_on = false
 local acc_system_on = false
 local obstacle_aeb_system_on = true
-local lane_centering_assist_on = true
+local lane_centering_assist_on = false
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -253,12 +253,69 @@ local function toggleObstacleAEBSystem()
   ui_message("Obstacle Collision AEB switched " .. state)
 end
 
-local function toggleLaneCenteringSystem()
-  if not extra_utils.getPart("lane_centering_assist_angelo234") then return end
+local function hasLaneCenteringAssistPart()
+  return extra_utils.getPart("lane_centering_assist_angelo234")
+    or extra_utils.getPart("lane_centering_assist_system_angelo234")
+end
 
-  lane_centering_assist_on = not lane_centering_assist_on
-  local state = lane_centering_assist_on and "ON" or "OFF"
-  ui_message("Lane Centering Assist System switched " .. state)
+local function formatLaneCenteringReason(reason)
+  if reason == "driver_override" then
+    return "Driver steering input"
+  end
+  if reason and reason ~= "" and reason ~= "user_toggle" then
+    return tostring(reason)
+  end
+  return nil
+end
+
+local function setLaneCenteringAssistActive(active, reason)
+  if not hasLaneCenteringAssistPart() then
+    if active then
+      ui_message("Lane Centering Assist not installed")
+    end
+    if lane_centering_assist_on then
+      lane_centering_assist_on = false
+      ui_message("Lane Centering Assist disengaged")
+    end
+    return
+  end
+
+  if lane_centering_assist_on == active then
+    if not active then
+      local detail = formatLaneCenteringReason(reason)
+      if detail then
+        ui_message("Lane Centering Assist disengaged: " .. detail)
+      end
+    end
+    return
+  end
+
+  lane_centering_assist_on = active
+
+  if active then
+    ui_message("Lane Centering Assist engaged")
+  else
+    local detail = formatLaneCenteringReason(reason)
+    if detail then
+      ui_message("Lane Centering Assist disengaged: " .. detail)
+    else
+      ui_message("Lane Centering Assist disengaged")
+    end
+  end
+end
+
+local function handleLaneCenteringActivationRequest(active, reason)
+  setLaneCenteringAssistActive(active, reason or 'system')
+end
+
+local function toggleLaneCenteringSystem()
+  if not hasLaneCenteringAssistPart() then
+    ui_message("Lane Centering Assist not installed")
+    lane_centering_assist_on = false
+    return
+  end
+
+  setLaneCenteringAssistActive(not lane_centering_assist_on, "user_toggle")
 end
 
 local function toggleAutoHeadlightSystem()
@@ -381,6 +438,37 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     "if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. " ..
     "input.parkingbrake ) end"
   my_veh:queueLuaCommand(parking_cmd)
+  local steering_cmd = [[
+    local driver = 0
+    if input.lastInputs and input.lastInputs.local and input.lastInputs.local.steering ~= nil then
+      driver = input.lastInputs.local.steering
+    end
+
+    if type(driver) ~= 'number' then
+      driver = tonumber(driver) or 0
+    end
+    obj:queueGameEngineLua(string.format("input_steering_driver_angelo234 = %.6f", driver or 0))
+
+    local assist = 0
+    if input.lastInputs and input.lastInputs.lane_centering and input.lastInputs.lane_centering.steering ~= nil then
+      assist = input.lastInputs.lane_centering.steering
+    end
+    if type(assist) ~= 'number' then
+      assist = tonumber(assist) or 0
+    end
+    obj:queueGameEngineLua(string.format("input_steering_assist_angelo234 = %.6f", assist or 0))
+
+    if input.steering ~= nil then
+      local combined = input.steering
+      if type(combined) ~= 'number' then
+        combined = tonumber(combined) or 0
+      end
+      obj:queueGameEngineLua(string.format("input_steering_angelo234 = %.6f", combined))
+    else
+      obj:queueGameEngineLua("input_steering_angelo234 = 0")
+    end
+  ]]
+  my_veh:queueLuaCommand(steering_cmd)
 
   local electrics_cmd =
     'obj:queueGameEngineLua("electrics_values_angelo234 = (\'" .. jsonEncode(electrics.values) .. "\')")'
@@ -829,13 +917,12 @@ local function onUpdate(dt)
           end
 
           --Update Lane Centering Assist System
-          if extra_utils.getPart("lane_centering_assist_angelo234") and lane_centering_assist_on then
-            lane_centering_system.update(
-              other_systems_timer * 2,
-              my_veh,
-              system_params
-            )
-          end
+          lane_centering_system.update(
+            other_systems_timer * 2,
+            my_veh,
+            system_params,
+            lane_centering_assist_on
+          )
 
         phase = 0
       end
@@ -1239,6 +1326,8 @@ end
 local function onExtensionUnloaded()
   stopVirtualLidarStreamServer()
 end
+
+lane_centering_system.setActivationCallback(handleLaneCenteringActivationRequest)
 
 M.onExtensionLoaded = onExtensionLoaded
 M.onVehicleSwitched = onVehicleSwitched
