@@ -1,6 +1,7 @@
 local M = {}
 
 require("lua/common/luaProfiler")
+local mapmgr = require("lua/vehicle/mapmgr")
 
 --For efficiency
 local max = math.max
@@ -14,9 +15,34 @@ local abs = math.abs
 local sqrt = math.sqrt
 local floor = math.floor
 local ceil = math.ceil
+local function clamp(value, low, high)
+  if value < low then return low end
+  if value > high then return high end
+  return value
+end
+
+local graph_data
+local graph_positions
+local graph_radius
+local graph_links
+
+local function refreshGraphData()
+  graph_data = mapmgr and mapmgr.mapData or graph_data
+  if graph_data and graph_data.graph then
+    graph_positions = graph_data.positions
+    graph_radius = graph_data.radius
+    graph_links = graph_data.graph
+  else
+    graph_positions = nil
+    graph_radius = nil
+    graph_links = nil
+  end
+end
 
 local map_nodes = map.getMap().nodes
 local findClosestRoad = map.findClosestRoad
+
+refreshGraphData()
 
 local function getPart(partName)
   local vehData = core_vehicle_manager.getPlayerVehicleData()
@@ -336,11 +362,17 @@ local function getFuturePositionXYWithAcc(veh_props, time, acc_vec, rel_car_pos)
 end
 
 local function getWaypointPosition(wp)
-  if wp ~= nil then
-    return vec3(map_nodes[wp].pos)
-  else
-    return vec3(-1,-1,-1)
+  if not wp then return nil end
+  if not graph_positions then
+    refreshGraphData()
   end
+  if graph_positions and graph_positions[wp] then
+    return vec3(graph_positions[wp])
+  end
+  if map_nodes and map_nodes[wp] and map_nodes[wp].pos then
+    return vec3(map_nodes[wp].pos)
+  end
+  return nil
 end
 
 local function getLaneWidth(wps_info)
@@ -404,14 +436,37 @@ local function getWaypointsProperties(veh_props, start_wp, end_wp, start_wp_pos,
   local wps_props = {}
 
   --Get lane width
-  local wp_radius = map_nodes[start_wp].radius
-  local my_start_links = map_nodes[start_wp].links
+  if not graph_positions and (not map_nodes or not map_nodes[start_wp]) then
+    refreshGraphData()
+  end
+
+  local wp_radius = 0
+  if graph_radius and graph_radius[start_wp] then
+    wp_radius = graph_radius[start_wp]
+  elseif map_nodes and map_nodes[start_wp] and map_nodes[start_wp].radius then
+    wp_radius = map_nodes[start_wp].radius
+  end
 
   local one_way = false
-
-  for wp, data in pairs(my_start_links) do
-    one_way = data.oneWay
-    break
+  if graph_links and graph_links[start_wp] then
+    local link = graph_links[start_wp][end_wp]
+    if link and link.oneWay ~= nil then
+      one_way = link.oneWay ~= 0
+    else
+      for _, data in pairs(graph_links[start_wp]) do
+        if data.oneWay ~= nil then
+          one_way = data.oneWay ~= 0
+          break
+        end
+      end
+    end
+  elseif map_nodes and map_nodes[start_wp] and map_nodes[start_wp].links then
+    for _, data in pairs(map_nodes[start_wp].links) do
+      if data.oneWay ~= nil then
+        one_way = data.oneWay
+        break
+      end
+    end
   end
 
   wps_props.start_wp = start_wp
@@ -506,7 +561,7 @@ local function getWaypointStartEndAdvanced(my_veh_props, veh_props, position, pa
 
   for _, curr_wps_props in pairs(wps_reusing) do
     --Get direction between our waypoints and one of its linked waypoints
-    local wp_dir = (curr_wps_props.end_wp_pos - curr_wps_props.start_wp_pos):normalized()
+  local wp_dir = (curr_wps_props.end_wp_pos - curr_wps_props.start_wp_pos):normalized()
 
     --Angle between waypoint dir and car dir
     local angle = acos(wp_dir:dot(veh_props.dir))
@@ -532,6 +587,39 @@ local function getWaypointStartEndAdvanced(my_veh_props, veh_props, position, pa
   end
 
   return min_wp_props_angle[2]
+end
+
+local function getWaypointSegmentFromNodes(my_veh_props, veh_props, start_wp, end_wp)
+  if not start_wp or not end_wp then return nil end
+
+  local start_wp_pos = getWaypointPosition(start_wp)
+  local end_wp_pos = getWaypointPosition(end_wp)
+
+  if not start_wp_pos or not end_wp_pos then
+    return nil
+  end
+
+  local lat_dist_from_wp = 0
+
+  if veh_props and veh_props.center_pos then
+    local start_xy = start_wp_pos:z0()
+    local end_xy = end_wp_pos:z0()
+    local veh_xy = veh_props.center_pos:z0()
+    local seg_vec = end_xy - start_xy
+    local seg_len_sq = seg_vec:squaredLength()
+
+    if seg_len_sq > 1e-9 then
+      local xnorm = clamp((veh_xy - start_xy):dot(seg_vec) / seg_len_sq, 0, 1)
+      local lane_point = start_xy + seg_vec * xnorm
+      local seg_dir = toNormXYVec(seg_vec)
+      if seg_dir:length() > 1e-6 then
+        local right = vec3(seg_dir.y, -seg_dir.x, 0)
+        lat_dist_from_wp = (veh_xy - lane_point):dot(right)
+      end
+    end
+  end
+
+  return getWaypointsProperties(veh_props or my_veh_props, start_wp, end_wp, start_wp_pos, end_wp_pos, lat_dist_from_wp)
 end
 
 --Check if other car is on the same road as me (not lane)
@@ -626,6 +714,7 @@ end
 local function onClientPostStartMission(levelpath)
   map_nodes = map.getMap().nodes
   findClosestRoad = map.findClosestRoad
+  refreshGraphData()
 end
 
 M.getPart = getPart
@@ -638,7 +727,41 @@ M.getWaypointPosition = getWaypointPosition
 M.getLaneWidth = getLaneWidth
 M.getWhichSideOfWaypointsCarIsOn = getWhichSideOfWaypointsCarIsOn
 M.getWaypointStartEnd = getWaypointStartEnd
+M.getWaypointsProperties = getWaypointsProperties
 M.getWaypointStartEndAdvanced = getWaypointStartEndAdvanced
+M.getWaypointSegmentFromNodes = getWaypointSegmentFromNodes
+M.getGraphData = function()
+  if not graph_data or not graph_links then
+    refreshGraphData()
+  end
+  return graph_data
+end
+M.getGraphLinks = function(node)
+  if not graph_links then
+    refreshGraphData()
+  end
+  if graph_links and graph_links[node] then
+    return graph_links[node]
+  end
+  if map_nodes and map_nodes[node] then
+    return map_nodes[node].links
+  end
+  return nil
+end
+M.getGraphLinkData = function(node, neighbor)
+  if not node or not neighbor then return nil end
+  if graph_links and graph_links[node] then
+    return graph_links[node][neighbor]
+  end
+  if map_nodes and map_nodes[node] and map_nodes[node].links then
+    return map_nodes[node].links[neighbor]
+  end
+  return nil
+end
+M.getMapNode = function(id)
+  if not map_nodes then return nil end
+  return map_nodes[id]
+end
 M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
