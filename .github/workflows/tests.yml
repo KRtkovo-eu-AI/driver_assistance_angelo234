@@ -17,7 +17,7 @@ jobs:
         id: lua
         continue-on-error: true
         run: |
-          files=$(find . -name '*.lua')
+          files=$(find . -path './.beamng' -prune -o -name '*.lua' -print)
           if [ -n "$files" ]; then
             echo 'Lua files:'
             printf '%s\n' $files
@@ -41,7 +41,7 @@ jobs:
         id: js
         continue-on-error: true
         run: |
-          files=$(find . -name '*.js')
+          files=$(find . -path './.beamng' -prune -o -name '*.js' -print)
           if [ -n "$files" ]; then
             echo 'JS files:'
             printf '%s\n' $files

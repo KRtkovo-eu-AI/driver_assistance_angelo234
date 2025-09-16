@@ -182,7 +182,7 @@ local function toggleObstacleAEBSystem()
 
   obstacle_aeb_system_on = not obstacle_aeb_system_on
   local state = obstacle_aeb_system_on and "ON" or "OFF"
-  ui_message("Obstacle Collision Mitigation System switched " .. state)
+  ui_message("Self-driving Assist switched " .. state)
 end
 
 local function toggleLaneCenteringSystem()
@@ -727,7 +727,7 @@ local function onUpdate(dt)
             )
           end
 
-          --Update Obstacle Collision Mitigation System
+          --Update Self-driving Assist
           if extra_utils.getPart("obstacle_collision_mitigation_angelo234")
             and extra_utils.getPart("obstacle_aeb_angelo234")
             and obstacle_aeb_system_on then
