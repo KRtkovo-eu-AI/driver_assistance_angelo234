@@ -370,6 +370,9 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     "if input.parkingbrake ~= nil then obj:queueGameEngineLua('input_parkingbrake_angelo234 = ' .. " ..
     "input.parkingbrake ) end"
   my_veh:queueLuaCommand(parking_cmd)
+  local steering_cmd =
+    "if input.steering ~= nil then obj:queueGameEngineLua('input_steering_angelo234 = ' .. input.steering ) end"
+  my_veh:queueLuaCommand(steering_cmd)
 
   local electrics_cmd =
     'obj:queueGameEngineLua("electrics_values_angelo234 = (\'" .. jsonEncode(electrics.values) .. "\')")'

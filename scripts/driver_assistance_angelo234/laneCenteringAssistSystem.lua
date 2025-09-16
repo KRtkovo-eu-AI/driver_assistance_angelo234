@@ -33,6 +33,7 @@ local steering_smoother = nil
 local controller_signature = nil
 local override_timer = 0
 local activation_handler = nil
+local last_assist_delta = 0
 
 local lane_state = {
   prev_wps = nil,
@@ -48,6 +49,7 @@ local function resetControllers()
   steering_pid = nil
   steering_smoother = nil
   controller_signature = nil
+  last_assist_delta = 0
 end
 
 local function ensureControllers(params, steer_limit)
@@ -248,51 +250,85 @@ local function computePathLength(points)
   return length
 end
 
-local function selectNextSegment(veh_props, current_wps, params, _preferred_offset, visited)
+local function selectNextSegment(veh_props, current_wps, params, _preferred_offset, visited, map_data)
   if not current_wps or not current_wps.end_wp then return nil end
 
-  local node = extra_utils.getMapNode(current_wps.end_wp)
-  if not node or not node.links then return nil end
+  visited = visited or {}
+  map_data = map_data or extra_utils.getGraphData()
 
-  local current_dir = extra_utils.toNormXYVec(current_wps.end_wp_pos - current_wps.start_wp_pos)
+  local current_node = current_wps.end_wp
+  local current_pos = vec3(current_wps.end_wp_pos.x, current_wps.end_wp_pos.y, veh_props.center_pos.z)
+  local prev_pos = vec3(current_wps.start_wp_pos.x, current_wps.start_wp_pos.y, veh_props.center_pos.z)
+  local current_dir = extra_utils.toNormXYVec(current_pos - prev_pos)
+  if current_dir:length() < 1e-6 then
+    current_dir = extra_utils.toNormXYVec(veh_props.dir)
+  end
   local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
   local align_weight = clamp(params.segment_alignment_weight or 0.7, 0, 1)
   local heading_weight = clamp(params.segment_heading_weight or (1 - align_weight), 0, 1)
+  local drivability_weight = params.segment_drivability_weight or 0.15
 
   local best_wp = nil
   local best_score = -huge
 
-  for next_wp, link in pairs(node.links) do
-    if next_wp ~= current_wps.start_wp then
-      local key = makeEdgeKey(current_wps.end_wp, next_wp)
-      if not visited[key] then
-        local next_pos = extra_utils.getWaypointPosition(next_wp)
-        if next_pos then
-          local seg_vec = next_pos - current_wps.end_wp_pos
-          if seg_vec:squaredLength() > 1e-6 then
-            local seg_dir = extra_utils.toNormXYVec(seg_vec)
-            local forward_score = seg_dir:dot(current_dir)
-            local heading_score = seg_dir:dot(vehicle_dir)
+  local function evaluateCandidate(next_wp, link)
+    if next_wp == current_wps.start_wp then return end
+    local key = makeEdgeKey(current_node, next_wp)
+    if visited[key] then return end
 
-            local penalty = 0
-            if link and link.drivability and link.drivability <= 0 then
-              penalty = penalty + 10
-            end
+    if link and link.oneWay and link.inNode and link.inNode ~= current_node then
+      return
+    end
 
-            local score = forward_score * align_weight + heading_score * heading_weight - penalty
+    local next_pos = extra_utils.getWaypointPosition(next_wp)
+    if not next_pos then return end
+    next_pos = vec3(next_pos.x, next_pos.y, veh_props.center_pos.z)
 
-            if score > best_score then
-              best_score = score
-              best_wp = next_wp
-            end
-          end
-        end
+    local seg_vec = next_pos - current_pos
+    if seg_vec:squaredLength() <= 1e-6 then return end
+
+    local seg_dir = extra_utils.toNormXYVec(seg_vec)
+    local forward_score = seg_dir:dot(current_dir)
+    local heading_score = seg_dir:dot(vehicle_dir)
+    local drivability = (link and link.drivability) or 1
+
+    local penalty = 0
+    if drivability <= 0 then
+      penalty = penalty + 10
+    end
+    if link and link.gated and link.gated ~= 0 then
+      penalty = penalty + 1
+    end
+
+    local score =
+      forward_score * align_weight + heading_score * heading_weight + drivability * drivability_weight - penalty
+
+    if score > best_score then
+      best_score = score
+      best_wp = next_wp
+    end
+  end
+
+  if map_data and map_data.graph then
+    local graph_links = map_data.graph[current_node]
+    if graph_links then
+      for next_wp, link in pairs(graph_links) do
+        evaluateCandidate(next_wp, link)
+      end
+    end
+  end
+
+  if not best_wp then
+    local node = extra_utils.getMapNode(current_node)
+    if node and node.links then
+      for next_wp, link in pairs(node.links) do
+        evaluateCandidate(next_wp, link)
       end
     end
   end
 
   if not best_wp then return nil end
-  return extra_utils.getWaypointSegmentFromNodes(veh_props, veh_props, current_wps.end_wp, best_wp)
+  return extra_utils.getWaypointSegmentFromNodes(veh_props, veh_props, current_node, best_wp)
 end
 
 local function buildSegmentsFromNodeList(nodes, veh_props)
@@ -416,14 +452,14 @@ local function buildSegmentPlan(veh_props, initial_wps, params, target_length)
   if not state_node then return nil end
 
   local prev_path = lane_state.prev_path_nodes
-  local use_prev = prev_path and prev_path[#prev_path] == state_node
+  local use_prev = prev_path and prev_path[1] == state_node
 
   local heading_keep = params.prev_path_heading_keep or 0
   if use_prev and heading_keep > 0 and #prev_path >= 2 then
-    local last_pos = extra_utils.getWaypointPosition(prev_path[#prev_path])
-    local prev_pos = extra_utils.getWaypointPosition(prev_path[#prev_path - 1])
-    if last_pos and prev_pos then
-      local prev_dir = extra_utils.toNormXYVec(last_pos - prev_pos)
+    local first_pos = extra_utils.getWaypointPosition(prev_path[1])
+    local second_pos = extra_utils.getWaypointPosition(prev_path[2])
+    if first_pos and second_pos then
+      local prev_dir = extra_utils.toNormXYVec(second_pos - first_pos)
       if prev_dir:length() > 0 then
         local heading = prev_dir:dot(extra_utils.toNormXYVec(veh_props.dir))
         if heading < heading_keep then
@@ -620,6 +656,8 @@ end
 local function gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
   if not initial_wps then return nil end
 
+  local map_data = extra_utils.getGraphData()
+
   local lookahead_base = params.lookahead_base or 22
   local lookahead_min = params.lookahead_min or lookahead_base
   if lookahead_min < 0 then lookahead_min = 0 end
@@ -730,7 +768,7 @@ local function gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
 
     if total_length >= target_length then break end
 
-    local next_wps = selectNextSegment(veh_props, current_wps, params, preferred_offset, visited)
+    local next_wps = selectNextSegment(veh_props, current_wps, params, preferred_offset, visited, map_data)
     if not next_wps then
       local probe_dist = params.segment_probe_distance or 5
       local fallback_query = vec3(
@@ -1039,6 +1077,7 @@ local function buildAssistInfo(params, lane_model)
       weight = 0,
       final = 0,
       driver = 0,
+      applied = 0,
       error = lane_model and lane_model.offset.normalized or 0,
       headingError = lane_model and lane_model.heading.error or 0,
       curvature = lane_model and lane_model.curvature or 0
@@ -1104,13 +1143,17 @@ local function update(dt, veh, system_params, enabled)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
 
-  local raw_input = 0
-  if electrics_values_angelo234 then
-    raw_input = electrics_values_angelo234["steering_input"] or 0
+  local driver_input = rawget(_G, "input_steering_angelo234")
+  if driver_input == nil then
+    local estimated = 0
+    if electrics_values_angelo234 then
+      estimated = (electrics_values_angelo234["steering_input"] or 0) - last_assist_delta
+    end
+    driver_input = clamp(estimated, -1, 1)
   end
-  assist_info.steering.driver = raw_input
+  assist_info.steering.driver = driver_input
 
-  if abs(raw_input) > (disable_threshold * 0.6) then
+  if abs(driver_input) > (disable_threshold * 0.6) then
     lane_state.prev_path_nodes = nil
   end
 
@@ -1126,7 +1169,7 @@ local function update(dt, veh, system_params, enabled)
 
   local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
 
-  if assist_ready and abs(raw_input) > disable_threshold then
+  if assist_ready and abs(driver_input) > disable_threshold then
     status.driverOverride = true
     status.reason = "driver_override"
     assist_ready = false
@@ -1154,10 +1197,16 @@ local function update(dt, veh, system_params, enabled)
     local smoothed = steering_smoother:getUncapped(raw_target, dt)
     local target = clamp(smoothed, -steer_limit, steer_limit)
 
-    local assist_weight = clamp(1 - abs(raw_input) * assist_weight_gain, 0, 1)
-    local final = clamp(raw_input + target * assist_weight, -1, 1)
+    local assist_weight = clamp(1 - abs(driver_input) * assist_weight_gain, 0, 1)
+    local blended = target * assist_weight
+    local final = clamp(driver_input + blended, -1, 1)
 
-    veh:queueLuaCommand(string.format("input.event('steering', %f, 0)", final))
+    last_assist_delta = final - driver_input
+
+    veh:queueLuaCommand(string.format(
+      "input.event('steering', %f, 'FILTER_LANE_CENTERING', nil, nil, nil, 'lane_centering')",
+      final
+    ))
 
     assist_info.active = true
     assist_info.steering.target = target
@@ -1168,6 +1217,7 @@ local function update(dt, veh, system_params, enabled)
     assist_info.steering.error = norm_error
     assist_info.steering.headingError = heading_error
     assist_info.steering.curvature = lane_model.curvature or 0
+    assist_info.steering.applied = last_assist_delta
 
     status.active = true
     status.reason = nil
