@@ -11,7 +11,7 @@
   "description": "Displays lane centering data.",
   "directive": "laneCenteringAssistApp",
   "domElement": "<lane-centering-assist-app></lane-centering-assist-app>",
-  "name": "Lane Centering Assist Viewer",
+  "name": "ADAS - Lane Centering Assist Viewer",
   "types": [
     "ui.apps.categories.examples"
   ],

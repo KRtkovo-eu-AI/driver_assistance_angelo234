@@ -11,7 +11,7 @@
   "description": "Displays point cloud from virtual lidar.",
   "directive": "virtualLidarApp",
   "domElement": "<virtual-lidar-app></virtual-lidar-app>",
-  "name": "Virtual Lidar Viewer",
+  "name": "ADAS - Virtual Lidar Viewer",
   "types": [
     "ui.apps.categories.examples"
   ],
