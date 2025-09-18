@@ -1,7 +1,11 @@
-local busted = require('busted')
+local laura = require('laura')
+local describe = laura.describe
+local it = laura.it
+local expect = laura.expect
+local hooks = laura.hooks
 
 describe('extension', function()
-  before_each(function()
+  hooks.beforeEach(function()
     -- clear loaded module to allow fresh environment per test
     package.loaded['scripts/driver_assistance_angelo234/extension'] = nil
     package.loaded['scripts/driver_assistance_angelo234/extraUtils'] = nil
@@ -39,7 +43,7 @@ describe('extension', function()
 
     local extension = require('scripts/driver_assistance_angelo234/extension')
     extension._setFrontLidarThread(nil)
-    assert.has_no.errors(function() extension.onUpdate(0.1) end)
+    expect(function() extension.onUpdate(0.1) end).notToFail()
   end)
 
   it('initializes lidar buffers for both sweeps', function()
@@ -63,9 +67,9 @@ describe('extension', function()
     local extension = require('scripts/driver_assistance_angelo234/extension')
     extension._resetVirtualLidarPointCloud()
     extension._setFrontLidarThread(nil)
-    assert.equal(8, #extension._virtual_lidar_point_cloud())
-    assert.equal(4, #extension._front_lidar_point_cloud())
-    assert.has_no.errors(function() extension.onUpdate(0.1) end)
+    expect(#extension._virtual_lidar_point_cloud()).toEqual(8)
+    expect(#extension._front_lidar_point_cloud()).toEqual(4)
+    expect(function() extension.onUpdate(0.1) end).notToFail()
   end)
 
   it('polls front sensors when only auto headlight system is active', function()
@@ -133,8 +137,8 @@ describe('extension', function()
     extension.onUpdate(0.3)
     extension.onUpdate(0.3)
 
-    assert.is_true(poll_called > 0)
-    assert.equal(sample_front_data[2], passed_vehs)
+    expect(poll_called > 0).toBeTruthy()
+    expect(passed_vehs).toEqual(sample_front_data[2])
   end)
 
   it('does not run obstacle AEB without the part installed', function()
@@ -198,6 +202,6 @@ describe('extension', function()
     extension.onUpdate(0.3)
     extension.onUpdate(0.3)
 
-    assert.equal(0, aeb_called)
+    expect(aeb_called).toEqual(0)
   end)
 end)
