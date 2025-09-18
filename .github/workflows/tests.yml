@@ -17,74 +17,240 @@ jobs:
         id: lua
         continue-on-error: true
         run: |
-          files=$(find . -path './.beamng' -prune -o -name '*.lua' -print)
-          if [ -n "$files" ]; then
-            echo 'Lua files:'
-            printf '%s\n' $files
-            errors=0
-            for f in $files; do
-              if ! luac -p "$f"; then
-                errors=$((errors+1))
-              fi
-            done
-            count=$(printf '%s\n' "$files" | wc -l)
-          else
+          set -o pipefail
+
+          quote_attr() {
+            python3 - "$1" <<'PY'
+import sys
+from xml.sax.saxutils import quoteattr
+print(quoteattr(sys.argv[1]))
+PY
+          }
+
+          escape_xml() {
+            python3 - <<'PY'
+import sys
+from xml.sax.saxutils import escape
+print(escape(sys.stdin.read()), end='')
+PY
+          }
+
+          mkdir -p reports
+          report="reports/lua.xml"
+          tmp_body=$(mktemp)
+
+          mapfile -d '' -t files < <(find . -path './.beamng' -prune -o -name '*.lua' -print0)
+
+          count=${#files[@]}
+          errors=0
+
+          if [ "$count" -eq 0 ]; then
             echo 'No Lua files'
-            count=0
-            errors=0
+          else
+            echo 'Lua files:'
+            printf '%s\n' "${files[@]}"
           fi
+
+          : > "$tmp_body"
+          for file in "${files[@]}"; do
+            rel="${file#./}"
+            quoted_name=$(quote_attr "$rel")
+            if output=$(luac -p "$file" 2>&1); then
+              printf '  <testcase classname="lua.syntax" name=%s></testcase>\n' "$quoted_name" >> "$tmp_body"
+            else
+              errors=$((errors+1))
+              printf 'Lua syntax error in %s\n' "$file"
+              failure_text=$(printf '%s' "$output" | escape_xml)
+              printf '  <testcase classname="lua.syntax" name=%s><failure message="Syntax error">%s</failure></testcase>\n' "$quoted_name" "$failure_text" >> "$tmp_body"
+            fi
+          done
+
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '<testsuite name="Lua syntax" tests="%s" failures="%s">\n' "$count" "$errors"
+            cat "$tmp_body"
+            echo '</testsuite>'
+          } > "$report"
+
+          rm -f "$tmp_body"
+
+          if [ "$count" -gt 0 ]; then
+            files_output=$(printf '%s\n' "${files[@]}")
+          else
+            files_output=""
+          fi
+
           printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
-          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files_output" >> "$GITHUB_OUTPUT"
+
           if [ "$errors" -ne 0 ]; then exit 1; fi
       - name: JS syntax check
         id: js
         continue-on-error: true
         run: |
-          files=$(find . -path './.beamng' -prune -o -name '*.js' -print)
-          if [ -n "$files" ]; then
-            echo 'JS files:'
-            printf '%s\n' $files
-            errors=0
-            for f in $files; do
-              if ! node --check "$f"; then
-                errors=$((errors+1))
-              fi
-            done
-            count=$(printf '%s\n' "$files" | wc -l)
-          else
+          set -o pipefail
+
+          quote_attr() {
+            python3 - "$1" <<'PY'
+import sys
+from xml.sax.saxutils import quoteattr
+print(quoteattr(sys.argv[1]))
+PY
+          }
+
+          escape_xml() {
+            python3 - <<'PY'
+import sys
+from xml.sax.saxutils import escape
+print(escape(sys.stdin.read()), end='')
+PY
+          }
+
+          mkdir -p reports
+          report="reports/js.xml"
+          tmp_body=$(mktemp)
+
+          mapfile -d '' -t files < <(find . -path './.beamng' -prune -o -name '*.js' -print0)
+
+          count=${#files[@]}
+          errors=0
+
+          if [ "$count" -eq 0 ]; then
             echo 'No JavaScript files'
-            count=0
-            errors=0
+          else
+            echo 'JS files:'
+            printf '%s\n' "${files[@]}"
           fi
+
+          : > "$tmp_body"
+          for file in "${files[@]}"; do
+            rel="${file#./}"
+            quoted_name=$(quote_attr "$rel")
+            if output=$(node --check "$file" 2>&1); then
+              printf '  <testcase classname="js.syntax" name=%s></testcase>\n' "$quoted_name" >> "$tmp_body"
+            else
+              errors=$((errors+1))
+              printf 'JavaScript syntax error in %s\n' "$file"
+              failure_text=$(printf '%s' "$output" | escape_xml)
+              printf '  <testcase classname="js.syntax" name=%s><failure message="Syntax error">%s</failure></testcase>\n' "$quoted_name" "$failure_text" >> "$tmp_body"
+            fi
+          done
+
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '<testsuite name="JS syntax" tests="%s" failures="%s">\n' "$count" "$errors"
+            cat "$tmp_body"
+            echo '</testsuite>'
+          } > "$report"
+
+          rm -f "$tmp_body"
+
+          if [ "$count" -gt 0 ]; then
+            files_output=$(printf '%s\n' "${files[@]}")
+          else
+            files_output=""
+          fi
+
           printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
-          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files_output" >> "$GITHUB_OUTPUT"
+
           if [ "$errors" -ne 0 ]; then exit 1; fi
       - name: Busted tests
         id: busted
         continue-on-error: true
         run: |
-          output=$(busted)
-          status=$?
-          echo "$output"
-          summary=$(printf '%s\n' "$output" | sed -e 's/\x1B\[[0-9;]*m//g' | awk 'NF {line=$0} END {print line}')
-          successes=$(echo "$summary" | awk '{print $1}')
-          failures=$(echo "$summary" | awk '{print $4}')
-          errors=$(echo "$summary" | awk '{print $7}')
-          pending=$(echo "$summary" | awk '{print $10}')
-          if ! [[ "$successes" =~ ^[0-9]+$ ]]; then successes=0; fi
-          if ! [[ "$failures" =~ ^[0-9]+$ ]]; then failures=0; fi
-          if ! [[ "$errors" =~ ^[0-9]+$ ]]; then errors=0; fi
-          if ! [[ "$pending" =~ ^[0-9]+$ ]]; then pending=0; fi
-          total=$((successes + failures + errors + pending))
+          set -o pipefail
+
+          mkdir -p reports
+          report="reports/busted.xml"
+
+          busted --output=junit | tee "$report"
+          status=${PIPESTATUS[0]}
+
+          summary_present=1
+          total=0
+          successes=0
+          failures=0
+          errors=0
+          pending=0
+
+          if [ -s "$report" ]; then
+            if counts=$(python3 - "$report" <<'PY'
+import sys
+from xml.etree import ElementTree as ET
+
+path = sys.argv[1]
+try:
+    tree = ET.parse(path)
+except Exception:
+    sys.exit(1)
+root = tree.getroot()
+if root.tag == 'testsuites':
+    suites = root.findall('testsuite')
+else:
+    suites = [root]
+def to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+tests = sum(to_int(s.get('tests')) for s in suites)
+failures = sum(to_int(s.get('failures')) for s in suites)
+errors = sum(to_int(s.get('errors')) for s in suites)
+skip = None
+for attr in ('skipped', 'skip'):
+    values = [to_int(s.get(attr)) for s in suites if s.get(attr) is not None]
+    if values:
+        skip = sum(values)
+        break
+if skip is None:
+    skip = 0
+successes = tests - failures - errors - skip
+if successes < 0:
+    successes = 0
+print(tests)
+print(successes)
+print(failures)
+print(errors)
+print(skip)
+PY
+); then
+              mapfile -t parsed <<EOF
+$counts
+EOF
+              if [ "${#parsed[@]}" -eq 5 ]; then
+                total=${parsed[0]}
+                successes=${parsed[1]}
+                failures=${parsed[2]}
+                errors=${parsed[3]}
+                pending=${parsed[4]}
+              else
+                summary_present=0
+              fi
+            else
+              summary_present=0
+            fi
+          else
+            summary_present=0
+          fi
+
+          if [ "$summary_present" -eq 1 ]; then
+            printf 'Busted totals: %s tests, %s successes, %s failures, %s errors, %s pending\n' "$total" "$successes" "$failures" "$errors" "$pending"
+          else
+            echo 'Unable to parse Busted JUnit report' >&2
+          fi
+
           printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
           printf 'successes=%s\n' "$successes" >> "$GITHUB_OUTPUT"
           printf 'failures=%s\n' "$failures" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
           printf 'pending=%s\n' "$pending" >> "$GITHUB_OUTPUT"
+          printf 'summary_present=%s\n' "$summary_present" >> "$GITHUB_OUTPUT"
           printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
-          exit $status
+
+          exit "$status"
       - name: Report results
         id: report
         if: always()
@@ -103,6 +269,7 @@ jobs:
           BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
           BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
           BUSTED_PENDING: ${{ steps.busted.outputs.pending }}
+          BUSTED_SUMMARY_PRESENT: ${{ steps.busted.outputs.summary_present }}
           BUSTED_STATUS: ${{ steps.busted.outputs.status }}
         run: |
           LUA_COUNT=${LUA_COUNT:-0}
@@ -115,10 +282,9 @@ jobs:
           BUSTED_ERRORS=${BUSTED_ERRORS:-0}
           BUSTED_PENDING=${BUSTED_PENDING:-0}
           BUSTED_STATUS=${BUSTED_STATUS:-0}
-          BUSTED_SUMMARY_PRESENT=1
-          if [ "$BUSTED_STATUS" -ne 0 ] && [ $((BUSTED_FAILURES + BUSTED_ERRORS)) -eq 0 ]; then
+          BUSTED_SUMMARY_PRESENT=${BUSTED_SUMMARY_PRESENT:-1}
+          if [ "$BUSTED_SUMMARY_PRESENT" -eq 0 ] && [ $((BUSTED_FAILURES + BUSTED_ERRORS)) -eq 0 ]; then
             BUSTED_ERRORS=$((BUSTED_ERRORS + 1))
-            BUSTED_SUMMARY_PRESENT=0
           fi
           total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
           total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
@@ -195,6 +361,15 @@ jobs:
           printf 'total_fail=%s\n' "$total_fail" >> "$GITHUB_OUTPUT"
           printf 'total_error=%s\n' "$total_error" >> "$GITHUB_OUTPUT"
 
+      - name: Publish test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Test results
+          path: reports/*.xml
+          reporter: junit
+          fail-on-error: false
+
       - name: Upload report artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -203,6 +378,7 @@ jobs:
           path: |
             test-results.md
             tests-badge.svg
+            reports/*.xml
 
       - name: Annotate check name
         if: always()
