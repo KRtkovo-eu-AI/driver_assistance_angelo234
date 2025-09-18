@@ -152,21 +152,7 @@ jobs:
           status=$?
 
           if [ -f reports/laura_summary.json ]; then
-            python3 - <<'PY' >> "$GITHUB_OUTPUT"
-import json
-from pathlib import Path
-
-path = Path('reports/laura_summary.json')
-data = {}
-if path.exists():
-    data = json.loads(path.read_text())
-print(f"tests={data.get('tests', 0)}")
-print(f"passed={data.get('passed', 0)}")
-print(f"failures={data.get('failures', 0)}")
-print(f"errors={data.get('errors', 0)}")
-print(f"skipped={data.get('skipped', 0)}")
-print(f"time={data.get('time', 0.0)}")
-PY
+            python3 -c $'import json\nfrom pathlib import Path\npath = Path("reports/laura_summary.json")\ntry:\n    data = json.loads(path.read_text())\nexcept Exception:\n    data = {}\nfor key, default in (("tests", 0), ("passed", 0), ("failures", 0), ("errors", 0), ("skipped", 0), ("time", 0.0)):\n    value = data.get(key, default)\n    print(f"{key}={value}")' >> "$GITHUB_OUTPUT"
           else
             {
               echo 'tests=0'
