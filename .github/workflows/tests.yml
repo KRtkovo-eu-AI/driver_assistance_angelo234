@@ -20,19 +20,11 @@ jobs:
           set -o pipefail
 
           quote_attr() {
-            python3 - "$1" <<'PY'
-import sys
-from xml.sax.saxutils import quoteattr
-print(quoteattr(sys.argv[1]))
-PY
+            python3 -c $'import sys\nfrom xml.sax.saxutils import quoteattr\nprint(quoteattr(sys.argv[1]))' "$1"
           }
 
           escape_xml() {
-            python3 - <<'PY'
-import sys
-from xml.sax.saxutils import escape
-print(escape(sys.stdin.read()), end='')
-PY
+            python3 -c $'import sys\nfrom xml.sax.saxutils import escape\nsys.stdout.write(escape(sys.stdin.read()))'
           }
 
           mkdir -p reports
@@ -92,19 +84,11 @@ PY
           set -o pipefail
 
           quote_attr() {
-            python3 - "$1" <<'PY'
-import sys
-from xml.sax.saxutils import quoteattr
-print(quoteattr(sys.argv[1]))
-PY
+            python3 -c $'import sys\nfrom xml.sax.saxutils import quoteattr\nprint(quoteattr(sys.argv[1]))' "$1"
           }
 
           escape_xml() {
-            python3 - <<'PY'
-import sys
-from xml.sax.saxutils import escape
-print(escape(sys.stdin.read()), end='')
-PY
+            python3 -c $'import sys\nfrom xml.sax.saxutils import escape\nsys.stdout.write(escape(sys.stdin.read()))'
           }
 
           mkdir -p reports
@@ -177,46 +161,7 @@ PY
           pending=0
 
           if [ -s "$report" ]; then
-            if counts=$(python3 - "$report" <<'PY'
-import sys
-from xml.etree import ElementTree as ET
-
-path = sys.argv[1]
-try:
-    tree = ET.parse(path)
-except Exception:
-    sys.exit(1)
-root = tree.getroot()
-if root.tag == 'testsuites':
-    suites = root.findall('testsuite')
-else:
-    suites = [root]
-def to_int(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-tests = sum(to_int(s.get('tests')) for s in suites)
-failures = sum(to_int(s.get('failures')) for s in suites)
-errors = sum(to_int(s.get('errors')) for s in suites)
-skip = None
-for attr in ('skipped', 'skip'):
-    values = [to_int(s.get(attr)) for s in suites if s.get(attr) is not None]
-    if values:
-        skip = sum(values)
-        break
-if skip is None:
-    skip = 0
-successes = tests - failures - errors - skip
-if successes < 0:
-    successes = 0
-print(tests)
-print(successes)
-print(failures)
-print(errors)
-print(skip)
-PY
-); then
+            if counts=$(python3 -c $'import sys\nfrom xml.etree import ElementTree as ET\npath = sys.argv[1]\ntry:\n    tree = ET.parse(path)\nexcept Exception:\n    sys.exit(1)\nroot = tree.getroot()\nif root.tag == "testsuites":\n    suites = root.findall("testsuite")\nelse:\n    suites = [root]\n\ndef to_int(value):\n    try:\n        return int(value)\n    except (TypeError, ValueError):\n        return 0\n\ntests = sum(to_int(s.get("tests")) for s in suites)\nfailures = sum(to_int(s.get("failures")) for s in suites)\nerrors = sum(to_int(s.get("errors")) for s in suites)\nskip = 0\nfor attr in ("skipped", "skip"):\n    values = [to_int(s.get(attr)) for s in suites if s.get(attr) is not None]\n    if values:\n        skip = sum(values)\n        break\n\nsuccesses = tests - failures - errors - skip\nif successes < 0:\n    successes = 0\n\nprint(tests)\nprint(successes)\nprint(failures)\nprint(errors)\nprint(skip)\n' "$report"); then
               mapfile -t parsed <<EOF
 $counts
 EOF
