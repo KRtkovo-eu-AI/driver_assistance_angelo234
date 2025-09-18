@@ -38,7 +38,7 @@ local auto_headlight_system_on = false
 local prev_auto_headlight_system_on = false
 local acc_system_on = false
 local obstacle_aeb_system_on = true
-local lane_centering_assist_on = true
+local lane_centering_assist_on = false
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -142,6 +142,9 @@ local function init(player)
     auto_headlight_system_on = false
     prev_auto_headlight_system_on = false
   end
+
+  lane_centering_assist_on = false
+  lane_centering_system.onDeactivated()
 end
 
 local function onExtensionLoaded()
@@ -185,12 +188,48 @@ local function toggleObstacleAEBSystem()
   ui_message("Self-driving Assist switched " .. state)
 end
 
-local function toggleLaneCenteringSystem()
-  if not extra_utils.getPart("lane_centering_assist_angelo234") then return end
+local function setLaneCenteringAssistState(on, reason)
+  local has_part = extra_utils.getPart("lane_centering_assist_system_angelo234")
+  if not has_part then
+    on = false
+    reason = reason or 'missing_part'
+  end
 
-  lane_centering_assist_on = not lane_centering_assist_on
-  local state = lane_centering_assist_on and "ON" or "OFF"
-  ui_message("Lane Centering Assist System switched " .. state)
+  if lane_centering_assist_on == on then
+    if not on and reason then
+      lane_centering_system.onDeactivated()
+      if reason == 'manual_override' then
+        ui_message("Lane Centering Assist disengaged (manual steering)")
+      end
+    end
+    return
+  end
+
+  lane_centering_assist_on = on
+
+  if on then
+    lane_centering_system.onActivated()
+    ui_message("Lane Centering Assist System switched ON")
+  else
+    lane_centering_system.onDeactivated()
+    local msg
+    if reason == 'manual_override' then
+      msg = "Lane Centering Assist disengaged (manual steering)"
+    elseif reason == 'toggle' then
+      msg = "Lane Centering Assist System switched OFF"
+    elseif reason == 'missing_part' then
+      msg = "Lane Centering Assist System switched OFF"
+    else
+      msg = "Lane Centering Assist disengaged"
+    end
+    ui_message(msg)
+  end
+end
+
+local function toggleLaneCenteringSystem()
+  if not extra_utils.getPart("lane_centering_assist_system_angelo234") then return end
+
+  setLaneCenteringAssistState(not lane_centering_assist_on, 'toggle')
 end
 
 local function toggleAutoHeadlightSystem()
@@ -756,12 +795,19 @@ local function onUpdate(dt)
           end
 
           --Update Lane Centering Assist System
-          if extra_utils.getPart("lane_centering_assist_angelo234") and lane_centering_assist_on then
-            lane_centering_system.update(
-              other_systems_timer * 2,
-              my_veh,
-              system_params
-            )
+          if lane_centering_assist_on then
+            if extra_utils.getPart("lane_centering_assist_system_angelo234") then
+              local result = lane_centering_system.update(
+                other_systems_timer * 2,
+                my_veh,
+                system_params
+              )
+              if result and result.disengaged then
+                setLaneCenteringAssistState(false, result.reason or 'auto')
+              end
+            else
+              setLaneCenteringAssistState(false, 'missing_part')
+            end
           end
 
         phase = 0
@@ -917,9 +963,11 @@ local function getVirtualLidarData()
 end
 
 local function getLaneCenteringData()
-  local data = lane_centering_system.getLaneData()
-  if data then
-    data.color = getVehicleColor()
+  local data = lane_centering_system.getLaneData() or {}
+  data.active = lane_centering_assist_on
+  data.color = getVehicleColor()
+  if not data.status then
+    data.status = lane_centering_assist_on and 'SEARCHING' or 'OFF'
   end
   return data
 end
