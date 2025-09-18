@@ -277,7 +277,7 @@ jobs:
         with:
           name: Test results
           path: reports/*.xml
-          reporter: junit
+          reporter: java-junit
           fail-on-error: false
 
       - name: Upload report artifacts
