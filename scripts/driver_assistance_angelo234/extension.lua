@@ -24,6 +24,7 @@ local lane_centering_system = require('scripts/driver_assistance_angelo234/laneC
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 local drift_proximity = require('scripts/driver_assistance_angelo234/driftProximity')
 local lidarPcdPublisher = require('scripts/driver_assistance_angelo234/lidarPcdPublisher')
+local lidarPcdStream = require('scripts/driver_assistance_angelo234/lidarPcdStreamServer')
 
 local first_update = true
 
@@ -80,6 +81,43 @@ local virtual_lidar_pcd = {
   path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
   dirty = false
 }
+
+local virtual_lidar_stream = {
+  enabled = false,
+  host = '127.0.0.1',
+  port = 8765,
+  running = false,
+  activePort = nil
+}
+
+local function reportLidarError(msg)
+  logger.log('E', 'lidar', msg)
+end
+
+local function ensureVirtualLidarStreamServer()
+  local running = lidarPcdStream.isRunning and lidarPcdStream.isRunning() or false
+  if not running then
+    virtual_lidar_stream.activePort = nil
+  end
+  if running and virtual_lidar_stream.activePort == virtual_lidar_stream.port then
+    virtual_lidar_stream.running = true
+    return true
+  end
+  local ok, err = lidarPcdStream.start(virtual_lidar_stream.host, virtual_lidar_stream.port)
+  if not ok then
+    virtual_lidar_stream.running = running
+    return false, err
+  end
+  virtual_lidar_stream.running = true
+  virtual_lidar_stream.activePort = virtual_lidar_stream.port
+  return true
+end
+
+local function stopVirtualLidarStreamServer()
+  lidarPcdStream.stop()
+  virtual_lidar_stream.running = false
+  virtual_lidar_stream.activePort = nil
+end
 
 lidarPcdPublisher.configure({path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH, enabled = false})
 lidarPcdPublisher.setEnabled(false)
@@ -171,6 +209,7 @@ end
 
 local function onExtensionLoaded()
   init(0)
+  ensureVirtualLidarStreamServer()
 end
 
 local function onVehicleSwitched(_oid, _nid, player)
@@ -690,6 +729,8 @@ local phase = 0
 local function onUpdate(dt)
   --p:start()
 
+  lidarPcdStream.update(dt)
+
   if first_update then
     if sensor_system.init then sensor_system.init() end
     if fcm_system.init then fcm_system.init() end
@@ -972,16 +1013,27 @@ local function ensureVirtualLidarPcdConfigured(active)
 end
 
 function maybePublishVirtualLidarPcd(veh)
-  local active = virtual_lidar_pcd.enabled and logger.isSensorEnabled('lidar')
-  ensureVirtualLidarPcdConfigured(active)
-  if not active then
-    lidarPcdPublisher.setEnabled(false)
+  local lidarLogging = logger.isSensorEnabled('lidar')
+  local exportActive = virtual_lidar_pcd.enabled and lidarLogging
+  ensureVirtualLidarPcdConfigured(exportActive)
+  lidarPcdPublisher.setEnabled(exportActive)
+
+  local streamActive = virtual_lidar_stream.enabled
+  if not exportActive and not streamActive then
     return
+  end
+
+  local streamReady = false
+  if streamActive then
+    local ok = ensureVirtualLidarStreamServer()
+    streamReady = ok and true or false
   end
 
   local frame = buildCurrentFrame(veh)
   if not frame then
-    lidarPcdPublisher.setEnabled(false)
+    if exportActive then
+      lidarPcdPublisher.setEnabled(false)
+    end
     return
   end
 
@@ -989,12 +1041,18 @@ function maybePublishVirtualLidarPcd(veh)
   local mainPoints = convertPointsToWorld(getVirtualLidarPointCloud(frame, veh), frame, vehicleKeyMap)
   local groundPoints = convertPointsToWorld(getVirtualLidarGroundPointCloud(frame, veh), frame)
 
-  lidarPcdPublisher.setEnabled(true)
-  lidarPcdPublisher.publish(frame, {
+  local payload = lidarPcdPublisher.publish(frame, {
     main = mainPoints,
     ground = groundPoints,
     vehicle = vehicleWorld
+  }, {
+    writeFile = exportActive,
+    wantPayload = streamActive
   })
+
+  if streamActive and streamReady and payload then
+    lidarPcdStream.broadcast(payload)
+  end
 end
 
 local function getVehicleColor(veh)
@@ -1071,8 +1129,75 @@ local function setVirtualLidarPcdOutputPath(path)
   end
 end
 
+local function setVirtualLidarPcdStreamEnabled(flag)
+  local enabled = flag and true or false
+  if virtual_lidar_stream.enabled == enabled then return end
+  if enabled then
+    local ok, err = ensureVirtualLidarStreamServer()
+    if not ok then
+      local msg = string.format(
+        'Failed to enable virtual LiDAR PCD streaming on %s:%d (%s)',
+        virtual_lidar_stream.host,
+        virtual_lidar_stream.port,
+        tostring(err or 'unknown')
+      )
+      reportLidarError(msg)
+      return
+    end
+    virtual_lidar_stream.enabled = true
+    if ui_message then
+      ui_message(string.format(
+        'Virtual LiDAR PCD streaming enabled on %s:%d',
+        virtual_lidar_stream.host,
+        virtual_lidar_stream.port
+      ))
+    end
+  else
+    virtual_lidar_stream.enabled = false
+    if ui_message then
+      ui_message('Virtual LiDAR PCD streaming disabled')
+    end
+  end
+end
+
+local function setVirtualLidarPcdStreamPort(port)
+  local numeric = tonumber(port)
+  if not numeric or math.floor(numeric) ~= numeric or numeric < 1 or numeric > 65535 then
+    local msg = string.format('Invalid virtual LiDAR PCD stream port: %s', tostring(port))
+    reportLidarError(msg)
+    if ui_message then ui_message(msg) end
+    return
+  end
+  if virtual_lidar_stream.port == numeric then return end
+  local previousPort = virtual_lidar_stream.port
+  virtual_lidar_stream.port = numeric
+  local ok, err = ensureVirtualLidarStreamServer()
+  if not ok then
+    local msg = string.format(
+      'Failed to bind virtual LiDAR PCD stream to port %d (%s)',
+      numeric,
+      tostring(err or 'unknown')
+    )
+    reportLidarError(msg)
+    if ui_message then
+      ui_message(string.format('%s. Reverting to port %d', msg, previousPort or virtual_lidar_stream.port))
+    end
+    virtual_lidar_stream.port = previousPort
+    virtual_lidar_stream.activePort = previousPort
+    ensureVirtualLidarStreamServer()
+    return
+  end
+  if ui_message then
+    ui_message(string.format('Virtual LiDAR PCD stream port set to %d', numeric))
+  end
+end
+
 local function onInit()
   setExtensionUnloadMode(M, "manual")
+end
+
+local function onExtensionUnloaded()
+  stopVirtualLidarStreamServer()
 end
 
 M.onExtensionLoaded = onExtensionLoaded
@@ -1095,9 +1220,12 @@ M.toggleRearSensorLogging = toggleRearSensorLogging
 M.toggleLidarLogging = toggleLidarLogging
 M.setVirtualLidarPcdExportEnabled = setVirtualLidarPcdExportEnabled
 M.setVirtualLidarPcdOutputPath = setVirtualLidarPcdOutputPath
+M.setVirtualLidarPcdStreamEnabled = setVirtualLidarPcdStreamEnabled
+M.setVirtualLidarPcdStreamPort = setVirtualLidarPcdStreamPort
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
+M.onExtensionUnloaded = onExtensionUnloaded
 M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
 M.getVehicleColor = getVehicleColor
 M.getVirtualLidarData = getVirtualLidarData

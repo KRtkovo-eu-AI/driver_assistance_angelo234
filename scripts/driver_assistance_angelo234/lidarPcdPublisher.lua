@@ -82,6 +82,80 @@ end
 
 local M = {}
 
+local packPoint
+
+do
+  local hasStringPack = type(string.pack) == 'function'
+
+  if hasStringPack then
+    packPoint = function(x, y, z, intensity)
+      return string.pack('<ffff', x, y, z, intensity)
+    end
+  else
+    local function encodeFloat(value)
+      if value ~= value then
+        return 0xffc00000
+      end
+      if value == math.huge then
+        return 0x7f800000
+      end
+      if value == -math.huge then
+        return 0xff800000
+      end
+
+      local sign = 0
+      if value < 0 or (value == 0 and 1 / value < 0) then
+        sign = 0x80000000
+        value = -value
+      end
+
+      if value == 0 then
+        return sign
+      end
+
+      local mantissa, exponent = math.frexp(value)
+      exponent = exponent - 1
+      mantissa = mantissa * 2 - 1
+      exponent = exponent + 127
+
+      if exponent <= 0 then
+        mantissa = math.floor((mantissa + 1) * math.ldexp(1, exponent + 22) + 0.5)
+        exponent = 0
+      else
+        mantissa = math.floor(mantissa * 0x800000 + 0.5)
+      end
+
+      if mantissa == 0x800000 then
+        exponent = exponent + 1
+        mantissa = 0
+      end
+
+      if exponent >= 255 then
+        exponent = 255
+        mantissa = 0
+      end
+
+      return sign + exponent * 0x800000 + mantissa
+    end
+
+    local function packFloat(value)
+      local bits = encodeFloat(value)
+      local b1 = bits % 256
+      bits = (bits - b1) / 256
+      local b2 = bits % 256
+      bits = (bits - b2) / 256
+      local b3 = bits % 256
+      bits = (bits - b3) / 256
+      local b4 = bits % 256
+      return string.char(b1, b2, b3, b4)
+    end
+
+    packPoint = function(x, y, z, intensity)
+      return packFloat(x) .. packFloat(y) .. packFloat(z) .. packFloat(intensity)
+    end
+  end
+end
+
 local function computeDefaultPath()
   if FS and FS.getUserPath then
     local ok, base = pcall(function()
@@ -152,7 +226,7 @@ local function appendPoints(segments, points, intensity)
       local x = pt.x or pt[1] or 0
       local y = pt.y or pt[2] or 0
       local z = pt.z or pt[3] or 0
-      segments[#segments + 1] = string.pack('<fff f', x, y, z, intensity)
+      segments[#segments + 1] = packPoint(x, y, z, intensity)
       count = count + 1
     end
   end
@@ -235,15 +309,25 @@ local function ensureConfigured()
   ensureDirectory(state.outputPath)
 end
 
-function M.publish(frame, scan)
-  if not state.enabled then return false end
+function M.publish(frame, scan, opts)
+  opts = opts or {}
+  local writeFile = opts.writeFile
+  if writeFile == nil then
+    writeFile = state.enabled
+  end
+  local wantPayload = opts.wantPayload
+  if wantPayload == nil then
+    wantPayload = writeFile
+  end
+  if not writeFile and not wantPayload then return nil end
+
   local throttled, now = shouldThrottle()
-  if throttled then return false end
-  if not frame or not frame.origin or not frame.dir or not frame.up then return false end
+  if throttled then return nil end
+  if not frame or not frame.origin or not frame.dir or not frame.up then return nil end
   scan = scan or {}
 
   local pcd = pcdLib.newPcd()
-  if not pcd then return false end
+  if not pcd then return nil end
 
   if pcd.clearFields then pcd:clearFields() end
   if pcd.addField then
@@ -271,12 +355,18 @@ function M.publish(frame, scan)
     pcd:setViewpoint(origin, q)
   end
 
-  ensureConfigured()
+  if writeFile then
+    ensureConfigured()
 
-  local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
-  savePcd(pcd, tmpPath)
-  renameFile(tmpPath, state.outputPath)
+    local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
+    savePcd(pcd, tmpPath)
+    renameFile(tmpPath, state.outputPath)
+  end
+
   state.lastWrite = now or (os.clock and os.clock()) or state.lastWrite
+  if wantPayload then
+    return payload
+  end
   return true
 end
 
