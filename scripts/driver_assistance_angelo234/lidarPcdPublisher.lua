@@ -407,6 +407,13 @@ local function formatFloat(value)
 end
 
 local function writeBinaryPcd(path, payload, count, origin, quat)
+  if type(path) == 'string' then
+    -- Lua's io library accepts forward slashes on Windows as well. Normalizing
+    -- ensures escaped backslashes (for example coming from FS:getUserPath)
+    -- never confuse the sandboxed runtime when it validates domains.
+    path = path:gsub('\\', '/')
+  end
+
   local file, err = io.open(path, 'wb')
   if not file then
     return false, err
@@ -465,7 +472,7 @@ local function shouldFallbackToDefault(err)
   return false
 end
 
-local function applySandboxFallback(err, payload, count, origin, viewpointQuat)
+local function applySandboxFallback(pcd, err, payload, count, origin, viewpointQuat)
   if state.outputPath == DEFAULT_PATH or not shouldFallbackToDefault(err) then
     return false, err
   end
@@ -474,8 +481,31 @@ local function applySandboxFallback(err, payload, count, origin, viewpointQuat)
   local fallbackPath = DEFAULT_PATH
   ensureDirectory(fallbackPath)
 
-  local ok, fallbackErr = writeBinaryPcd(fallbackPath, payload, count, origin, viewpointQuat)
-  if ok then
+  local wroteFallback = false
+  local fallbackErr = nil
+
+  if pcd then
+    local ok, saveErr = pcall(savePcd, pcd, fallbackPath)
+    if ok and saveErr ~= false then
+      wroteFallback = true
+    else
+      fallbackErr = saveErr or fallbackErr
+    end
+  end
+
+  if not wroteFallback then
+    local ok, directErr = writeBinaryPcd(fallbackPath, payload, count, origin, viewpointQuat)
+    if ok then
+      wroteFallback = true
+      state.writeMode = 'direct'
+    else
+      fallbackErr = directErr or fallbackErr
+    end
+  else
+    state.writeMode = 'atomic'
+  end
+
+  if wroteFallback then
     if reportError then
       reportError(string.format(
         'Virtual LiDAR export path %s is not writable (%s); using default path %s instead',
@@ -486,7 +516,6 @@ local function applySandboxFallback(err, payload, count, origin, viewpointQuat)
     end
     state.outputPath = fallbackPath
     state.tmpPath = fallbackPath .. '.tmp'
-    state.writeMode = 'direct'
     state.sandboxFallback = {
       blockedPath = blockedPath,
       reason = tostring(err or 'unknown')
@@ -607,7 +636,7 @@ function M.publish(frame, scan, opts)
           end
           state.sandboxFallback = nil
         else
-          local fallbackOk, fallbackErr = applySandboxFallback(err, payload, count, origin, viewpointQuat)
+          local fallbackOk, fallbackErr = applySandboxFallback(pcd, err, payload, count, origin, viewpointQuat)
           if fallbackOk then
             writeSucceeded = true
             writeError = nil
