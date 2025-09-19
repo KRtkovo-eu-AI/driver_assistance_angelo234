@@ -229,23 +229,6 @@ local function buildCandidatePaths(path)
   return candidates
 end
 
-local function prioritizeUserSchemes(candidates)
-  local prioritized = {}
-  local others = {}
-  for i = 1, #candidates do
-    local value = candidates[i]
-    if value:sub(1, 6) == 'user:/' then
-      prioritized[#prioritized + 1] = value
-    else
-      others[#others + 1] = value
-    end
-  end
-  for i = 1, #others do
-    prioritized[#prioritized + 1] = others[i]
-  end
-  return prioritized
-end
-
 local state = {
   enabled = false,
   outputPath = DEFAULT_PATH,
@@ -330,8 +313,8 @@ end
 
 local function renameFile(from, to)
   if not from or not to then return false, 'invalid path' end
-  local fromCandidates = prioritizeUserSchemes(buildCandidatePaths(from))
-  local toCandidates = prioritizeUserSchemes(buildCandidatePaths(to))
+  local fromCandidates = buildCandidatePaths(from)
+  local toCandidates = buildCandidatePaths(to)
   local lastErr = nil
   for i = 1, #fromCandidates do
     for j = 1, #toCandidates do
