@@ -235,15 +235,25 @@ local function ensureConfigured()
   ensureDirectory(state.outputPath)
 end
 
-function M.publish(frame, scan)
-  if not state.enabled then return false end
+function M.publish(frame, scan, opts)
+  opts = opts or {}
+  local writeFile = opts.writeFile
+  if writeFile == nil then
+    writeFile = state.enabled
+  end
+  local wantPayload = opts.wantPayload
+  if wantPayload == nil then
+    wantPayload = writeFile
+  end
+  if not writeFile and not wantPayload then return nil end
+
   local throttled, now = shouldThrottle()
-  if throttled then return false end
-  if not frame or not frame.origin or not frame.dir or not frame.up then return false end
+  if throttled then return nil end
+  if not frame or not frame.origin or not frame.dir or not frame.up then return nil end
   scan = scan or {}
 
   local pcd = pcdLib.newPcd()
-  if not pcd then return false end
+  if not pcd then return nil end
 
   if pcd.clearFields then pcd:clearFields() end
   if pcd.addField then
@@ -271,12 +281,18 @@ function M.publish(frame, scan)
     pcd:setViewpoint(origin, q)
   end
 
-  ensureConfigured()
+  if writeFile then
+    ensureConfigured()
 
-  local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
-  savePcd(pcd, tmpPath)
-  renameFile(tmpPath, state.outputPath)
+    local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
+    savePcd(pcd, tmpPath)
+    renameFile(tmpPath, state.outputPath)
+  end
+
   state.lastWrite = now or (os.clock and os.clock()) or state.lastWrite
+  if wantPayload then
+    return payload
+  end
   return true
 end
 
