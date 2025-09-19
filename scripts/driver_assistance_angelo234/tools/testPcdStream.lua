@@ -30,7 +30,7 @@ end
 
 function M.run(host, port, duration)
   host = host or '127.0.0.1'
-  port = tonumber(port) or 8765
+  port = tonumber(port) or 23511
   duration = duration or 5
 
   local client, err = socket.tcp()

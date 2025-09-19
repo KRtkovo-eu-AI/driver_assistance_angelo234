@@ -239,7 +239,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
       veh:queueLuaCommand("input.event('parkingbrake', 0, 2)")
     end
     if system_state ~= "braking" then
-      ui_message("Self-driving Assist Activated", 3)
+      ui_message("Obstacle Collision AEB Activated", 3)
       enableHazardLights(veh)
       enableABS(veh)
     end
