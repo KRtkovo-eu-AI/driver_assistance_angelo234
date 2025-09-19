@@ -166,8 +166,8 @@ describe('lidarPcdStreamServer', function()
     local payload = 'ABCD'
     server.broadcast(payload)
 
-    expect(clientA.sends).toEqual({ 'PCD 4\n', payload })
-    expect(clientB.sends).toEqual({ 'PCD 4\n', payload })
+    expect(clientA.sends).toDeepEqual({ 'PCD 4\n', payload })
+    expect(clientB.sends).toDeepEqual({ 'PCD 4\n', payload })
   end)
 
   it('removes clients that fail to send payloads', function()
@@ -188,7 +188,7 @@ describe('lidarPcdStreamServer', function()
     expect(server.clientCount()).toEqual(1)
     expect(healthyClient.closed).toBeFalsy()
     expect(failingClient.closed).toBeTruthy()
-    expect(healthyClient.sends).toEqual({ 'PCD 5\n', 'HELLO' })
+    expect(healthyClient.sends).toDeepEqual({ 'PCD 5\n', 'HELLO' })
   end)
 
   it('sends heartbeat messages at the configured interval', function()
@@ -209,10 +209,10 @@ describe('lidarPcdStreamServer', function()
     expect(#client.sends).toEqual(0)
 
     server.update(0.1)
-    expect(client.sends).toEqual({ 'PING\n' })
+    expect(client.sends).toDeepEqual({ 'PING\n' })
 
     server.update(0.25)
-    expect(client.sends).toEqual({ 'PING\n', 'PING\n' })
+    expect(client.sends).toDeepEqual({ 'PING\n', 'PING\n' })
   end)
 
   it('stops the server and closes all clients', function()
