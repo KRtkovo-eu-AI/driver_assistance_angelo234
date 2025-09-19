@@ -180,9 +180,9 @@ end
 local function computeDefaultPath()
   local base = getUserPathBase()
   if base then
-    return base .. 'virtual_lidar/latest.pcd'
+    return base .. 'settings/krtektm_lidar/latest.pcd'
   end
-  return 'virtual_lidar/latest.pcd'
+  return 'settings/krtektm_lidar/latest.pcd'
 end
 
 local DEFAULT_PATH = computeDefaultPath()
@@ -311,6 +311,39 @@ local function fileExists(path)
   return false
 end
 
+local function toFilesystemPath(path)
+  if not path or path == '' then return nil end
+  if path:sub(1, 7) == 'user://' or path:sub(1, 6) == 'user:/' then
+    local base = getUserPathBase()
+    if not base then return nil end
+    local relative = path:gsub('^user:/+', '')
+    return base .. relative
+  end
+  return path
+end
+
+local function ensureFile(path)
+  if not path or path == '' then return end
+  if fileExists(path) then return end
+  local candidates = buildCandidatePaths(path)
+  for i = 1, #candidates do
+    local fsPath = toFilesystemPath(candidates[i])
+    if fsPath then
+      local ok, created = pcall(function()
+        local file = io.open(fsPath, 'wb')
+        if file then
+          file:close()
+          return true
+        end
+        return false
+      end)
+      if ok and created then
+        return
+      end
+    end
+  end
+end
+
 local function renameFile(from, to)
   if not from or not to then return false, 'invalid path' end
   local fromCandidates = buildCandidatePaths(from)
@@ -381,6 +414,11 @@ local function configure(opts)
     state.enabled = opts.enabled and true or false
   end
   ensureDirectory(state.outputPath)
+  ensureFile(state.outputPath)
+  if state.tmpPath then
+    ensureDirectory(state.tmpPath)
+    ensureFile(state.tmpPath)
+  end
 end
 
 local function appendPoints(segments, points, intensity)
@@ -664,6 +702,11 @@ local function ensureConfigured()
     state.tmpPath = state.outputPath .. '.tmp'
   end
   ensureDirectory(state.outputPath)
+  ensureFile(state.outputPath)
+  if state.tmpPath then
+    ensureDirectory(state.tmpPath)
+    ensureFile(state.tmpPath)
+  end
 end
 
 function M.publish(frame, scan, opts)

@@ -83,10 +83,10 @@ local function computeDefaultVirtualLidarPath()
       return FS:getUserPath()
     end)
     if ok and type(base) == 'string' and base ~= '' then
-      return base .. 'virtual_lidar/latest.pcd'
+      return base .. 'settings/krtektm_lidar/latest.pcd'
     end
   end
-  return 'virtual_lidar/latest.pcd'
+  return 'settings/krtektm_lidar/latest.pcd'
 end
 
 local DEFAULT_VIRTUAL_LIDAR_PCD_PATH = computeDefaultVirtualLidarPath()

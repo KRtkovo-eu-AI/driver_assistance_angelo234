@@ -64,7 +64,7 @@ Pass `false` to either function to turn the feature off. Enabling the export (or
 
 ### Default file location
 
-If you do not override the path, the module writes `latest.pcd` into the `virtual_lidar` folder inside your BeamNG user profile (for example `Documents/BeamNG.drive/virtual_lidar/latest.pcd`). 【F:scripts/driver_assistance_angelo234/extension.lua†L70-L83】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L60-L86】
+If you do not override the path, the module writes `latest.pcd` into `settings/krtektm_lidar` inside your BeamNG user profile (for example `C:\Users\ok\AppData\Local\BeamNG.drive\current\settings\krtektm_lidar\latest.pcd`). 【F:scripts/driver_assistance_angelo234/extension.lua†L70-L83】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L60-L86】
 
 ### Options (path, port, intensity)
 
