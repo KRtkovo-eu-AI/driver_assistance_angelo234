@@ -1,8 +1,100 @@
-local pcdLib = require('common.tech.pcdLib')
+local ok, pcdLib = pcall(require, 'common.tech.pcdLib')
+if not ok or not pcdLib then
+  local missingLibError = not ok and pcdLib or nil
+
+  local function createStubPcd()
+    local stub = {
+      fields = {}
+    }
+
+    function stub:clearFields()
+      self.fields = {}
+    end
+
+    function stub:addField(name, ftype, size)
+      self.fields[#self.fields + 1] = {name = name, type = ftype, size = size}
+    end
+
+    function stub:setBinaryData(payload, count)
+      self.data = payload
+      self.pointCount = count
+    end
+
+    function stub:setPayload(payload, count)
+      self:setBinaryData(payload, count)
+    end
+
+    function stub:setData(payload)
+      self.data = payload
+    end
+
+    local function assignCount(self, count)
+      self.pointCount = count
+    end
+
+    function stub:setPointCount(count)
+      assignCount(self, count)
+    end
+
+    stub.setCount = stub.setPointCount
+    stub.setPoints = stub.setPointCount
+    stub.setPointNumber = stub.setPointCount
+
+    function stub:setViewpoint(origin, quat)
+      self.viewpoint = {origin = origin, rotation = quat}
+    end
+
+    local function saveTo(self, path)
+      local file = io.open(path, 'wb')
+      if file then
+        if self.data then
+          file:write(self.data)
+        end
+        file:close()
+      end
+    end
+
+    function stub:save(path)
+      saveTo(self, path)
+    end
+
+    stub.write = stub.save
+    stub.saveToFile = stub.save
+    stub.writeToFile = stub.save
+    stub.store = stub.save
+
+    function stub:toString()
+      return self.data or ''
+    end
+
+    return stub
+  end
+
+  pcdLib = {
+    newPcd = function()
+      return createStubPcd()
+    end,
+    _missing_error = missingLibError
+  }
+
+  package.loaded['common.tech.pcdLib'] = pcdLib
+end
 
 local M = {}
 
-local DEFAULT_PATH = FS:getUserPath() .. 'virtual_lidar/latest.pcd'
+local function computeDefaultPath()
+  if FS and FS.getUserPath then
+    local ok, base = pcall(function()
+      return FS:getUserPath()
+    end)
+    if ok and type(base) == 'string' and base ~= '' then
+      return base .. 'virtual_lidar/latest.pcd'
+    end
+  end
+  return 'virtual_lidar/latest.pcd'
+end
+
+local DEFAULT_PATH = computeDefaultPath()
 
 local state = {
   enabled = false,
@@ -16,7 +108,21 @@ local function ensureDirectory(path)
   if not path then return end
   local dir = path:match('^(.*)[/\\][^/\\]+$')
   if dir and dir ~= '' then
-    FS:directoryCreate(dir)
+    if FS and FS.directoryCreate then
+      FS:directoryCreate(dir)
+    elseif os and os.execute then
+      local escaped = dir:gsub("'", "'\\''")
+      os.execute("mkdir -p '" .. escaped .. "'")
+    end
+  end
+end
+
+local function renameFile(from, to)
+  if not from or not to then return end
+  if FS and FS.rename then
+    FS:rename(from, to)
+  elseif os and os.rename then
+    os.rename(from, to)
   end
 end
 
@@ -169,7 +275,7 @@ function M.publish(frame, scan)
 
   local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
   savePcd(pcd, tmpPath)
-  FS:rename(tmpPath, state.outputPath)
+  renameFile(tmpPath, state.outputPath)
   state.lastWrite = now or (os.clock and os.clock()) or state.lastWrite
   return true
 end

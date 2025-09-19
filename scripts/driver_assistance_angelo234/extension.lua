@@ -62,7 +62,19 @@ local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
 
-local DEFAULT_VIRTUAL_LIDAR_PCD_PATH = FS:getUserPath() .. 'virtual_lidar/latest.pcd'
+local function computeDefaultVirtualLidarPath()
+  if FS and FS.getUserPath then
+    local ok, base = pcall(function()
+      return FS:getUserPath()
+    end)
+    if ok and type(base) == 'string' and base ~= '' then
+      return base .. 'virtual_lidar/latest.pcd'
+    end
+  end
+  return 'virtual_lidar/latest.pcd'
+end
+
+local DEFAULT_VIRTUAL_LIDAR_PCD_PATH = computeDefaultVirtualLidarPath()
 local virtual_lidar_pcd = {
   enabled = false,
   path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
@@ -679,11 +691,11 @@ local function onUpdate(dt)
   --p:start()
 
   if first_update then
-    -- sensor_system.init()
-    -- fcm_system.init()
-    -- rcm_system.init()
-    -- acc_system.init()
-    -- hsa_system.init()
+    if sensor_system.init then sensor_system.init() end
+    if fcm_system.init then fcm_system.init() end
+    if rcm_system.init then rcm_system.init() end
+    if acc_system.init then acc_system.init() end
+    if hsa_system.init then hsa_system.init() end
     first_update = false
   end
 
