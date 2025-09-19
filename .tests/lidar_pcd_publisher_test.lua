@@ -4,6 +4,75 @@ local it = laura.it
 local expect = laura.expect
 local hooks = laura.hooks
 
+local unpack = table.unpack or _G.unpack
+
+local string_unpack = string.unpack
+
+if not string_unpack then
+  local function readFloatLE(data, index)
+    local b1 = data:byte(index) or 0
+    local b2 = data:byte(index + 1) or 0
+    local b3 = data:byte(index + 2) or 0
+    local b4 = data:byte(index + 3) or 0
+
+    local bits = b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
+    local sign = 1
+    if bits >= 0x80000000 then
+      sign = -1
+      bits = bits - 0x80000000
+    end
+
+    local exponent = math.floor(bits / 0x800000)
+    local mantissa = bits % 0x800000
+
+    if exponent == 255 then
+      if mantissa == 0 then
+        return sign * math.huge, index + 4
+      end
+      return 0 / 0, index + 4
+    end
+
+    if exponent == 0 then
+      if mantissa == 0 then
+        local zero = 0.0
+        return sign > 0 and zero or -zero, index + 4
+      end
+      local value = mantissa / 0x800000
+      return sign * math.ldexp(value, -126), index + 4
+    end
+
+    local value = 1 + mantissa / 0x800000
+    return sign * math.ldexp(value, exponent - 127), index + 4
+  end
+
+  string_unpack = function(fmt, data, index)
+    index = index or 1
+    local values = {}
+    local littleEndian = true
+
+    for i = 1, #fmt do
+      local c = fmt:sub(i, i)
+      if c == '<' then
+        littleEndian = true
+      elseif c == '>' then
+        littleEndian = false
+      elseif c == 'f' then
+        if not littleEndian then
+          error('fallback string.unpack only supports little-endian floats')
+        end
+        local value
+        value, index = readFloatLE(data, index)
+        values[#values + 1] = value
+      end
+    end
+
+    values[#values + 1] = index
+    return unpack(values, 1, #values)
+  end
+
+  string.unpack = string_unpack
+end
+
 local path_sep = package.config:sub(1, 1)
 local is_windows = path_sep == '\\'
 
@@ -331,7 +400,7 @@ describe('lidarPcdPublisher', function()
     local points = {}
     for i = 1, 4 do
       local x, y, z, intensity
-      x, y, z, intensity, offset = string.unpack('<ffff', payload, offset)
+      x, y, z, intensity, offset = string_unpack('<ffff', payload, offset)
       points[i] = { x = x, y = y, z = z, intensity = intensity }
     end
 
