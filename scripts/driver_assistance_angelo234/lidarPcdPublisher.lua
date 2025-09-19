@@ -569,7 +569,7 @@ local function configure(opts)
   end
   ensureDirectory(state.outputPath)
   ensureFile(state.outputPath)
-  if state.tmpPath then
+  if state.tmpPath and state.writeMode ~= 'direct' then
     ensureDirectory(state.tmpPath)
     ensureFile(state.tmpPath)
   end
@@ -735,6 +735,7 @@ local function writeBinaryPcd(path, payload, count, origin, quat)
       end
     end
     if candidate then
+      ensureDirectory(candidate)
       local file, err = io.open(candidate, 'wb')
       if file then
         local okHeader, headerErr = file:write(header)
@@ -857,7 +858,7 @@ local function ensureConfigured()
   end
   ensureDirectory(state.outputPath)
   ensureFile(state.outputPath)
-  if state.tmpPath then
+  if state.tmpPath and state.writeMode ~= 'direct' then
     ensureDirectory(state.tmpPath)
     ensureFile(state.tmpPath)
   end
