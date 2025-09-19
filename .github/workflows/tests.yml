@@ -151,7 +151,7 @@ jobs:
           set -o pipefail
 
           mkdir -p reports
-          lua scripts/run_laura_tests.lua spec reports/laura.xml reports/laura_summary.json
+          lua .scripts/run_laura_tests.lua spec reports/laura.xml reports/laura_summary.json
           status=$?
 
           if [ -f reports/laura_summary.json ]; then
