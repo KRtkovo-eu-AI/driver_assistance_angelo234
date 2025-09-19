@@ -41,9 +41,42 @@ The current functionality includes:
 
 - **Obstacle Collision Automatic Emergency Braking (WIP)**
 
-- **Virtual Lidar (WIP)**
+- **Virtual LiDAR – PCD export & streaming**
 
 - **Lane Centering Assist (WIP)**
+
+---
+
+## Virtual LiDAR – PCD export & streaming
+
+> ⚠️ Repeatedly writing full point clouds can put noticeable load on your drive, so the module caps file updates at four per second. For the lowest latency prefer the TCP stream over polling the export file. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L58-L118】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L64-L118】
+
+### Activation
+
+Control the export and stream from the in-game console (``~``) with:
+
+```lua
+extensions.driver_assistance_angelo234.setVirtualLidarPcdExportEnabled(true)
+extensions.driver_assistance_angelo234.setVirtualLidarPcdStreamEnabled(true)
+```
+
+Pass `false` to either function to turn the feature off. Enabling the export (or changing its path) prints the currently active location to the console, and you can set a custom file path with `extensions.driver_assistance_angelo234.setVirtualLidarPcdOutputPath('D:/scans/latest.pcd')`. 【F:scripts/driver_assistance_angelo234/extension.lua†L1101-L1183】
+
+### Default file location
+
+If you do not override the path, the module writes `latest.pcd` into the `virtual_lidar` folder inside your BeamNG user profile (for example `Documents/BeamNG.drive/virtual_lidar/latest.pcd`). 【F:scripts/driver_assistance_angelo234/extension.lua†L70-L83】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L60-L86】
+
+### Options (path, port, intensity)
+
+- **Path** – adjust it with `setVirtualLidarPcdOutputPath(...)`; the module creates missing folders and uses a temporary file for safe writes. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L88-L157】【F:scripts/driver_assistance_angelo234/extension.lua†L1113-L1132】
+- **Stream port** – defaults to `8765` on `127.0.0.1`; change it with `setVirtualLidarPcdStreamPort(9000)`. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/extension.lua†L1164-L1186】
+- **Intensity** – each point includes an `intensity` channel used to categorize samples: main scan (1.0), ground (0.2), and vehicle outline (0.8). 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
+
+### Update frequency
+
+The virtual LiDAR refreshes internally at 20 Hz, but exporting/streaming is throttled to at most one PCD frame every 0.25 s (≈4 Hz) to limit I/O overhead. 【F:scripts/driver_assistance_angelo234/extension.lua†L508-L724】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L128】
+
+You can find full workflows and ready-to-run client examples in [docs/virtual-lidar-pcd.md](docs/virtual-lidar-pcd.md).
 
 ---
 
