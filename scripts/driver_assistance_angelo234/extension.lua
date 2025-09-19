@@ -1327,7 +1327,9 @@ local function onExtensionUnloaded()
   stopVirtualLidarStreamServer()
 end
 
-lane_centering_system.setActivationCallback(handleLaneCenteringActivationRequest)
+if lane_centering_system and lane_centering_system.setActivationCallback then
+  lane_centering_system.setActivationCallback(handleLaneCenteringActivationRequest)
+end
 
 M.onExtensionLoaded = onExtensionLoaded
 M.onVehicleSwitched = onVehicleSwitched
