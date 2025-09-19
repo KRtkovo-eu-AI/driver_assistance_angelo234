@@ -243,38 +243,223 @@ local state = {
   pcdLibBlocked = false
 }
 
+local lfsLib = nil
+local lfsChecked = false
+
+local function getLfs()
+  if not lfsChecked then
+    lfsChecked = true
+    local ok, lib = pcall(require, 'lfs')
+    if ok then
+      lfsLib = lib
+    else
+      lfsLib = nil
+    end
+  end
+  return lfsLib
+end
+
+local function normalizePath(path)
+  if not path then return nil end
+  local normalized = path:gsub('\\', '/')
+  normalized = normalized:gsub('/+', '/')
+  return normalized
+end
+
+local function getUserRelativePath(fsPath)
+  local base = getUserPathBase()
+  if not base or not fsPath then return nil end
+  local normalizedBase = normalizePath(base)
+  local normalizedPath = normalizePath(fsPath)
+  if not normalizedBase or not normalizedPath then return nil end
+  if normalizedPath:sub(1, #normalizedBase) == normalizedBase then
+    local relative = normalizedPath:sub(#normalizedBase + 1)
+    relative = relative:gsub('^/+', '')
+    return relative ~= '' and relative or nil
+  end
+  return nil
+end
+
+local function ensureDirectoryWithFs(relativePath)
+  if not relativePath or relativePath == '' or not FS then return false end
+  local segments = {}
+  for segment in relativePath:gmatch('[^/]+') do
+    segments[#segments + 1] = segment
+  end
+  if #segments == 0 then return false end
+
+  local prefix = ''
+  for i = 1, #segments do
+    if prefix ~= '' then
+      prefix = prefix .. segments[i]
+    else
+      prefix = segments[i]
+    end
+
+    local checkPaths = {}
+    local seen = {}
+    local function pushCheck(value)
+      if not value or value == '' then return end
+      if not seen[value] then
+        checkPaths[#checkPaths + 1] = value
+        seen[value] = true
+      end
+    end
+
+    local function addVariants(base)
+      if not base or base == '' then return end
+      pushCheck(base)
+      if base:sub(-1) ~= '/' then
+        pushCheck(base .. '/')
+      end
+    end
+
+    addVariants(prefix)
+    addVariants('/' .. prefix)
+    local exists = false
+    if FS.directoryExists then
+      for j = 1, #checkPaths do
+        local ok, res = pcall(function()
+          return FS:directoryExists(checkPaths[j])
+        end)
+        if ok and res and res ~= 0 then
+          exists = true
+          break
+        end
+      end
+    end
+
+    if not exists then
+      local created = false
+      local createTargets = {}
+      local createSeen = {}
+      local function pushCreate(value)
+        if not value or value == '' then return end
+        if value:sub(-1) ~= '/' then
+          value = value .. '/'
+        end
+        if not createSeen[value] then
+          createTargets[#createTargets + 1] = value
+          createSeen[value] = true
+        end
+      end
+
+      pushCreate(prefix)
+      pushCreate('/' .. prefix)
+
+      for j = 1, #createTargets do
+        local target = createTargets[j]
+        local ok, res = pcall(function()
+          return FS:directoryCreate(target)
+        end)
+        if ok and res ~= false and res ~= 0 then
+          created = true
+          break
+        end
+        ok, res = pcall(function()
+          return FS:directoryCreate(target, true)
+        end)
+        if ok and res ~= false and res ~= 0 then
+          created = true
+          break
+        end
+      end
+      if not created then
+        return false
+      end
+    end
+
+    if prefix:sub(-1) ~= '/' then
+      prefix = prefix .. '/'
+    end
+  end
+
+  return true
+end
+
+local function ensureDirectoryWithLfs(fsPath)
+  if not fsPath or fsPath == '' then return false end
+  local lfs = getLfs()
+  if not lfs then return false end
+
+  local normalized = normalizePath(fsPath)
+  if not normalized or normalized == '' then return false end
+
+  local prefix = ''
+  local remainder = normalized
+
+  if remainder:match('^%a:[/]') then
+    prefix = remainder:sub(1, 3)
+    remainder = remainder:sub(4)
+  elseif remainder:sub(1, 1) == '/' then
+    prefix = '/'
+    remainder = remainder:sub(2)
+  end
+
+  local function ensurePrefix(current)
+    local attr = lfs.attributes(current)
+    if attr == 'directory' then
+      return true
+    elseif attr ~= nil then
+      return false
+    end
+    local ok, err = lfs.mkdir(current)
+    if ok or err == 'File exists' then
+      return true
+    end
+    return false
+  end
+
+  if prefix ~= '' and not ensurePrefix(prefix) then
+    return false
+  end
+
+  local current = prefix
+  for segment in remainder:gmatch('[^/]+') do
+    if current ~= '' and current:sub(-1) ~= '/' then
+      current = current .. '/'
+    end
+    current = current .. segment
+    if not ensurePrefix(current) then
+      return false
+    end
+  end
+
+  return true
+end
+
 local function ensureDirectory(path)
   if not path or path == '' then return end
   local candidates = buildCandidatePaths(path)
   if #candidates == 0 then return end
 
-  local function tryCreate(dir)
-    if not dir or dir == '' then return false end
-    if FS then
-      if FS.directoryCreate then
-        local ok, res = pcall(function()
-          return FS:directoryCreate(dir)
-        end)
-        if ok and res ~= false then
-          return true
-        end
-      end
-      if FS.fileExists then
-        local okExists, exists = pcall(function()
-          return FS:fileExists(dir)
-        end)
-        if okExists and exists then
-          return exists ~= 0
-        end
-      end
-    end
-    return false
-  end
-
   for i = 1, #candidates do
     local dir = candidates[i]:match('^(.*)[/\\][^/\\]+$')
-    if dir and tryCreate(dir) then
-      return
+    if dir then
+      local fsDir = toFilesystemPath(dir)
+      local ensured = false
+      if fsDir then
+        local relative = getUserRelativePath(fsDir)
+        if relative then
+          ensured = ensureDirectoryWithFs(relative)
+        end
+        if not ensured then
+          ensured = ensureDirectoryWithLfs(fsDir)
+        end
+      end
+
+      if not ensured and dir ~= fsDir then
+        local relativeFromCandidate = dir
+        if relativeFromCandidate then
+          relativeFromCandidate = relativeFromCandidate:gsub('^user:/+', '')
+          relativeFromCandidate = relativeFromCandidate:gsub('^/+', '')
+          ensured = ensureDirectoryWithFs(relativeFromCandidate)
+        end
+      end
+
+      if ensured then
+        return
+      end
     end
   end
 end
