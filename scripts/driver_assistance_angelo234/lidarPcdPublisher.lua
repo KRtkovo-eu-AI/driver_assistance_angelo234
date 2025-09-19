@@ -173,12 +173,14 @@ local DEFAULT_PATH = computeDefaultPath()
 local state = {
   enabled = false,
   outputPath = DEFAULT_PATH,
+  requestedPath = DEFAULT_PATH,
   tmpPath = DEFAULT_PATH .. '.tmp',
   throttle = 0.25,
   lastWrite = -math.huge,
   writeMode = 'atomic',
   lastErrorMessage = nil,
-  lastErrorTime = -math.huge
+  lastErrorTime = -math.huge,
+  sandboxFallback = nil
 }
 
 local function ensureDirectory(path)
@@ -186,7 +188,15 @@ local function ensureDirectory(path)
   local dir = path:match('^(.*)[/\\][^/\\]+$')
   if dir and dir ~= '' then
     if FS and FS.directoryCreate then
-      FS:directoryCreate(dir)
+      local ok, res = pcall(function()
+        return FS:directoryCreate(dir)
+      end)
+      if not ok or res == false then
+        if os and os.execute then
+          local escaped = dir:gsub("'", "'\\''")
+          os.execute("mkdir -p '" .. escaped .. "'")
+        end
+      end
     elseif os and os.execute then
       local escaped = dir:gsub("'", "'\\''")
       os.execute("mkdir -p '" .. escaped .. "'")
@@ -259,8 +269,14 @@ local function configure(opts)
   local previousPath = state.outputPath
   if opts.path and opts.path ~= '' then
     state.outputPath = opts.path
+    state.requestedPath = opts.path
+    state.sandboxFallback = nil
   elseif not state.outputPath then
     state.outputPath = DEFAULT_PATH
+    state.requestedPath = state.requestedPath or state.outputPath
+  end
+  if not state.requestedPath then
+    state.requestedPath = state.outputPath
   end
   state.tmpPath = state.outputPath .. '.tmp'
   if previousPath ~= state.outputPath then
@@ -440,6 +456,47 @@ local function writeBinaryPcd(path, payload, count, origin, quat)
   return true
 end
 
+local function shouldFallbackToDefault(err)
+  if not err then return false end
+  local msg = string.lower(tostring(err))
+  if msg:find('domain') or msg:find('permission') or msg:find('denied') or msg:find('access') then
+    return true
+  end
+  return false
+end
+
+local function applySandboxFallback(err, payload, count, origin, viewpointQuat)
+  if state.outputPath == DEFAULT_PATH or not shouldFallbackToDefault(err) then
+    return false, err
+  end
+
+  local blockedPath = state.requestedPath or state.outputPath
+  local fallbackPath = DEFAULT_PATH
+  ensureDirectory(fallbackPath)
+
+  local ok, fallbackErr = writeBinaryPcd(fallbackPath, payload, count, origin, viewpointQuat)
+  if ok then
+    if reportError then
+      reportError(string.format(
+        'Virtual LiDAR export path %s is not writable (%s); using default path %s instead',
+        tostring(blockedPath),
+        tostring(err or 'unknown'),
+        tostring(fallbackPath)
+      ))
+    end
+    state.outputPath = fallbackPath
+    state.tmpPath = fallbackPath .. '.tmp'
+    state.writeMode = 'direct'
+    state.sandboxFallback = {
+      blockedPath = blockedPath,
+      reason = tostring(err or 'unknown')
+    }
+    return true
+  end
+
+  return false, fallbackErr or err
+end
+
 function M.configure(opts)
   configure(opts)
 end
@@ -548,8 +605,15 @@ function M.publish(frame, scan, opts)
           if writeError then
             reportInfo('Virtual LiDAR export fell back to direct writes for path: ' .. tostring(state.outputPath))
           end
+          state.sandboxFallback = nil
         else
-          writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(err or 'unknown'))
+          local fallbackOk, fallbackErr = applySandboxFallback(err, payload, count, origin, viewpointQuat)
+          if fallbackOk then
+            writeSucceeded = true
+            writeError = nil
+          else
+            writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(fallbackErr or err or 'unknown'))
+          end
         end
       else
         local ok, err = pcall(savePcd, pcd, state.outputPath)
@@ -574,6 +638,18 @@ function M.publish(frame, scan, opts)
     return payload
   end
   return true
+end
+
+function M.getOutputPath()
+  return state.outputPath
+end
+
+function M.getRequestedPath()
+  return state.requestedPath or state.outputPath
+end
+
+function M.getSandboxFallback()
+  return state.sandboxFallback
 end
 
 return M
