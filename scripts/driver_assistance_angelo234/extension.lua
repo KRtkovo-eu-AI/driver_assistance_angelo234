@@ -443,8 +443,8 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
   my_veh:queueLuaCommand(parking_cmd)
   local steering_cmd = [[
     local driver = 0
-    if input.lastInputs and input.lastInputs.local and input.lastInputs.local.steering ~= nil then
-      driver = input.lastInputs.local.steering
+    if input.lastInputs and input.lastInputs["local"] and input.lastInputs["local"].steering ~= nil then
+      driver = input.lastInputs["local"].steering
     end
 
     if type(driver) ~= 'number' then
