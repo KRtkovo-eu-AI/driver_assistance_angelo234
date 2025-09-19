@@ -10,6 +10,20 @@ veh_accs_angelo234 = {}
 
 local M = {}
 
+local EXTENSION_GLOBAL_NAME = 'scripts_driver__assistance__angelo234_extension'
+
+local function registerGlobal()
+  rawset(_G, EXTENSION_GLOBAL_NAME, M)
+end
+
+local function unregisterGlobal()
+  if rawget(_G, EXTENSION_GLOBAL_NAME) == M then
+    rawset(_G, EXTENSION_GLOBAL_NAME, nil)
+  end
+end
+
+registerGlobal()
+
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 
 local sensor_system = require('scripts/driver_assistance_angelo234/sensorSystem')
@@ -1198,6 +1212,7 @@ end
 
 local function onExtensionUnloaded()
   stopVirtualLidarStreamServer()
+  unregisterGlobal()
 end
 
 M.onExtensionLoaded = onExtensionLoaded
