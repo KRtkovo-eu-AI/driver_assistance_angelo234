@@ -324,6 +324,104 @@ local function savePcd(pcd, path)
   end
 end
 
+local function safeIndex(value, key)
+  if value == nil then return nil end
+  local ok, result = pcall(function()
+    return value[key]
+  end)
+  if ok and type(result) == 'number' then
+    return result
+  end
+  return nil
+end
+
+local function extractVec3(v)
+  if not v then return 0, 0, 0 end
+  if type(v) == 'table' then
+    local x = v.x or v[1] or 0
+    local y = v.y or v[2] or 0
+    local z = v.z or v[3] or 0
+    return x, y, z
+  end
+  local x = safeIndex(v, 'x') or safeIndex(v, 1) or 0
+  local y = safeIndex(v, 'y') or safeIndex(v, 2) or 0
+  local z = safeIndex(v, 'z') or safeIndex(v, 3) or 0
+  return x, y, z
+end
+
+local function extractQuat(q)
+  if not q then return 1, 0, 0, 0 end
+  if type(q) == 'table' then
+    local qw = q.w or q[4] or 1
+    local qx = q.x or q[1] or 0
+    local qy = q.y or q[2] or 0
+    local qz = q.z or q[3] or 0
+    return qw, qx, qy, qz
+  end
+  local qw = safeIndex(q, 'w') or safeIndex(q, 4) or 1
+  local qx = safeIndex(q, 'x') or safeIndex(q, 1) or 0
+  local qy = safeIndex(q, 'y') or safeIndex(q, 2) or 0
+  local qz = safeIndex(q, 'z') or safeIndex(q, 3) or 0
+  return qw, qx, qy, qz
+end
+
+local function formatFloat(value)
+  if type(value) ~= 'number' then
+    value = tonumber(value) or 0
+  end
+  return string.format('%.9g', value)
+end
+
+local function writeBinaryPcd(path, payload, count, origin, quat)
+  local file, err = io.open(path, 'wb')
+  if not file then
+    return false, err
+  end
+
+  local ox, oy, oz = extractVec3(origin)
+  local qw, qx, qy, qz = extractQuat(quat)
+
+  local header = table.concat({
+    '# .PCD v0.7 - Point Cloud Data file format\n',
+    'VERSION 0.7\n',
+    'FIELDS x y z intensity\n',
+    'SIZE 4 4 4 4\n',
+    'TYPE F F F F\n',
+    'COUNT 1 1 1 1\n',
+    'WIDTH ' .. tostring(count) .. '\n',
+    'HEIGHT 1\n',
+    string.format(
+      'VIEWPOINT %s %s %s %s %s %s %s\n',
+      formatFloat(ox),
+      formatFloat(oy),
+      formatFloat(oz),
+      formatFloat(qw),
+      formatFloat(qx),
+      formatFloat(qy),
+      formatFloat(qz)
+    ),
+    'POINTS ' .. tostring(count) .. '\n',
+    'DATA binary\n'
+  })
+
+  local okHeader, headerErr = file:write(header)
+  if not okHeader then
+    file:close()
+    return false, headerErr or 'failed to write header'
+  end
+
+  if payload and #payload > 0 then
+    local okPayload, payloadErr = file:write(payload)
+    if not okPayload then
+      file:close()
+      return false, payloadErr or 'failed to write payload'
+    end
+  end
+
+  file:close()
+  return true
+end
+
 function M.configure(opts)
   configure(opts)
 end
@@ -387,12 +485,14 @@ function M.publish(frame, scan, opts)
 
   applyPayload(pcd, payload, count)
 
-  if pcd.setViewpoint and quatFromDir then
-    local origin = frame.origin
-    local dir = frame.dir
-    local up = frame.up
-    local q = quatFromDir(dir, up)
-    pcd:setViewpoint(origin, q)
+  local origin = frame.origin
+  local dir = frame.dir
+  local up = frame.up
+  local viewpointQuat = nil
+
+  if pcd.setViewpoint and quatFromDir and origin and dir and up then
+    viewpointQuat = quatFromDir(dir, up)
+    pcd:setViewpoint(origin, viewpointQuat)
   end
 
   if writeFile then
@@ -418,14 +518,26 @@ function M.publish(frame, scan, opts)
     end
 
     if not writeSucceeded then
-      local ok, err = pcall(savePcd, pcd, state.outputPath)
-      if ok and err ~= false then
-        writeSucceeded = true
-        if writeError then
-          reportInfo('Virtual LiDAR export fell back to direct writes for path: ' .. tostring(state.outputPath))
+      if state.writeMode == 'direct' then
+        local ok, err = writeBinaryPcd(state.outputPath, payload, count, origin, viewpointQuat)
+        if ok then
+          writeSucceeded = true
+          if writeError then
+            reportInfo('Virtual LiDAR export fell back to direct writes for path: ' .. tostring(state.outputPath))
+          end
+        else
+          writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(err or 'unknown'))
         end
       else
-        writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(err or 'unknown'))
+        local ok, err = pcall(savePcd, pcd, state.outputPath)
+        if ok and err ~= false then
+          writeSucceeded = true
+          if writeError then
+            reportInfo('Virtual LiDAR export fell back to direct writes for path: ' .. tostring(state.outputPath))
+          end
+        else
+          writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(err or 'unknown'))
+        end
       end
     end
 
