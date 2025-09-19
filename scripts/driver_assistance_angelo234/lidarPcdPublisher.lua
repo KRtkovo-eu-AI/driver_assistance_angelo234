@@ -157,6 +157,7 @@ do
 end
 
 local userPathBase = nil
+local toFilesystemPath
 
 local function getUserPathBase()
   if userPathBase == nil or (userPathBase == false and FS and FS.getUserPath) then
@@ -496,7 +497,7 @@ local function fileExists(path)
   return false
 end
 
-local function toFilesystemPath(path)
+toFilesystemPath = function(path)
   if not path or path == '' then return nil end
   if path:sub(1, 7) == 'user://' or path:sub(1, 6) == 'user:/' then
     local base = getUserPathBase()
