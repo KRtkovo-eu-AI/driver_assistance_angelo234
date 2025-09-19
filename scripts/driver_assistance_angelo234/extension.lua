@@ -53,6 +53,7 @@ local VIRTUAL_LIDAR_PHASES = 8
 local FRONT_LIDAR_PHASES = 4
 local virtual_lidar_point_cloud = {}
 local virtual_lidar_ground_point_cloud = {}
+local virtual_lidar_overhead_point_cloud = {}
 local virtual_lidar_frames = {}
 local front_lidar_point_cloud = {}
 local front_lidar_ground_point_cloud = {}
@@ -145,6 +146,7 @@ local LIDAR_LOW_OBJECT_BAND = 1.0
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_ground_point_cloud = {}
+  virtual_lidar_overhead_point_cloud = {}
   virtual_lidar_frames = {}
   front_lidar_point_cloud = {}
   front_lidar_ground_point_cloud = {}
@@ -157,6 +159,7 @@ local function resetVirtualLidarPointCloud()
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
     virtual_lidar_ground_point_cloud[i] = {}
+    virtual_lidar_overhead_point_cloud[i] = {}
     virtual_lidar_frames[i] = nil
   end
   for i = 1, FRONT_LIDAR_PHASES do
@@ -764,15 +767,21 @@ local function updateVirtualLidar(dt, veh)
     local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
     local current_cloud = {}
     local ground_cloud = {}
+    local overhead_cloud = {}
     for _, p in ipairs(scan_hits) do
       local rel = p - origin
-      if not insideSelf(p) and rel:length() <= allowedDistance(rel) then
-        local z = rel:dot(up)
-        local point = {
-          x = rel:dot(right),
-          y = rel:dot(dir),
-          z = z
-        }
+      local withinRange = rel:length() <= allowedDistance(rel)
+      local z = rel:dot(up)
+      local point = {
+        x = rel:dot(right),
+        y = rel:dot(dir),
+        z = z
+      }
+      if insideSelf(p) then
+        if withinRange and z >= groundThreshold then
+          overhead_cloud[#overhead_cloud + 1] = point
+        end
+      elseif withinRange then
         if z >= groundThreshold then
           current_cloud[#current_cloud + 1] = point
         elseif z >= lowObjectMin then
@@ -782,6 +791,7 @@ local function updateVirtualLidar(dt, veh)
     end
     virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
     virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
+    virtual_lidar_overhead_point_cloud[virtual_lidar_phase + 1] = overhead_cloud
 
     local veh_cloud = {}
     for _, p in ipairs(vehicle_hits) do
@@ -1034,6 +1044,14 @@ local function getVirtualLidarGroundPointCloud(curr, veh)
   return combined
 end
 
+local function getVirtualLidarOverheadPointCloud(curr, veh)
+  local frame = resolveCurrentFrame(curr, veh)
+  if not frame then return {} end
+  local combined = {}
+  accumulateTransformedPoints(virtual_lidar_overhead_point_cloud, virtual_lidar_frames, frame, combined)
+  return combined
+end
+
 local function roundToMillis(value)
   if value >= 0 then
     return math.floor(value * 1000 + 0.5)
@@ -1170,11 +1188,13 @@ function maybePublishVirtualLidarPcd(veh)
   local vehicleWorld, vehicleKeyMap = gatherVehicleWorldPoints(frame)
   local mainPoints = convertPointsToWorld(getVirtualLidarPointCloud(frame, veh), frame, vehicleKeyMap)
   local groundPoints = convertPointsToWorld(getVirtualLidarGroundPointCloud(frame, veh), frame)
+  local overheadPoints = convertPointsToWorld(getVirtualLidarOverheadPointCloud(frame, veh), frame)
 
   local payload = lidarPcdPublisher.publish(frame, {
     main = mainPoints,
     ground = groundPoints,
-    vehicle = vehicleWorld
+    vehicle = vehicleWorld,
+    overhead = overheadPoints
   }, {
     writeFile = exportActive,
     wantPayload = streamActive
@@ -1358,11 +1378,13 @@ M.onUpdate = onUpdate
 M.onInit = onInit
 M.onExtensionUnloaded = onExtensionUnloaded
 M.getVirtualLidarPointCloud = getVirtualLidarPointCloud
+M.getVirtualLidarOverheadPointCloud = getVirtualLidarOverheadPointCloud
 M.getVehicleColor = getVehicleColor
 M.getVirtualLidarData = getVirtualLidarData
 M.getLaneCenteringData = getLaneCenteringData
 M._resetVirtualLidarPointCloud = resetVirtualLidarPointCloud
 M._virtual_lidar_point_cloud = function() return virtual_lidar_point_cloud end
+M._virtual_lidar_overhead_point_cloud = function() return virtual_lidar_overhead_point_cloud end
 M._front_lidar_point_cloud = function() return front_lidar_point_cloud end
 M._setFrontLidarThread = function(th) front_lidar_thread = th end
 
