@@ -283,6 +283,10 @@ end
 
 local function ensureDirectoryWithFs(relativePath)
   if not relativePath or relativePath == '' or not FS then return false end
+
+  local base = getUserPathBase()
+  if not base then return false end
+
   local segments = {}
   for segment in relativePath:gmatch('[^/]+') do
     segments[#segments + 1] = segment
@@ -291,65 +295,32 @@ local function ensureDirectoryWithFs(relativePath)
 
   local prefix = ''
   for i = 1, #segments do
-    if prefix ~= '' then
-      prefix = prefix .. segments[i]
-    else
+    if prefix == '' then
       prefix = segments[i]
+    else
+      prefix = prefix .. '/' .. segments[i]
     end
 
-    local checkPaths = {}
-    local seen = {}
-    local function pushCheck(value)
-      if not value or value == '' then return end
-      if not seen[value] then
-        checkPaths[#checkPaths + 1] = value
-        seen[value] = true
-      end
-    end
-
-    local function addVariants(base)
-      if not base or base == '' then return end
-      pushCheck(base)
-      if base:sub(-1) ~= '/' then
-        pushCheck(base .. '/')
-      end
-    end
-
-    addVariants(prefix)
-    addVariants('/' .. prefix)
+    local fsTarget = base .. prefix
     local exists = false
     if FS.directoryExists then
-      for j = 1, #checkPaths do
-        local ok, res = pcall(function()
-          return FS:directoryExists(checkPaths[j])
-        end)
-        if ok and res and res ~= 0 then
-          exists = true
-          break
-        end
+      local ok, res = pcall(function()
+        return FS:directoryExists(fsTarget)
+      end)
+      if ok and res and res ~= 0 then
+        exists = true
       end
     end
 
     if not exists then
       local created = false
-      local createTargets = {}
-      local createSeen = {}
-      local function pushCreate(value)
-        if not value or value == '' then return end
-        if value:sub(-1) ~= '/' then
-          value = value .. '/'
-        end
-        if not createSeen[value] then
-          createTargets[#createTargets + 1] = value
-          createSeen[value] = true
-        end
+      local variants = { fsTarget }
+      if fsTarget:sub(-1) ~= '/' then
+        variants[#variants + 1] = fsTarget .. '/'
       end
 
-      pushCreate(prefix)
-      pushCreate('/' .. prefix)
-
-      for j = 1, #createTargets do
-        local target = createTargets[j]
+      for j = 1, #variants do
+        local target = variants[j]
         local ok, res = pcall(function()
           return FS:directoryCreate(target)
         end)
@@ -365,13 +336,10 @@ local function ensureDirectoryWithFs(relativePath)
           break
         end
       end
+
       if not created then
         return false
       end
-    end
-
-    if prefix:sub(-1) ~= '/' then
-      prefix = prefix .. '/'
     end
   end
 
