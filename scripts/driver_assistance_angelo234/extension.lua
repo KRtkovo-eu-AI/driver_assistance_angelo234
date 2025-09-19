@@ -1027,8 +1027,7 @@ local function ensureVirtualLidarPcdConfigured(active)
 end
 
 function maybePublishVirtualLidarPcd(veh)
-  local lidarLogging = logger.isSensorEnabled('lidar')
-  local exportActive = virtual_lidar_pcd.enabled and lidarLogging
+  local exportActive = virtual_lidar_pcd.enabled
   ensureVirtualLidarPcdConfigured(exportActive)
   lidarPcdPublisher.setEnabled(exportActive)
 
@@ -1122,7 +1121,7 @@ end
 local function setVirtualLidarPcdExportEnabled(flag)
   local enabled = flag and true or false
   virtual_lidar_pcd.enabled = enabled
-  local active = enabled and logger.isSensorEnabled('lidar') or false
+  local active = enabled
   ensureVirtualLidarPcdConfigured(active)
   lidarPcdPublisher.setEnabled(active)
   if enabled then
@@ -1136,7 +1135,7 @@ local function setVirtualLidarPcdOutputPath(path)
   end
   virtual_lidar_pcd.path = path
   virtual_lidar_pcd.dirty = true
-  local active = virtual_lidar_pcd.enabled and logger.isSensorEnabled('lidar') or false
+  local active = virtual_lidar_pcd.enabled
   ensureVirtualLidarPcdConfigured(active)
   if virtual_lidar_pcd.enabled then
     ui_message(string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path))
