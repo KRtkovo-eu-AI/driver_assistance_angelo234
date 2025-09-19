@@ -189,21 +189,61 @@ local DEFAULT_PATH = computeDefaultPath()
 
 local function buildCandidatePaths(path)
   if type(path) ~= 'string' or path == '' then return {} end
+
   local normalized = path:gsub('\\', '/')
-  local candidates = {normalized}
+  local candidates = {}
+
   local base = getUserPathBase()
-  if base and normalized:sub(1, #base) == base then
-    local relative = normalized:sub(#base + 1)
+  local function pushCandidate(value)
+    if not value or value == '' then return end
+    candidates[#candidates + 1] = value
+  end
+
+  local function appendUserSchemes(relative)
+    if not relative then return end
     relative = relative:gsub('^/+', '')
     if relative == '' then
-      candidates[#candidates + 1] = 'user:/'
-      candidates[#candidates + 1] = 'user://'
+      pushCandidate('user://')
+      pushCandidate('user:/')
     else
-      candidates[#candidates + 1] = 'user:/' .. relative
-      candidates[#candidates + 1] = 'user://' .. relative
+      pushCandidate('user://' .. relative)
+      pushCandidate('user:/' .. relative)
     end
   end
+
+  if normalized:sub(1, 7) == 'user://'
+      or normalized:sub(1, 6) == 'user:/' then
+    local relative = normalized:gsub('^user:/+', '')
+    if base then
+      pushCandidate(base .. relative)
+    end
+    appendUserSchemes(relative)
+  else
+    pushCandidate(normalized)
+    if base and normalized:sub(1, #base) == base then
+      local relative = normalized:sub(#base + 1)
+      appendUserSchemes(relative)
+    end
+  end
+
   return candidates
+end
+
+local function prioritizeUserSchemes(candidates)
+  local prioritized = {}
+  local others = {}
+  for i = 1, #candidates do
+    local value = candidates[i]
+    if value:sub(1, 6) == 'user:/' then
+      prioritized[#prioritized + 1] = value
+    else
+      others[#others + 1] = value
+    end
+  end
+  for i = 1, #others do
+    prioritized[#prioritized + 1] = others[i]
+  end
+  return prioritized
 end
 
 local state = {
@@ -224,30 +264,34 @@ local function ensureDirectory(path)
   if not path or path == '' then return end
   local candidates = buildCandidatePaths(path)
   if #candidates == 0 then return end
-  local created = false
-  for i = 1, #candidates do
-    local candidate = candidates[i]
-    local dir = candidate:match('^(.*)[/\\][^/\\]+$')
-    if dir and dir ~= '' then
-      if FS and FS.directoryCreate then
+
+  local function tryCreate(dir)
+    if not dir or dir == '' then return false end
+    if FS then
+      if FS.directoryCreate then
         local ok, res = pcall(function()
           return FS:directoryCreate(dir)
         end)
-        if ok and (res == nil or res == true) then
-          created = true
+        if ok and res ~= false then
+          return true
+        end
+      end
+      if FS.fileExists then
+        local okExists, exists = pcall(function()
+          return FS:fileExists(dir)
+        end)
+        if okExists and exists then
+          return exists ~= 0
         end
       end
     end
+    return false
   end
-  if not created then
-    local absolute = candidates[1]
-    local dir = absolute:match('^(.*)/[^/]+$')
-    if not dir then
-      dir = absolute:match('^(.*)\\[^\\]+$')
-    end
-    if dir and dir ~= '' and os and os.execute then
-      local escaped = dir:gsub("'", "'\\''")
-      os.execute("mkdir -p '" .. escaped .. "'")
+
+  for i = 1, #candidates do
+    local dir = candidates[i]:match('^(.*)[/\\][^/\\]+$')
+    if dir and tryCreate(dir) then
+      return
     end
   end
 end
@@ -257,6 +301,7 @@ local function fileExists(path)
   local candidates = buildCandidatePaths(path)
   for i = 1, #candidates do
     local candidate = candidates[i]
+    local fsCandidate = candidate
     if FS and FS.fileExists then
       local ok, result = pcall(function()
         return FS:fileExists(candidate)
@@ -265,7 +310,16 @@ local function fileExists(path)
         return result ~= 0
       end
     end
-    local file = io.open(candidate, 'rb')
+    if fsCandidate:sub(1, 6) == 'user:/' then
+      local base = getUserPathBase()
+      if base then
+        local relative = fsCandidate:gsub('^user:/+', '')
+        fsCandidate = base .. relative
+      else
+        fsCandidate = nil
+      end
+    end
+    local file = fsCandidate and io.open(fsCandidate, 'rb') or nil
     if file then
       file:close()
       return true
@@ -276,8 +330,8 @@ end
 
 local function renameFile(from, to)
   if not from or not to then return false, 'invalid path' end
-  local fromCandidates = buildCandidatePaths(from)
-  local toCandidates = buildCandidatePaths(to)
+  local fromCandidates = prioritizeUserSchemes(buildCandidatePaths(from))
+  local toCandidates = prioritizeUserSchemes(buildCandidatePaths(to))
   local lastErr = nil
   for i = 1, #fromCandidates do
     for j = 1, #toCandidates do
@@ -293,13 +347,6 @@ local function renameFile(from, to)
         if not ok then
           lastErr = res or lastErr
         end
-      end
-      if os and os.rename then
-        local ok, err = os.rename(candidateFrom, candidateTo)
-        if ok then
-          return true
-        end
-        lastErr = err or lastErr
       end
     end
   end
@@ -503,28 +550,39 @@ local function writeBinaryPcd(path, payload, count, origin, quat)
   local lastErr = nil
   for i = 1, #candidates do
     local candidate = candidates[i]
-    local file, err = io.open(candidate, 'wb')
-    if file then
-      local okHeader, headerErr = file:write(header)
-      if not okHeader then
-        file:close()
-        lastErr = headerErr or 'failed to write header'
+    if candidate:sub(1, 6) == 'user:/' then
+      local base = getUserPathBase()
+      if base then
+        local relative = candidate:gsub('^user:/+', '')
+        candidate = base .. relative
       else
-        local payloadErr = nil
-        if payload and #payload > 0 then
-          local okPayload, writeErr = file:write(payload)
-          if not okPayload then
-            payloadErr = writeErr or 'failed to write payload'
-          end
-        end
-        file:close()
-        if not payloadErr then
-          return true
-        end
-        lastErr = payloadErr
+        candidate = nil
       end
-    else
-      lastErr = err or lastErr
+    end
+    if candidate then
+      local file, err = io.open(candidate, 'wb')
+      if file then
+        local okHeader, headerErr = file:write(header)
+        if not okHeader then
+          file:close()
+          lastErr = headerErr or 'failed to write header'
+        else
+          local payloadErr = nil
+          if payload and #payload > 0 then
+            local okPayload, writeErr = file:write(payload)
+            if not okPayload then
+              payloadErr = writeErr or 'failed to write payload'
+            end
+          end
+          file:close()
+          if not payloadErr then
+            return true
+          end
+          lastErr = payloadErr
+        end
+      else
+        lastErr = err or lastErr
+      end
     end
   end
 
