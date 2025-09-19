@@ -4,7 +4,7 @@ This guide expands on the summary in the [README](../README.md) and walks throug
 
 ## Performance warnings
 
-- Each frame export writes into a temporary file before renaming it to the target `latest.pcd`. Even with the built-in limit of one write every 0.25 s (≈4 Hz) this results in noticeable I/O activity, especially on SSDs with limited endurance. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L144】
+- Each frame export is throttled to one write every 0.25 s (≈4 Hz). The publisher stages data through a temporary file when possible for atomic overwrites, but on sandboxed builds it falls back to writing the target `latest.pcd` directly. Either approach still produces noticeable I/O activity, especially on SSDs with limited endurance. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L239】
 - When you need live data with the lowest possible latency (for example to feed another visualizer), rely on the TCP stream, which delivers frames without touching the disk and enables `tcp-nodelay` to actively reduce queuing. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L118】
 
 ## PCD header structure
@@ -22,7 +22,7 @@ The export adds an `intensity` channel that categorizes points for quick filteri
 
 ## TCP frame format
 
-- The server listens on `127.0.0.1:8765` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L79】
+- The server listens on `127.0.0.1:23511` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L79】
 - Every frame starts with an ASCII line `PCD <length>\n`, where `<length>` is the byte size of the upcoming binary blob. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L90-L113】
 - The header is followed by raw binary data (`float32` ×4 per point) in the exact same layout as the file export. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L24-L55】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
 - If no fresh frame is available, the server sends `PING\n` once per second as a heartbeat. Clients should ignore these lines. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L70-L88】
@@ -36,7 +36,7 @@ import socket
 import numpy as np
 import open3d as o3d
 
-HOST, PORT = "127.0.0.1", 8765
+HOST, PORT = "127.0.0.1", 23511
 INTENSITY_COLORS = {
     0.2: [0.3, 0.7, 0.3],  # ground
     0.8: [0.9, 0.6, 0.1],  # vehicle
@@ -88,7 +88,7 @@ The script converts each frame into an `open3d.geometry.PointCloud`, colors poin
 import socket
 import pathlib
 
-HOST, PORT = "127.0.0.1", 8765
+HOST, PORT = "127.0.0.1", 23511
 OUTPUT = pathlib.Path("frame.pcd")
 
 def recv_line(sock):
@@ -127,4 +127,4 @@ Adjust the header if your downstream application needs the real sensor pose—th
 
 ### Working with the export file (tail)
 
-For lightweight processing without custom code you can monitor `latest.pcd` with a command such as `tail -F "Documents/BeamNG.drive/virtual_lidar/latest.pcd"`. Every overwrite indicates a new frame; automation scripts can react to the change by loading the file (for example through `open3d.io.read_point_cloud`). Because of the I/O load described earlier, prefer the TCP stream whenever you need near-real-time data. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L144】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L64-L118】
+For lightweight processing without custom code you can monitor `latest.pcd` with a command such as `tail -F "C:\\Users\\ok\\AppData\\Local\\BeamNG.drive\\current\\settings\\krtektm_lidar\\latest.pcd"`. Every overwrite indicates a new frame; automation scripts can react to the change by loading the file (for example through `open3d.io.read_point_cloud`). Because of the I/O load described earlier, prefer the TCP stream whenever you need near-real-time data. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L144】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L64-L118】

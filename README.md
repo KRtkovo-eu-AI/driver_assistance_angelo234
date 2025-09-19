@@ -64,12 +64,12 @@ Pass `false` to either function to turn the feature off. Enabling the export (or
 
 ### Default file location
 
-If you do not override the path, the module writes `latest.pcd` into the `virtual_lidar` folder inside your BeamNG user profile (for example `Documents/BeamNG.drive/virtual_lidar/latest.pcd`). 【F:scripts/driver_assistance_angelo234/extension.lua†L70-L83】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L60-L86】
+If you do not override the path, the module writes `latest.pcd` into `settings/krtektm_lidar` inside your BeamNG user profile (for example `C:\Users\ok\AppData\Local\BeamNG.drive\current\settings\krtektm_lidar\latest.pcd`). 【F:scripts/driver_assistance_angelo234/extension.lua†L70-L83】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L60-L86】
 
 ### Options (path, port, intensity)
 
-- **Path** – adjust it with `setVirtualLidarPcdOutputPath(...)`; the module creates missing folders and uses a temporary file for safe writes. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L88-L157】【F:scripts/driver_assistance_angelo234/extension.lua†L1113-L1132】
-- **Stream port** – defaults to `8765` on `127.0.0.1`; change it with `setVirtualLidarPcdStreamPort(9000)`. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/extension.lua†L1164-L1186】
+- **Path** – adjust it with `setVirtualLidarPcdOutputPath(...)`; the module creates missing folders and stages writes through a temporary file when permitted (falling back to direct overwrites on sandboxed builds). 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L88-L232】【F:scripts/driver_assistance_angelo234/extension.lua†L1113-L1132】
+- **Stream port** – defaults to `23511` on `127.0.0.1`; change it with `setVirtualLidarPcdStreamPort(9000)`. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/extension.lua†L1164-L1186】
 - **Intensity** – each point includes an `intensity` channel used to categorize samples: main scan (1.0), ground (0.2), and vehicle outline (0.8). 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
 
 ### Update frequency
@@ -168,4 +168,45 @@ Special thanks to the BeamNG community for suggestions & feedback. :contentRefer
 
 ---
 
-Enjoy driving safer! 🚗  
+Enjoy driving safer! 🚗
+
+---
+
+## Development & Testing
+
+The repository includes automated specs written for the [Laura](https://github.com/dknight/laura) Lua test framework. Install
+the runner once per machine, then execute the helper script in this repo to run all specs.
+
+### Installing Laura
+
+Choose one of the official installation paths:
+
+- **LuaRocks (system-wide):**
+
+  ```bash
+  luarocks install laura
+  ```
+
+- **LuaRocks (per-user tree):**
+
+  ```bash
+  luarocks --local install laura
+  ```
+
+- **Build from source with `make`:**
+
+  ```bash
+  git clone https://github.com/dknight/laura.git
+  cd laura
+  make install
+  # Optional install prefix overrides:
+  # PREFIX=/opt/lua/libs BINDIR=/opt/bin LIBDIR=/opt/share make install
+  ```
+
+### Running the specs
+
+After installing Laura (and ensuring the `lua` interpreter is on your `PATH`), run the test suite from the repository root with:
+
+```bash
+lua .scripts/run_laura_tests.lua spec reports/laura.xml reports/laura_summary.json
+```

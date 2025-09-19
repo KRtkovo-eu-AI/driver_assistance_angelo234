@@ -69,23 +69,27 @@ local function computeDefaultVirtualLidarPath()
       return FS:getUserPath()
     end)
     if ok and type(base) == 'string' and base ~= '' then
-      return base .. 'virtual_lidar/latest.pcd'
+      return base .. 'settings/krtektm_lidar/latest.pcd'
     end
   end
-  return 'virtual_lidar/latest.pcd'
+  return 'settings/krtektm_lidar/latest.pcd'
 end
 
 local DEFAULT_VIRTUAL_LIDAR_PCD_PATH = computeDefaultVirtualLidarPath()
 local virtual_lidar_pcd = {
   enabled = false,
   path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
+  requestedPath = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
+  actualPath = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
+  sandboxBlockedPath = nil,
+  sandboxReason = nil,
   dirty = false
 }
 
 local virtual_lidar_stream = {
   enabled = false,
   host = '127.0.0.1',
-  port = 8765,
+  port = 23511,
   running = false,
   activePort = nil
 }
@@ -1001,6 +1005,7 @@ end
 local function ensureVirtualLidarPcdConfigured(active)
   if not virtual_lidar_pcd.path or virtual_lidar_pcd.path == '' then
     virtual_lidar_pcd.path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH
+    virtual_lidar_pcd.requestedPath = virtual_lidar_pcd.path
     virtual_lidar_pcd.dirty = true
   end
   if virtual_lidar_pcd.dirty then
@@ -1010,11 +1015,49 @@ local function ensureVirtualLidarPcdConfigured(active)
     })
     virtual_lidar_pcd.dirty = false
   end
+
+  if lidarPcdPublisher.getOutputPath then
+    local actualPath = lidarPcdPublisher.getOutputPath()
+    if actualPath and actualPath ~= '' then
+      virtual_lidar_pcd.actualPath = actualPath
+      virtual_lidar_pcd.path = actualPath
+    end
+  end
+  if lidarPcdPublisher.getRequestedPath then
+    local requested = lidarPcdPublisher.getRequestedPath()
+    if requested and requested ~= '' then
+      virtual_lidar_pcd.requestedPath = requested
+    end
+  end
+  if lidarPcdPublisher.getSandboxFallback then
+    local fallback = lidarPcdPublisher.getSandboxFallback()
+    if fallback then
+      virtual_lidar_pcd.sandboxBlockedPath = fallback.blockedPath
+      virtual_lidar_pcd.sandboxReason = fallback.reason
+    else
+      virtual_lidar_pcd.sandboxBlockedPath = nil
+      virtual_lidar_pcd.sandboxReason = nil
+    end
+  end
+end
+
+local function announceVirtualLidarExportPath()
+  if not virtual_lidar_pcd.enabled then return end
+  local pathMessage = string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path)
+  ui_message(pathMessage)
+  if virtual_lidar_pcd.sandboxBlockedPath and virtual_lidar_pcd.sandboxBlockedPath ~= virtual_lidar_pcd.path then
+    local reason = virtual_lidar_pcd.sandboxReason and string.format(' (%s)', virtual_lidar_pcd.sandboxReason) or ''
+    ui_message(string.format(
+      'Sandbox blocked %s%s; writing to %s instead',
+      virtual_lidar_pcd.sandboxBlockedPath,
+      reason,
+      virtual_lidar_pcd.path
+    ))
+  end
 end
 
 function maybePublishVirtualLidarPcd(veh)
-  local lidarLogging = logger.isSensorEnabled('lidar')
-  local exportActive = virtual_lidar_pcd.enabled and lidarLogging
+  local exportActive = virtual_lidar_pcd.enabled
   ensureVirtualLidarPcdConfigured(exportActive)
   lidarPcdPublisher.setEnabled(exportActive)
 
@@ -1108,12 +1151,10 @@ end
 local function setVirtualLidarPcdExportEnabled(flag)
   local enabled = flag and true or false
   virtual_lidar_pcd.enabled = enabled
-  local active = enabled and logger.isSensorEnabled('lidar') or false
+  local active = enabled
   ensureVirtualLidarPcdConfigured(active)
   lidarPcdPublisher.setEnabled(active)
-  if enabled then
-    ui_message(string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path))
-  end
+  announceVirtualLidarExportPath()
 end
 
 local function setVirtualLidarPcdOutputPath(path)
@@ -1121,12 +1162,11 @@ local function setVirtualLidarPcdOutputPath(path)
     path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH
   end
   virtual_lidar_pcd.path = path
+  virtual_lidar_pcd.requestedPath = path
   virtual_lidar_pcd.dirty = true
-  local active = virtual_lidar_pcd.enabled and logger.isSensorEnabled('lidar') or false
+  local active = virtual_lidar_pcd.enabled
   ensureVirtualLidarPcdConfigured(active)
-  if virtual_lidar_pcd.enabled then
-    ui_message(string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path))
-  end
+  announceVirtualLidarExportPath()
 end
 
 local function setVirtualLidarPcdStreamEnabled(flag)
