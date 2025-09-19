@@ -246,7 +246,7 @@ local function toggleObstacleAEBSystem()
 
   obstacle_aeb_system_on = not obstacle_aeb_system_on
   local state = obstacle_aeb_system_on and "ON" or "OFF"
-  ui_message("Self-driving Assist switched " .. state)
+  ui_message("Obstacle Collision AEB switched " .. state)
 end
 
 local function toggleLaneCenteringSystem()
