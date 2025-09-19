@@ -4,7 +4,7 @@ This guide expands on the summary in the [README](../README.md) and walks throug
 
 ## Performance warnings
 
-- Each frame export writes into a temporary file before renaming it to the target `latest.pcd`. Even with the built-in limit of one write every 0.25 s (≈4 Hz) this results in noticeable I/O activity, especially on SSDs with limited endurance. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L144】
+- Each frame export is throttled to one write every 0.25 s (≈4 Hz). The publisher stages data through a temporary file when possible for atomic overwrites, but on sandboxed builds it falls back to writing the target `latest.pcd` directly. Either approach still produces noticeable I/O activity, especially on SSDs with limited endurance. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L239】
 - When you need live data with the lowest possible latency (for example to feed another visualizer), rely on the TCP stream, which delivers frames without touching the disk and enables `tcp-nodelay` to actively reduce queuing. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L118】
 
 ## PCD header structure

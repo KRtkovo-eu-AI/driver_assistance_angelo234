@@ -175,7 +175,10 @@ local state = {
   outputPath = DEFAULT_PATH,
   tmpPath = DEFAULT_PATH .. '.tmp',
   throttle = 0.25,
-  lastWrite = -math.huge
+  lastWrite = -math.huge,
+  writeMode = 'atomic',
+  lastErrorMessage = nil,
+  lastErrorTime = -math.huge
 }
 
 local function ensureDirectory(path)
@@ -192,22 +195,59 @@ local function ensureDirectory(path)
 end
 
 local function renameFile(from, to)
-  if not from or not to then return end
+  if not from or not to then return false, 'invalid path' end
   if FS and FS.rename then
-    FS:rename(from, to)
+    local ok, res = pcall(function()
+      return FS:rename(from, to)
+    end)
+    if not ok then
+      return false, res
+    end
+    if res == false then
+      return false
+    end
+    return true
   elseif os and os.rename then
-    os.rename(from, to)
+    local ok, err = os.rename(from, to)
+    if ok then
+      return true
+    end
+    return false, err
+  end
+  return false, 'rename unavailable'
+end
+
+local function reportError(msg)
+  if not msg then return end
+  local now = os.clock and os.clock() or 0
+  if state.lastErrorMessage ~= msg or (now - state.lastErrorTime) > 2 then
+    if log then
+      log('E', 'virtualLidarPcd', msg)
+    end
+    state.lastErrorMessage = msg
+    state.lastErrorTime = now
+  end
+end
+
+local function reportInfo(msg)
+  if not msg then return end
+  if log then
+    log('I', 'virtualLidarPcd', msg)
   end
 end
 
 local function configure(opts)
   opts = opts or {}
+  local previousPath = state.outputPath
   if opts.path and opts.path ~= '' then
     state.outputPath = opts.path
   elseif not state.outputPath then
     state.outputPath = DEFAULT_PATH
   end
   state.tmpPath = state.outputPath .. '.tmp'
+  if previousPath ~= state.outputPath then
+    state.writeMode = 'atomic'
+  end
   if opts.throttle then
     state.throttle = opts.throttle
   end
@@ -358,9 +398,40 @@ function M.publish(frame, scan, opts)
   if writeFile then
     ensureConfigured()
 
-    local tmpPath = state.tmpPath or (state.outputPath .. '.tmp')
-    savePcd(pcd, tmpPath)
-    renameFile(tmpPath, state.outputPath)
+    local writeSucceeded = false
+    local writeError = nil
+
+    if state.writeMode ~= 'direct' and state.tmpPath then
+      local ok, err = pcall(savePcd, pcd, state.tmpPath)
+      if ok and err ~= false then
+        local renamed, renameErr = renameFile(state.tmpPath, state.outputPath)
+        if renamed then
+          writeSucceeded = true
+        else
+          writeError = string.format('Failed to rename temporary PCD file (%s)', tostring(renameErr or 'unknown'))
+          state.writeMode = 'direct'
+        end
+      else
+        writeError = string.format('Failed to write temporary PCD file (%s)', tostring(err or 'unknown'))
+        state.writeMode = 'direct'
+      end
+    end
+
+    if not writeSucceeded then
+      local ok, err = pcall(savePcd, pcd, state.outputPath)
+      if ok and err ~= false then
+        writeSucceeded = true
+        if writeError then
+          reportInfo('Virtual LiDAR export fell back to direct writes for path: ' .. tostring(state.outputPath))
+        end
+      else
+        writeError = writeError or string.format('Failed to write PCD file (%s)', tostring(err or 'unknown'))
+      end
+    end
+
+    if not writeSucceeded and writeError then
+      reportError(string.format('Virtual LiDAR PCD export error for %s: %s', tostring(state.outputPath), writeError))
+    end
   end
 
   state.lastWrite = now or (os.clock and os.clock()) or state.lastWrite
