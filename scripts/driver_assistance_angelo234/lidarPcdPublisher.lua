@@ -194,6 +194,24 @@ local function ensureDirectory(path)
   end
 end
 
+local function fileExists(path)
+  if not path or path == '' then return false end
+  if FS and FS.fileExists then
+    local ok, result = pcall(function()
+      return FS:fileExists(path)
+    end)
+    if ok then
+      return result and result ~= 0
+    end
+  end
+  local file = io.open(path, 'rb')
+  if file then
+    file:close()
+    return true
+  end
+  return false
+end
+
 local function renameFile(from, to)
   if not from or not to then return false, 'invalid path' end
   if FS and FS.rename then
@@ -504,11 +522,16 @@ function M.publish(frame, scan, opts)
     if state.writeMode ~= 'direct' and state.tmpPath then
       local ok, err = pcall(savePcd, pcd, state.tmpPath)
       if ok and err ~= false then
-        local renamed, renameErr = renameFile(state.tmpPath, state.outputPath)
-        if renamed then
-          writeSucceeded = true
+        if fileExists(state.tmpPath) then
+          local renamed, renameErr = renameFile(state.tmpPath, state.outputPath)
+          if renamed then
+            writeSucceeded = true
+          else
+            writeError = string.format('Failed to rename temporary PCD file (%s)', tostring(renameErr or 'unknown'))
+            state.writeMode = 'direct'
+          end
         else
-          writeError = string.format('Failed to rename temporary PCD file (%s)', tostring(renameErr or 'unknown'))
+          writeError = string.format('Failed to write temporary PCD file (%s)', tostring(err or 'temporary file missing'))
           state.writeMode = 'direct'
         end
       else
