@@ -23,6 +23,7 @@ local obstacle_aeb_system = require('scripts/driver_assistance_angelo234/obstacl
 local lane_centering_system = require('scripts/driver_assistance_angelo234/laneCenteringAssistSystem')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
 local drift_proximity = require('scripts/driver_assistance_angelo234/driftProximity')
+local lidarPcdPublisher = require('scripts/driver_assistance_angelo234/lidarPcdPublisher')
 
 local first_update = true
 
@@ -60,6 +61,18 @@ local front_lidar_ground_point_cloud_wip = {}
 local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
+
+local DEFAULT_VIRTUAL_LIDAR_PCD_PATH = FS:getUserPath() .. 'virtual_lidar/latest.pcd'
+local virtual_lidar_pcd = {
+  enabled = false,
+  path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH,
+  dirty = false
+}
+
+lidarPcdPublisher.configure({path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH, enabled = false})
+lidarPcdPublisher.setEnabled(false)
+
+local maybePublishVirtualLidarPcd
 
 local VEHICLE_POINT_MIN_SPACING = 0.3
 local VEHICLE_POINT_MAX_SPACING = 2.0
@@ -651,6 +664,9 @@ local function updateVirtualLidar(dt, veh)
       logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
     end
     virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
+    if virtual_lidar_phase == 0 then
+      maybePublishVirtualLidarPcd(veh)
+    end
     virtual_lidar_update_timer = 0
   else
     virtual_lidar_update_timer = virtual_lidar_update_timer + dt
@@ -874,6 +890,101 @@ local function getVirtualLidarGroundPointCloud(curr, veh)
   return combined
 end
 
+local function roundToMillis(value)
+  if value >= 0 then
+    return math.floor(value * 1000 + 0.5)
+  end
+  return -math.floor(-value * 1000 + 0.5)
+end
+
+local function makePointKey(pt)
+  if not pt then return nil end
+  return string.format('%d:%d:%d', roundToMillis(pt.x or 0), roundToMillis(pt.y or 0), roundToMillis(pt.z or 0))
+end
+
+local function toWorldPoint(pt, frame)
+  if not pt or not frame then return nil end
+  local relX = pt.x or pt[1] or 0
+  local relY = pt.y or pt[2] or 0
+  local relZ = pt.z or pt[3] or 0
+  local world = frame.origin + frame.right * relX + frame.dir * relY + frame.up * relZ
+  return {x = world.x, y = world.y, z = world.z}
+end
+
+local function convertPointsToWorld(points, frame, skipMap)
+  local worldPoints = {}
+  if not points or not frame then return worldPoints end
+  for i = 1, #points do
+    local worldPt = toWorldPoint(points[i], frame)
+    if worldPt then
+      local key = skipMap and makePointKey(worldPt)
+      if not key or not skipMap[key] then
+        worldPoints[#worldPoints + 1] = worldPt
+      end
+    end
+  end
+  return worldPoints
+end
+
+local function gatherVehicleWorldPoints(frame)
+  local vehiclePoints = {}
+  local keyMap = {}
+  if vehicle_lidar_frame and vehicle_lidar_point_cloud then
+    for i = 1, #vehicle_lidar_point_cloud do
+      local drifted = drift_proximity.apply(vehicle_lidar_point_cloud[i], vehicle_lidar_frame, frame)
+      local worldPt = toWorldPoint(drifted, frame)
+      if worldPt then
+        vehiclePoints[#vehiclePoints + 1] = worldPt
+        local key = makePointKey(worldPt)
+        if key then
+          keyMap[key] = true
+        end
+      end
+    end
+  end
+  return vehiclePoints, keyMap
+end
+
+local function ensureVirtualLidarPcdConfigured(active)
+  if not virtual_lidar_pcd.path or virtual_lidar_pcd.path == '' then
+    virtual_lidar_pcd.path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH
+    virtual_lidar_pcd.dirty = true
+  end
+  if virtual_lidar_pcd.dirty then
+    lidarPcdPublisher.configure({
+      path = virtual_lidar_pcd.path,
+      enabled = active and true or false
+    })
+    virtual_lidar_pcd.dirty = false
+  end
+end
+
+function maybePublishVirtualLidarPcd(veh)
+  local active = virtual_lidar_pcd.enabled and logger.isSensorEnabled('lidar')
+  ensureVirtualLidarPcdConfigured(active)
+  if not active then
+    lidarPcdPublisher.setEnabled(false)
+    return
+  end
+
+  local frame = buildCurrentFrame(veh)
+  if not frame then
+    lidarPcdPublisher.setEnabled(false)
+    return
+  end
+
+  local vehicleWorld, vehicleKeyMap = gatherVehicleWorldPoints(frame)
+  local mainPoints = convertPointsToWorld(getVirtualLidarPointCloud(frame, veh), frame, vehicleKeyMap)
+  local groundPoints = convertPointsToWorld(getVirtualLidarGroundPointCloud(frame, veh), frame)
+
+  lidarPcdPublisher.setEnabled(true)
+  lidarPcdPublisher.publish(frame, {
+    main = mainPoints,
+    ground = groundPoints,
+    vehicle = vehicleWorld
+  })
+end
+
 local function getVehicleColor(veh)
   veh = veh or be:getPlayerVehicle(0)
   if veh then
@@ -924,6 +1035,30 @@ local function getLaneCenteringData()
   return data
 end
 
+local function setVirtualLidarPcdExportEnabled(flag)
+  local enabled = flag and true or false
+  virtual_lidar_pcd.enabled = enabled
+  local active = enabled and logger.isSensorEnabled('lidar') or false
+  ensureVirtualLidarPcdConfigured(active)
+  lidarPcdPublisher.setEnabled(active)
+  if enabled then
+    ui_message(string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path))
+  end
+end
+
+local function setVirtualLidarPcdOutputPath(path)
+  if type(path) ~= 'string' or path == '' then
+    path = DEFAULT_VIRTUAL_LIDAR_PCD_PATH
+  end
+  virtual_lidar_pcd.path = path
+  virtual_lidar_pcd.dirty = true
+  local active = virtual_lidar_pcd.enabled and logger.isSensorEnabled('lidar') or false
+  ensureVirtualLidarPcdConfigured(active)
+  if virtual_lidar_pcd.enabled then
+    ui_message(string.format('Virtual LiDAR PCD export path: %s', virtual_lidar_pcd.path))
+  end
+end
+
 local function onInit()
   setExtensionUnloadMode(M, "manual")
 end
@@ -946,6 +1081,8 @@ M.toggleDebugLogging = toggleDebugLogging
 M.toggleFrontSensorLogging = toggleFrontSensorLogging
 M.toggleRearSensorLogging = toggleRearSensorLogging
 M.toggleLidarLogging = toggleLidarLogging
+M.setVirtualLidarPcdExportEnabled = setVirtualLidarPcdExportEnabled
+M.setVirtualLidarPcdOutputPath = setVirtualLidarPcdOutputPath
 M.onCameraModeChanged = onCameraModeChanged
 M.onUpdate = onUpdate
 M.onInit = onInit
