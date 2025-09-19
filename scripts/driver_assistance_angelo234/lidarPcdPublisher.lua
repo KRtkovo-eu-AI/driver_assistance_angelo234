@@ -156,19 +156,55 @@ do
   end
 end
 
-local function computeDefaultPath()
-  if FS and FS.getUserPath then
-    local ok, base = pcall(function()
-      return FS:getUserPath()
-    end)
-    if ok and type(base) == 'string' and base ~= '' then
-      return base .. 'virtual_lidar/latest.pcd'
+local userPathBase = nil
+
+local function getUserPathBase()
+  if userPathBase == nil or (userPathBase == false and FS and FS.getUserPath) then
+    userPathBase = false
+    if FS and FS.getUserPath then
+      local ok, base = pcall(function()
+        return FS:getUserPath()
+      end)
+      if ok and type(base) == 'string' and base ~= '' then
+        base = base:gsub('\\', '/')
+        if base:sub(-1) ~= '/' then
+          base = base .. '/'
+        end
+        userPathBase = base
+      end
     end
+  end
+  return userPathBase ~= false and userPathBase or nil
+end
+
+local function computeDefaultPath()
+  local base = getUserPathBase()
+  if base then
+    return base .. 'virtual_lidar/latest.pcd'
   end
   return 'virtual_lidar/latest.pcd'
 end
 
 local DEFAULT_PATH = computeDefaultPath()
+
+local function buildCandidatePaths(path)
+  if type(path) ~= 'string' or path == '' then return {} end
+  local normalized = path:gsub('\\', '/')
+  local candidates = {normalized}
+  local base = getUserPathBase()
+  if base and normalized:sub(1, #base) == base then
+    local relative = normalized:sub(#base + 1)
+    relative = relative:gsub('^/+', '')
+    if relative == '' then
+      candidates[#candidates + 1] = 'user:/'
+      candidates[#candidates + 1] = 'user://'
+    else
+      candidates[#candidates + 1] = 'user:/' .. relative
+      candidates[#candidates + 1] = 'user://' .. relative
+    end
+  end
+  return candidates
+end
 
 local state = {
   enabled = false,
@@ -180,24 +216,36 @@ local state = {
   writeMode = 'atomic',
   lastErrorMessage = nil,
   lastErrorTime = -math.huge,
-  sandboxFallback = nil
+  sandboxFallback = nil,
+  pcdLibBlocked = false
 }
 
 local function ensureDirectory(path)
-  if not path then return end
-  local dir = path:match('^(.*)[/\\][^/\\]+$')
-  if dir and dir ~= '' then
-    if FS and FS.directoryCreate then
-      local ok, res = pcall(function()
-        return FS:directoryCreate(dir)
-      end)
-      if not ok or res == false then
-        if os and os.execute then
-          local escaped = dir:gsub("'", "'\\''")
-          os.execute("mkdir -p '" .. escaped .. "'")
+  if not path or path == '' then return end
+  local candidates = buildCandidatePaths(path)
+  if #candidates == 0 then return end
+  local created = false
+  for i = 1, #candidates do
+    local candidate = candidates[i]
+    local dir = candidate:match('^(.*)[/\\][^/\\]+$')
+    if dir and dir ~= '' then
+      if FS and FS.directoryCreate then
+        local ok, res = pcall(function()
+          return FS:directoryCreate(dir)
+        end)
+        if ok and (res == nil or res == true) then
+          created = true
         end
       end
-    elseif os and os.execute then
+    end
+  end
+  if not created then
+    local absolute = candidates[1]
+    local dir = absolute:match('^(.*)/[^/]+$')
+    if not dir then
+      dir = absolute:match('^(.*)\\[^\\]+$')
+    end
+    if dir and dir ~= '' and os and os.execute then
       local escaped = dir:gsub("'", "'\\''")
       os.execute("mkdir -p '" .. escaped .. "'")
     end
@@ -206,43 +254,56 @@ end
 
 local function fileExists(path)
   if not path or path == '' then return false end
-  if FS and FS.fileExists then
-    local ok, result = pcall(function()
-      return FS:fileExists(path)
-    end)
-    if ok then
-      return result and result ~= 0
+  local candidates = buildCandidatePaths(path)
+  for i = 1, #candidates do
+    local candidate = candidates[i]
+    if FS and FS.fileExists then
+      local ok, result = pcall(function()
+        return FS:fileExists(candidate)
+      end)
+      if ok and result then
+        return result ~= 0
+      end
     end
-  end
-  local file = io.open(path, 'rb')
-  if file then
-    file:close()
-    return true
+    local file = io.open(candidate, 'rb')
+    if file then
+      file:close()
+      return true
+    end
   end
   return false
 end
 
 local function renameFile(from, to)
   if not from or not to then return false, 'invalid path' end
-  if FS and FS.rename then
-    local ok, res = pcall(function()
-      return FS:rename(from, to)
-    end)
-    if not ok then
-      return false, res
+  local fromCandidates = buildCandidatePaths(from)
+  local toCandidates = buildCandidatePaths(to)
+  local lastErr = nil
+  for i = 1, #fromCandidates do
+    for j = 1, #toCandidates do
+      local candidateFrom = fromCandidates[i]
+      local candidateTo = toCandidates[j]
+      if FS and FS.rename then
+        local ok, res = pcall(function()
+          return FS:rename(candidateFrom, candidateTo)
+        end)
+        if ok and res ~= false then
+          return true
+        end
+        if not ok then
+          lastErr = res or lastErr
+        end
+      end
+      if os and os.rename then
+        local ok, err = os.rename(candidateFrom, candidateTo)
+        if ok then
+          return true
+        end
+        lastErr = err or lastErr
+      end
     end
-    if res == false then
-      return false
-    end
-    return true
-  elseif os and os.rename then
-    local ok, err = os.rename(from, to)
-    if ok then
-      return true
-    end
-    return false, err
   end
-  return false, 'rename unavailable'
+  return false, lastErr or 'rename unavailable'
 end
 
 local function reportError(msg)
@@ -281,6 +342,7 @@ local function configure(opts)
   state.tmpPath = state.outputPath .. '.tmp'
   if previousPath ~= state.outputPath then
     state.writeMode = 'atomic'
+    state.pcdLibBlocked = false
   end
   if opts.throttle then
     state.throttle = opts.throttle
@@ -407,16 +469,9 @@ local function formatFloat(value)
 end
 
 local function writeBinaryPcd(path, payload, count, origin, quat)
-  if type(path) == 'string' then
-    -- Lua's io library accepts forward slashes on Windows as well. Normalizing
-    -- ensures escaped backslashes (for example coming from FS:getUserPath)
-    -- never confuse the sandboxed runtime when it validates domains.
-    path = path:gsub('\\', '/')
-  end
-
-  local file, err = io.open(path, 'wb')
-  if not file then
-    return false, err
+  local candidates = buildCandidatePaths(path)
+  if #candidates == 0 then
+    return false, 'invalid path'
   end
 
   local ox, oy, oz = extractVec3(origin)
@@ -445,22 +500,35 @@ local function writeBinaryPcd(path, payload, count, origin, quat)
     'DATA binary\n'
   })
 
-  local okHeader, headerErr = file:write(header)
-  if not okHeader then
-    file:close()
-    return false, headerErr or 'failed to write header'
-  end
-
-  if payload and #payload > 0 then
-    local okPayload, payloadErr = file:write(payload)
-    if not okPayload then
-      file:close()
-      return false, payloadErr or 'failed to write payload'
+  local lastErr = nil
+  for i = 1, #candidates do
+    local candidate = candidates[i]
+    local file, err = io.open(candidate, 'wb')
+    if file then
+      local okHeader, headerErr = file:write(header)
+      if not okHeader then
+        file:close()
+        lastErr = headerErr or 'failed to write header'
+      else
+        local payloadErr = nil
+        if payload and #payload > 0 then
+          local okPayload, writeErr = file:write(payload)
+          if not okPayload then
+            payloadErr = writeErr or 'failed to write payload'
+          end
+        end
+        file:close()
+        if not payloadErr then
+          return true
+        end
+        lastErr = payloadErr
+      end
+    else
+      lastErr = err or lastErr
     end
   end
 
-  file:close()
-  return true
+  return false, lastErr or 'failed to open file'
 end
 
 local function shouldFallbackToDefault(err)
@@ -484,12 +552,16 @@ local function applySandboxFallback(pcd, err, payload, count, origin, viewpointQ
   local wroteFallback = false
   local fallbackErr = nil
 
-  if pcd then
+  local attemptedAtomic = false
+
+  if pcd and not state.pcdLibBlocked then
+    attemptedAtomic = true
     local ok, saveErr = pcall(savePcd, pcd, fallbackPath)
     if ok and saveErr ~= false then
       wroteFallback = true
     else
       fallbackErr = saveErr or fallbackErr
+      state.pcdLibBlocked = true
     end
   end
 
@@ -498,11 +570,13 @@ local function applySandboxFallback(pcd, err, payload, count, origin, viewpointQ
     if ok then
       wroteFallback = true
       state.writeMode = 'direct'
+      state.pcdLibBlocked = true
     else
       fallbackErr = directErr or fallbackErr
     end
-  else
+  elseif attemptedAtomic then
     state.writeMode = 'atomic'
+    state.pcdLibBlocked = false
   end
 
   if wroteFallback then
@@ -605,7 +679,7 @@ function M.publish(frame, scan, opts)
     local writeSucceeded = false
     local writeError = nil
 
-    if state.writeMode ~= 'direct' and state.tmpPath then
+    if state.writeMode ~= 'direct' and state.tmpPath and not state.pcdLibBlocked then
       local ok, err = pcall(savePcd, pcd, state.tmpPath)
       if ok and err ~= false then
         if fileExists(state.tmpPath) then
@@ -615,14 +689,17 @@ function M.publish(frame, scan, opts)
           else
             writeError = string.format('Failed to rename temporary PCD file (%s)', tostring(renameErr or 'unknown'))
             state.writeMode = 'direct'
+            state.pcdLibBlocked = true
           end
         else
           writeError = string.format('Failed to write temporary PCD file (%s)', tostring(err or 'temporary file missing'))
           state.writeMode = 'direct'
+          state.pcdLibBlocked = true
         end
       else
         writeError = string.format('Failed to write temporary PCD file (%s)', tostring(err or 'unknown'))
         state.writeMode = 'direct'
+        state.pcdLibBlocked = true
       end
     end
 
