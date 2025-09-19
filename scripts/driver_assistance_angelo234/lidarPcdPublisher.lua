@@ -284,62 +284,100 @@ end
 local function ensureDirectoryWithFs(relativePath)
   if not relativePath or relativePath == '' or not FS then return false end
 
-  local base = getUserPathBase()
-  if not base then return false end
+  local normalized = normalizePath(relativePath)
+  if not normalized or normalized == '' then return false end
+
+  normalized = normalized:gsub('^/+', '')
+  if normalized == '' then return false end
+
+  local function eachFsVariant(subPath)
+    local variants = {}
+    local seen = {}
+
+    local function push(value)
+      if not value or value == '' or seen[value] then return end
+      variants[#variants + 1] = value
+      seen[value] = true
+    end
+
+    push(subPath)
+    if subPath:sub(-1) ~= '/' then
+      push(subPath .. '/')
+    end
+
+    if subPath:sub(1, 1) ~= '/' then
+      push('/' .. subPath)
+      if subPath:sub(-1) ~= '/' then
+        push('/' .. subPath .. '/')
+      end
+    end
+
+    push('user://' .. subPath)
+    push('user://' .. subPath:gsub('/*$', '') .. '/')
+    push('user:/' .. subPath)
+    push('user:/' .. subPath:gsub('/*$', '') .. '/')
+
+    return variants
+  end
+
+  local function fsDirectoryExists(path)
+    if not FS or not FS.directoryExists then return false end
+    local ok, res = pcall(function()
+      return FS:directoryExists(path)
+    end)
+    if not ok then return false end
+    if res == nil then return false end
+    if type(res) == 'boolean' then
+      return res
+    end
+    return res ~= 0
+  end
+
+  local function fsDirectoryCreate(path, recursive)
+    if not FS or not FS.directoryCreate then return false end
+    local ok, res = pcall(function()
+      return FS:directoryCreate(path, recursive)
+    end)
+    if not ok then return false end
+    if res == nil then return true end
+    if type(res) == 'boolean' then
+      return res
+    end
+    return res ~= 0
+  end
 
   local segments = {}
-  for segment in relativePath:gmatch('[^/]+') do
+  for segment in normalized:gmatch('[^/]+') do
     segments[#segments + 1] = segment
   end
   if #segments == 0 then return false end
 
   local prefix = ''
   for i = 1, #segments do
-    if prefix == '' then
-      prefix = segments[i]
-    else
-      prefix = prefix .. '/' .. segments[i]
-    end
+    prefix = prefix == '' and segments[i] or (prefix .. '/' .. segments[i])
 
-    local fsTarget = base .. prefix
-    local exists = false
-    if FS.directoryExists then
-      local ok, res = pcall(function()
-        return FS:directoryExists(fsTarget)
-      end)
-      if ok and res and res ~= 0 then
-        exists = true
+    local ensured = false
+    local variants = eachFsVariant(prefix)
+
+    for j = 1, #variants do
+      if fsDirectoryExists(variants[j]) then
+        ensured = true
+        break
       end
     end
 
-    if not exists then
-      local created = false
-      local variants = { fsTarget }
-      if fsTarget:sub(-1) ~= '/' then
-        variants[#variants + 1] = fsTarget .. '/'
-      end
-
+    if not ensured then
       for j = 1, #variants do
-        local target = variants[j]
-        local ok, res = pcall(function()
-          return FS:directoryCreate(target)
-        end)
-        if ok and res ~= false and res ~= 0 then
-          created = true
-          break
-        end
-        ok, res = pcall(function()
-          return FS:directoryCreate(target, true)
-        end)
-        if ok and res ~= false and res ~= 0 then
-          created = true
+        local variant = variants[j]
+        if fsDirectoryCreate(variant) or fsDirectoryCreate(variant, true) then
+          ensured = true
           break
         end
       end
+    end
 
-      if not created then
-        return false
-      end
+    if not ensured then
+      return false
     end
   end
 
@@ -483,6 +521,7 @@ local function ensureFile(path)
   for i = 1, #candidates do
     local fsPath = toFilesystemPath(candidates[i])
     if fsPath then
+      ensureDirectory(fsPath)
       local ok, created = pcall(function()
         local file = io.open(fsPath, 'wb')
         if file then
