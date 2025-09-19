@@ -22,7 +22,7 @@ The export adds an `intensity` channel that categorizes points for quick filteri
 
 ## TCP frame format
 
-- The server listens on `127.0.0.1:8765` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L79】
+- The server listens on `127.0.0.1:23511` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L79】
 - Every frame starts with an ASCII line `PCD <length>\n`, where `<length>` is the byte size of the upcoming binary blob. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L90-L113】
 - The header is followed by raw binary data (`float32` ×4 per point) in the exact same layout as the file export. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L24-L55】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
 - If no fresh frame is available, the server sends `PING\n` once per second as a heartbeat. Clients should ignore these lines. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L70-L88】
@@ -36,7 +36,7 @@ import socket
 import numpy as np
 import open3d as o3d
 
-HOST, PORT = "127.0.0.1", 8765
+HOST, PORT = "127.0.0.1", 23511
 INTENSITY_COLORS = {
     0.2: [0.3, 0.7, 0.3],  # ground
     0.8: [0.9, 0.6, 0.1],  # vehicle
@@ -88,7 +88,7 @@ The script converts each frame into an `open3d.geometry.PointCloud`, colors poin
 import socket
 import pathlib
 
-HOST, PORT = "127.0.0.1", 8765
+HOST, PORT = "127.0.0.1", 23511
 OUTPUT = pathlib.Path("frame.pcd")
 
 def recv_line(sock):

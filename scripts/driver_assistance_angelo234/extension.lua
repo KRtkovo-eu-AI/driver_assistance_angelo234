@@ -99,7 +99,7 @@ local virtual_lidar_pcd = {
 local virtual_lidar_stream = {
   enabled = false,
   host = '127.0.0.1',
-  port = 8765,
+  port = 23511,
   running = false,
   activePort = nil
 }

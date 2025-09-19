@@ -69,7 +69,7 @@ If you do not override the path, the module writes `latest.pcd` into the `virtua
 ### Options (path, port, intensity)
 
 - **Path** – adjust it with `setVirtualLidarPcdOutputPath(...)`; the module creates missing folders and uses a temporary file for safe writes. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L88-L157】【F:scripts/driver_assistance_angelo234/extension.lua†L1113-L1132】
-- **Stream port** – defaults to `8765` on `127.0.0.1`; change it with `setVirtualLidarPcdStreamPort(9000)`. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/extension.lua†L1164-L1186】
+- **Stream port** – defaults to `23511` on `127.0.0.1`; change it with `setVirtualLidarPcdStreamPort(9000)`. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/extension.lua†L1164-L1186】
 - **Intensity** – each point includes an `intensity` channel used to categorize samples: main scan (1.0), ground (0.2), and vehicle outline (0.8). 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
 
 ### Update frequency
