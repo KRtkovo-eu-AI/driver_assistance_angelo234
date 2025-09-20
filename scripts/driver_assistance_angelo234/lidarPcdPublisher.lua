@@ -1171,6 +1171,7 @@ function M.publish(frame, scan, opts)
   count = count + appendPoints(segments, scan.main, 1.0)
   count = count + appendPoints(segments, scan.ground, 0.2)
   count = count + appendPoints(segments, scan.vehicle, 0.8)
+  count = count + appendPoints(segments, scan.overhead, 0.6)
 
   local payload = table.concat(segments)
 
