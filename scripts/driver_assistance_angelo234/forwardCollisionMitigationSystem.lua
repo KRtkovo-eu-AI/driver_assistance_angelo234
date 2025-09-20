@@ -174,6 +174,24 @@ end
 
 local release_brake_confidence_level = 0
 
+local function disableAdaptiveCruiseControl()
+  local extension = rawget(_G, 'scripts_driver__assistance__angelo234_extension')
+  if not extension then return end
+
+  local setter = extension.setACCSystemOn
+  if type(setter) ~= 'function' then return end
+
+  local ok, err = pcall(setter, false)
+  if not ok then
+    local msg = string.format('Failed to disable ACC: %s', tostring(err))
+    if log then
+      log('E', 'fcm', msg)
+    else
+      print('[fcm] ' .. msg)
+    end
+  end
+end
+
 local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking, speed)
   --If throttle or brake is highly requested then override braking
   if input_throttle_angelo234 > 0.5 or input_brake_angelo234 > 0.3 then
@@ -201,7 +219,7 @@ local function performEmergencyBraking(dt, veh, aeb_params, time_before_braking,
     veh:queueLuaCommand("electrics.values.brakeOverride = 1")
 
     --Turn off Adaptive Cruise Control
-    scripts_driver__assistance__angelo234_extension.setACCSystemOn(false)
+    disableAdaptiveCruiseControl()
 
     system_state = "braking"
 

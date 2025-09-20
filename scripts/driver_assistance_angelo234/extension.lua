@@ -10,6 +10,15 @@ veh_accs_angelo234 = {}
 
 local M = {}
 
+-- Expose the extension instance through the legacy global name that other
+-- driver assistance modules expect. Some modules (such as the forward
+-- collision mitigation system) reference
+-- `scripts_driver__assistance__angelo234_extension` directly and crash if it
+-- is missing.  When the extension is loaded we immediately publish the module
+-- table under that global so that dependent modules can safely call back into
+-- the extension without needing to guard against a missing reference.
+rawset(_G, 'scripts_driver__assistance__angelo234_extension', M)
+
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 
 local sensor_system = require('scripts/driver_assistance_angelo234/sensorSystem')
