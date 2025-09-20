@@ -118,6 +118,29 @@ local function ensureVirtualLidarStreamServer()
   return true
 end
 
+local function buildFrameBasis(forward, up)
+  if not forward or not up then return end
+  if forward:length() < 1e-6 then return end
+  local dir = forward:normalized()
+  if up:length() < 1e-6 then return end
+  local upNorm = up:normalized()
+  local right = dir:cross(upNorm)
+  if right:length() < 1e-6 then
+    local fallbackUp = vec3(0, 0, 1)
+    right = dir:cross(fallbackUp)
+    if right:length() < 1e-6 then
+      fallbackUp = vec3(0, 1, 0)
+      right = dir:cross(fallbackUp)
+    end
+  end
+  if right:length() < 1e-6 then return end
+  right = right:normalized()
+  local orthoUp = right:cross(dir)
+  if orthoUp:length() < 1e-6 then return end
+  orthoUp = orthoUp:normalized()
+  return dir, right, orthoUp
+end
+
 local function stopVirtualLidarStreamServer()
   lidarPcdStream.stop()
   virtual_lidar_stream.running = false
@@ -523,65 +546,71 @@ local function frontLidarLoop()
       front_lidar_update_timer = front_lidar_update_timer + dt
       if front_lidar_update_timer >= 1.0 / 20.0 then
         local pos = veh:getPosition()
-        local dir = veh:getDirectionVector()
-        local up = veh:getDirectionVectorUp()
-        dir.z = 0
-        dir = dir:normalized()
-        up = up:normalized()
-        local origin = vec3(pos.x, pos.y, pos.z + 1.8)
-        local right = dir:cross(up):normalized()
-        front_lidar_frames_wip[front_lidar_phase + 1] = {
-          origin = origin,
-          dir = dir,
-          right = right,
-          up = up
-        }
-        local base_dist = aeb_params.sensor_max_distance
-        local front_dist = base_dist + 60
-        local hits = virtual_lidar.scan(
-          origin,
-          dir,
-          up,
-          front_dist,
-          math.rad(170),
-          math.rad(30),
-          60,
-          15,
-          0,
-          veh:getID(),
-          {
-            hStart = front_lidar_phase,
-            hStep = FRONT_LIDAR_PHASES,
-            maxRays = FRONT_LIDAR_MAX_RAYS
-          }
-        )
-        local groundThreshold = LIDAR_GROUND_THRESHOLD
-        local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
-        local current_cloud = {}
-        local low_cloud = {}
-        for _, p in ipairs(hits) do
-          local rel = p - origin
-          local z = rel:dot(up)
-          if rel:length() <= front_dist then
-            local point = {
-              x = rel:dot(right),
-              y = rel:dot(dir),
-              z = z
-            }
-            if z >= groundThreshold then
-              current_cloud[#current_cloud + 1] = point
-            elseif z >= lowObjectMin then
-              low_cloud[#low_cloud + 1] = point
-            end
+        local forward = veh:getDirectionVector()
+        local upVec = veh:getDirectionVectorUp()
+        local dir, right, up = nil, nil, nil
+        if forward and upVec then
+          local planarDir = vec3(forward.x, forward.y, 0)
+          dir, right, up = buildFrameBasis(planarDir, upVec)
+          if not dir then
+            dir, right, up = buildFrameBasis(forward, upVec)
           end
         end
-        front_lidar_point_cloud_wip[front_lidar_phase + 1] = current_cloud
-        front_lidar_ground_point_cloud_wip[front_lidar_phase + 1] = low_cloud
-        front_lidar_phase = (front_lidar_phase + 1) % FRONT_LIDAR_PHASES
-        if front_lidar_phase == 0 then
-          front_lidar_point_cloud, front_lidar_point_cloud_wip = front_lidar_point_cloud_wip, front_lidar_point_cloud
-          front_lidar_ground_point_cloud, front_lidar_ground_point_cloud_wip = front_lidar_ground_point_cloud_wip, front_lidar_ground_point_cloud
-          front_lidar_frames, front_lidar_frames_wip = front_lidar_frames_wip, front_lidar_frames
+        if dir and right and up then
+          local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+          front_lidar_frames_wip[front_lidar_phase + 1] = {
+            origin = origin,
+            dir = dir,
+            right = right,
+            up = up
+          }
+          local base_dist = aeb_params.sensor_max_distance
+          local front_dist = base_dist + 60
+          local hits = virtual_lidar.scan(
+            origin,
+            dir,
+            up,
+            front_dist,
+            math.rad(170),
+            math.rad(30),
+            60,
+            15,
+            0,
+            veh:getID(),
+            {
+              hStart = front_lidar_phase,
+              hStep = FRONT_LIDAR_PHASES,
+              maxRays = FRONT_LIDAR_MAX_RAYS
+            }
+          )
+          local groundThreshold = LIDAR_GROUND_THRESHOLD
+          local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
+          local current_cloud = {}
+          local low_cloud = {}
+          for _, p in ipairs(hits) do
+            local rel = p - origin
+            local z = rel:dot(up)
+            if rel:length() <= front_dist then
+              local point = {
+                x = rel:dot(right),
+                y = rel:dot(dir),
+                z = z
+              }
+              if z >= groundThreshold then
+                current_cloud[#current_cloud + 1] = point
+              elseif z >= lowObjectMin then
+                low_cloud[#low_cloud + 1] = point
+              end
+            end
+          end
+          front_lidar_point_cloud_wip[front_lidar_phase + 1] = current_cloud
+          front_lidar_ground_point_cloud_wip[front_lidar_phase + 1] = low_cloud
+          front_lidar_phase = (front_lidar_phase + 1) % FRONT_LIDAR_PHASES
+          if front_lidar_phase == 0 then
+            front_lidar_point_cloud, front_lidar_point_cloud_wip = front_lidar_point_cloud_wip, front_lidar_point_cloud
+            front_lidar_ground_point_cloud, front_lidar_ground_point_cloud_wip = front_lidar_ground_point_cloud_wip, front_lidar_ground_point_cloud
+            front_lidar_frames, front_lidar_frames_wip = front_lidar_frames_wip, front_lidar_frames
+          end
         end
         front_lidar_update_timer = 0
       end
@@ -602,223 +631,229 @@ local function updateVirtualLidar(dt, veh)
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then
     local pos = veh:getPosition()
-    local dir = veh:getDirectionVector()
-    local up = veh:getDirectionVectorUp()
-    dir.z = 0
-    dir = dir:normalized()
-    up = up:normalized()
-    local origin = vec3(pos.x, pos.y, pos.z + 1.8)
-    -- In BeamNG's left-handed system, forward × up yields the vehicle's right
-    local right = dir:cross(up):normalized()
-    virtual_lidar_frames[virtual_lidar_phase + 1] = {
-      origin = origin,
-      dir = dir,
-      right = right,
-      up = up
-    }
-    local base_dist = aeb_params.sensor_max_distance
-    -- boost forward reach by 60 m while keeping rear and side coverage at the base range
-    local front_dist = base_dist + 60
-    local rear_dist = base_dist
-    local side_dist = rear_dist
-    local ANG_FRONT = 85
-    local ANG_REAR = 112.5
-    local scan_hits = virtual_lidar.scan(
-      origin,
-      dir,
-      up,
-      front_dist,
-      VIRTUAL_LIDAR_H_FOV,
-      VIRTUAL_LIDAR_V_FOV,
-      VIRTUAL_LIDAR_H_RES,
-      VIRTUAL_LIDAR_V_RES,
-      0,
-      veh:getID(),
-      {
-        hStart = virtual_lidar_phase,
-        hStep = VIRTUAL_LIDAR_PHASES,
-        maxRays = VIRTUAL_LIDAR_MAX_RAYS
+    local forward = veh:getDirectionVector()
+    local upVec = veh:getDirectionVectorUp()
+    local dir, right, up = nil, nil, nil
+    if forward and upVec then
+      local planarDir = vec3(forward.x, forward.y, 0)
+      dir, right, up = buildFrameBasis(planarDir, upVec)
+      if not dir then
+        dir, right, up = buildFrameBasis(forward, upVec)
+      end
+    end
+    if dir and right and up then
+      local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+      -- In BeamNG's left-handed system, forward × up yields the vehicle's right
+      virtual_lidar_frames[virtual_lidar_phase + 1] = {
+        origin = origin,
+        dir = dir,
+        right = right,
+        up = up
       }
-    )
+      local base_dist = aeb_params.sensor_max_distance
+      -- boost forward reach by 60 m while keeping rear and side coverage at the base range
+      local front_dist = base_dist + 60
+      local rear_dist = base_dist
+      local side_dist = rear_dist
+      local ANG_FRONT = 85
+      local ANG_REAR = 112.5
+      local scan_hits = virtual_lidar.scan(
+        origin,
+        dir,
+        up,
+        front_dist,
+        VIRTUAL_LIDAR_H_FOV,
+        VIRTUAL_LIDAR_V_FOV,
+        VIRTUAL_LIDAR_H_RES,
+        VIRTUAL_LIDAR_V_RES,
+        0,
+        veh:getID(),
+        {
+          hStart = virtual_lidar_phase,
+          hStep = VIRTUAL_LIDAR_PHASES,
+          maxRays = VIRTUAL_LIDAR_MAX_RAYS
+        }
+      )
 
-    -- cache properties of the player's vehicle for later filtering
-    local veh_props = extra_utils.getVehicleProperties(veh)
-    local self_bb = veh_props.bb
-    local self_center = self_bb:getCenter()
-    local self_axes = {
-      vec3(self_bb:getAxis(0)),
-      vec3(self_bb:getAxis(1)),
-      vec3(self_bb:getAxis(2))
-    }
-    local self_half = self_bb:getHalfExtents()
-    local self_margin = 0.25
+      -- cache properties of the player's vehicle for later filtering
+      local veh_props = extra_utils.getVehicleProperties(veh)
+      local self_bb = veh_props.bb
+      local self_center = self_bb:getCenter()
+      local self_axes = {
+        vec3(self_bb:getAxis(0)),
+        vec3(self_bb:getAxis(1)),
+        vec3(self_bb:getAxis(2))
+      }
+      local self_half = self_bb:getHalfExtents()
+      local self_margin = 0.25
 
-    -- return true if the world-space point lies within our own vehicle's bounds
-    local function insideSelf(pt)
-      local rel = pt - self_center
-      return math.abs(rel:dot(self_axes[1])) <= self_half.x + self_margin
-        and math.abs(rel:dot(self_axes[2])) <= self_half.y + self_margin
-        and math.abs(rel:dot(self_axes[3])) <= self_half.z + self_margin
-    end
-
-    local detections = {}
-    local processed = {[veh:getID()] = true}
-    local vehicle_hits = {}
-
-    local function allowedDistance(rel)
-      local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
-      local absAng = math.abs(ang)
-      if absAng <= ANG_FRONT then
-        return front_dist
-      elseif absAng >= ANG_REAR then
-        return rear_dist
-      else
-        return side_dist
+      -- return true if the world-space point lies within our own vehicle's bounds
+      local function insideSelf(pt)
+        local rel = pt - self_center
+        return math.abs(rel:dot(self_axes[1])) <= self_half.x + self_margin
+          and math.abs(rel:dot(self_axes[2])) <= self_half.y + self_margin
+          and math.abs(rel:dot(self_axes[3])) <= self_half.z + self_margin
       end
-    end
 
-    local function addVehicle(vehObj, props)
-      if not vehObj then return end
-      local freshProps = extra_utils.getVehicleProperties(vehObj)
-      if freshProps then
-        props = freshProps
+      local detections = {}
+      local processed = {[veh:getID()] = true}
+      local vehicle_hits = {}
+
+      local function allowedDistance(rel)
+        local ang = math.deg(math.atan2(rel:dot(right), rel:dot(dir)))
+        local absAng = math.abs(ang)
+        if absAng <= ANG_FRONT then
+          return front_dist
+        elseif absAng >= ANG_REAR then
+          return rear_dist
+        else
+          return side_dist
+        end
       end
-      if not props then return end
-      local id = props.id or vehObj:getID()
-      if id == veh:getID() or processed[id] then return end
-      processed[id] = true
-      if extra_utils.isVehicleGhost(vehObj, props) then return end
-      local bb = props.bb
-      if not bb then return end
-      local center = props.center_pos or bb:getCenter()
-      local half_extents = bb:getHalfExtents()
-      local axis_x = vec3(bb:getAxis(0))
-      local axis_y = vec3(bb:getAxis(1))
-      local axis_z = vec3(bb:getAxis(2))
-      local top = center + axis_z * half_extents.z
-      local relCenter = center - origin
-      local relTop = top - origin
-      local forwardDist = relCenter:dot(dir)
-      local sideDist = relCenter:dot(right)
-      local planarDist = math.max(0.5, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
-      local heightOffset = math.abs(relCenter:dot(up))
-      local function clampSpacing(value)
-        if value < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
-        if value > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
-        return value
+
+      local function addVehicle(vehObj, props)
+        if not vehObj then return end
+        local freshProps = extra_utils.getVehicleProperties(vehObj)
+        if freshProps then
+          props = freshProps
+        end
+        if not props then return end
+        local id = props.id or vehObj:getID()
+        if id == veh:getID() or processed[id] then return end
+        processed[id] = true
+        if extra_utils.isVehicleGhost(vehObj, props) then return end
+        local bb = props.bb
+        if not bb then return end
+        local center = props.center_pos or bb:getCenter()
+        local half_extents = bb:getHalfExtents()
+        local axis_x = vec3(bb:getAxis(0))
+        local axis_y = vec3(bb:getAxis(1))
+        local axis_z = vec3(bb:getAxis(2))
+        local top = center + axis_z * half_extents.z
+        local relCenter = center - origin
+        local relTop = top - origin
+        local forwardDist = relCenter:dot(dir)
+        local sideDist = relCenter:dot(right)
+        local planarDist = math.max(0.5, math.sqrt(forwardDist * forwardDist + sideDist * sideDist))
+        local heightOffset = math.abs(relCenter:dot(up))
+        local function clampSpacing(value)
+          if value < VEHICLE_POINT_MIN_SPACING then return VEHICLE_POINT_MIN_SPACING end
+          if value > VEHICLE_POINT_MAX_SPACING then return VEHICLE_POINT_MAX_SPACING end
+          return value
+        end
+        local spacing_x = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_H_STEP))
+        local spacing_y = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_V_STEP) + heightOffset * math.tan(VIRTUAL_LIDAR_V_STEP))
+        local function stepsForHalfSpan(halfSpan, spacing)
+          local steps = math.floor(halfSpan / math.max(spacing, VEHICLE_POINT_MIN_SPACING) + 0.5)
+          if steps < 1 then steps = 1 end
+          if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
+          return steps
+        end
+        local steps_x = stepsForHalfSpan(half_extents.x, spacing_x)
+        local steps_y = stepsForHalfSpan(half_extents.y, spacing_y)
+        for xi = -steps_x, steps_x do
+          local offset_x = axis_x * (half_extents.x * xi / steps_x)
+          for yi = -steps_y, steps_y do
+            local offset_y = axis_y * (half_extents.y * yi / steps_y)
+            local p = top + offset_x + offset_y
+            local rel = p - origin
+            if rel:length() < allowedDistance(rel) then
+              vehicle_hits[#vehicle_hits + 1] = p
+            end
+          end
+        end
+        if relTop:length() <= allowedDistance(relTop) then
+          local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
+          local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
+          detections[#detections + 1] = {pos = top, desc = string.format('%s %s', veh_type, id)}
+        end
       end
-      local spacing_x = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_H_STEP))
-      local spacing_y = clampSpacing(planarDist * math.tan(VIRTUAL_LIDAR_V_STEP) + heightOffset * math.tan(VIRTUAL_LIDAR_V_STEP))
-      local function stepsForHalfSpan(halfSpan, spacing)
-        local steps = math.floor(halfSpan / math.max(spacing, VEHICLE_POINT_MIN_SPACING) + 0.5)
-        if steps < 1 then steps = 1 end
-        if steps > VEHICLE_POINT_MAX_STEPS then steps = VEHICLE_POINT_MAX_STEPS end
-        return steps
-      end
-      local steps_x = stepsForHalfSpan(half_extents.x, spacing_x)
-      local steps_y = stepsForHalfSpan(half_extents.y, spacing_y)
-      for xi = -steps_x, steps_x do
-        local offset_x = axis_x * (half_extents.x * xi / steps_x)
-        for yi = -steps_y, steps_y do
-          local offset_y = axis_y * (half_extents.y * yi / steps_y)
-          local p = top + offset_x + offset_y
-          local rel = p - origin
-          if rel:length() < allowedDistance(rel) then
-            vehicle_hits[#vehicle_hits + 1] = p
+
+      if front_sensor_data and front_sensor_data[2] then
+        for _, data in ipairs(front_sensor_data[2]) do
+          if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
+            addVehicle(data.other_veh, data.other_veh_props)
           end
         end
       end
-      if relTop:length() <= allowedDistance(relTop) then
-        local id = vehObj.getJBeamFilename and vehObj:getJBeamFilename() or tostring(vehObj:getID())
-        local veh_type = isPlayerVehicle(vehObj) and 'player vehicle' or 'traffic vehicle'
-        detections[#detections + 1] = {pos = top, desc = string.format('%s %s', veh_type, id)}
-      end
-    end
 
-    if front_sensor_data and front_sensor_data[2] then
-      for _, data in ipairs(front_sensor_data[2]) do
-        if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
-          addVehicle(data.other_veh, data.other_veh_props)
+      if rear_sensor_data and rear_sensor_data[1] then
+        local vehRear = rear_sensor_data[1]
+        if vehRear then
+          local propsRear = extra_utils.getVehicleProperties(vehRear)
+          if not extra_utils.isVehicleGhost(vehRear, propsRear) then
+            addVehicle(vehRear, propsRear)
+          end
         end
       end
-    end
 
-    if rear_sensor_data and rear_sensor_data[1] then
-      local vehRear = rear_sensor_data[1]
-      if vehRear then
-        local propsRear = extra_utils.getVehicleProperties(vehRear)
-        if not extra_utils.isVehicleGhost(vehRear, propsRear) then
-          addVehicle(vehRear, propsRear)
+      for i = 0, be:getObjectCount() - 1 do
+        local other = be:getObject(i)
+        if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
+          local otherProps = extra_utils.getVehicleProperties(other)
+          if not extra_utils.isVehicleGhost(other, otherProps) then
+            addVehicle(other, otherProps)
+          end
         end
       end
-    end
 
-    for i = 0, be:getObjectCount() - 1 do
-      local other = be:getObject(i)
-      if other:getID() ~= veh:getID() and other:getJBeamFilename() ~= "unicycle" then
-        local otherProps = extra_utils.getVehicleProperties(other)
-        if not extra_utils.isVehicleGhost(other, otherProps) then
-          addVehicle(other, otherProps)
-        end
-      end
-    end
-
-    local groundThreshold = LIDAR_GROUND_THRESHOLD
-    local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
-    local current_cloud = {}
-    local ground_cloud = {}
-    local overhead_cloud = {}
-    for _, p in ipairs(scan_hits) do
-      local rel = p - origin
-      local withinRange = rel:length() <= allowedDistance(rel)
-      local z = rel:dot(up)
-      local point = {
-        x = rel:dot(right),
-        y = rel:dot(dir),
-        z = z
-      }
-      if insideSelf(p) then
-        if withinRange and z >= groundThreshold then
-          overhead_cloud[#overhead_cloud + 1] = point
-        end
-      elseif withinRange then
-        if z >= groundThreshold then
-          current_cloud[#current_cloud + 1] = point
-        elseif z >= lowObjectMin then
-          ground_cloud[#ground_cloud + 1] = point
-        end
-      end
-    end
-    virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
-    virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
-    virtual_lidar_overhead_point_cloud[virtual_lidar_phase + 1] = overhead_cloud
-
-    local veh_cloud = {}
-    for _, p in ipairs(vehicle_hits) do
-      local rel = p - origin
-      if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
-        veh_cloud[#veh_cloud + 1] = {
+      local groundThreshold = LIDAR_GROUND_THRESHOLD
+      local lowObjectMin = groundThreshold - LIDAR_LOW_OBJECT_BAND
+      local current_cloud = {}
+      local ground_cloud = {}
+      local overhead_cloud = {}
+      for _, p in ipairs(scan_hits) do
+        local rel = p - origin
+        local withinRange = rel:length() <= allowedDistance(rel)
+        local z = rel:dot(up)
+        local point = {
           x = rel:dot(right),
           y = rel:dot(dir),
-          z = rel:dot(up)
+          z = z
         }
+        if insideSelf(p) then
+          if withinRange and z >= groundThreshold then
+            overhead_cloud[#overhead_cloud + 1] = point
+          end
+        elseif withinRange then
+          if z >= groundThreshold then
+            current_cloud[#current_cloud + 1] = point
+          elseif z >= lowObjectMin then
+            ground_cloud[#ground_cloud + 1] = point
+          end
+        end
       end
-    end
-    vehicle_lidar_point_cloud = veh_cloud
-    vehicle_lidar_frame = {origin = origin, dir = dir, right = right, up = up}
+      virtual_lidar_point_cloud[virtual_lidar_phase + 1] = current_cloud
+      virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
+      virtual_lidar_overhead_point_cloud[virtual_lidar_phase + 1] = overhead_cloud
 
-    for _, d in ipairs(detections) do
-      local rel = d.pos - origin
-      local x = rel:dot(right)
-      local y = rel:dot(dir)
-      local z = rel:dot(up)
-      local dist = rel:length()
-      local ang = math.deg(math.atan2(x, y))
-      logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
-    end
-    virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
-    if virtual_lidar_phase == 0 then
-      maybePublishVirtualLidarPcd(veh)
+      local veh_cloud = {}
+      for _, p in ipairs(vehicle_hits) do
+        local rel = p - origin
+        if rel:dot(up) >= groundThreshold and rel:length() <= allowedDistance(rel) then
+          veh_cloud[#veh_cloud + 1] = {
+            x = rel:dot(right),
+            y = rel:dot(dir),
+            z = rel:dot(up)
+          }
+        end
+      end
+      vehicle_lidar_point_cloud = veh_cloud
+      vehicle_lidar_frame = {origin = origin, dir = dir, right = right, up = up}
+
+      for _, d in ipairs(detections) do
+        local rel = d.pos - origin
+        local x = rel:dot(right)
+        local y = rel:dot(dir)
+        local z = rel:dot(up)
+        local dist = rel:length()
+        local ang = math.deg(math.atan2(x, y))
+        logger.log('I', 'lidar', string.format('Detected %s at %.1f m %.1f° (%.1f, %.1f, %.1f)', d.desc, dist, ang, x, y, z))
+      end
+      virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
+      if virtual_lidar_phase == 0 then
+        maybePublishVirtualLidarPcd(veh)
+      end
     end
     virtual_lidar_update_timer = 0
   else
@@ -985,17 +1020,15 @@ end
 local function buildCurrentFrame(veh)
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return nil end
   local pos = veh:getPosition()
-  local dir = veh:getDirectionVector()
-  local up = veh:getDirectionVectorUp()
-  if not pos or not dir or not up then return nil end
-  dir = vec3(dir.x, dir.y, 0)
-  if dir:length() < 1e-6 then return nil end
-  dir = dir:normalized()
-  if up:length() < 1e-6 then return nil end
-  up = up:normalized()
-  local right = dir:cross(up)
-  if right:length() < 1e-6 then return nil end
-  right = right:normalized()
+  local forward = veh:getDirectionVector()
+  local upVec = veh:getDirectionVectorUp()
+  if not pos or not forward or not upVec then return nil end
+  local planarDir = vec3(forward.x, forward.y, 0)
+  local dir, right, up = buildFrameBasis(planarDir, upVec)
+  if not dir then
+    dir, right, up = buildFrameBasis(forward, upVec)
+  end
+  if not dir or not right or not up then return nil end
   return {
     origin = vec3(pos.x, pos.y, pos.z + 1.8),
     dir = dir,
