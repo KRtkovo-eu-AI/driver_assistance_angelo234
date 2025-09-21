@@ -136,8 +136,16 @@ angular.module('beamng.apps')
           statusClass = 'lca-status-active'
         } else if (!status.enabled) {
           statusText = 'Standby'
-          statusClass = 'lca-status-idle'
-          statusDetail = 'Disabled'
+          if (status.reason === 'ai_route_conflict') {
+            statusClass = 'lca-status-warning'
+            statusDetail = 'AI route conflict'
+          } else if (status.reason === 'off_road') {
+            statusClass = 'lca-status-warning'
+            statusDetail = 'Off road'
+          } else {
+            statusClass = 'lca-status-idle'
+            statusDetail = 'Disabled'
+          }
         } else if (status.driverOverride || status.reason === 'driver_override') {
           statusText = 'Standby'
           statusClass = 'lca-status-warning'

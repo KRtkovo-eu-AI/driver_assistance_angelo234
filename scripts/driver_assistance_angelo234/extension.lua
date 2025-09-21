@@ -308,6 +308,9 @@ local function formatLaneCenteringReason(reason)
   if reason == "off_road" then
     return "Vehicle not on road"
   end
+  if reason == "ai_route_conflict" then
+    return "AI route conflict"
+  end
   if reason and reason ~= "" and reason ~= "user_toggle" then
     return tostring(reason)
   end
