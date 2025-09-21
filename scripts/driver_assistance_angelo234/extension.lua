@@ -302,6 +302,9 @@ local function formatLaneCenteringReason(reason)
   if reason == "driver_override" then
     return "Driver steering input"
   end
+  if reason == "low_speed" then
+    return "Speed below 30 km/h"
+  end
   if reason and reason ~= "" and reason ~= "user_toggle" then
     return tostring(reason)
   end

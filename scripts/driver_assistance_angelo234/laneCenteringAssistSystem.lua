@@ -1096,6 +1096,10 @@ local function update(dt, veh, system_params, enabled)
   local assist_weight_gain = params.assist_weight_gain or 4.0
   local min_active_speed = params.min_active_speed or 1.0
 
+  local prev_status = latest_data and latest_data.status or nil
+  local previously_active = prev_status and prev_status.active
+  local previously_enabled = prev_status and prev_status.enabled
+
   local installed = extra_utils.getPart("lane_centering_assist_system_angelo234")
     or extra_utils.getPart("lane_centering_assist_angelo234")
 
@@ -1143,6 +1147,20 @@ local function update(dt, veh, system_params, enabled)
   local assist_info = buildAssistInfo(params, lane_model)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
+  local assist_low_speed_shutdown = false
+
+  if previously_active and previously_enabled and enabled and forward_speed <= min_active_speed then
+    assist_low_speed_shutdown = true
+    status.reason = "low_speed"
+    warning_played = false
+    if activation_handler then
+      Engine.Audio.playOnce('AudioGui', 'art/sound/proximity_tone_50ms_moderate.wav')
+      activation_handler(false, "low_speed")
+    end
+    status.enabled = false
+    user_enabled = false
+    resetControllers()
+  end
 
   local driver_axis = rawget(_G, "input_steering_driver_angelo234")
   local driver_input = driver_axis or rawget(_G, "input_steering_angelo234")
@@ -1161,7 +1179,9 @@ local function update(dt, veh, system_params, enabled)
   end
 
   if not user_enabled then
-    status.reason = "user_disabled"
+    if not assist_low_speed_shutdown then
+      status.reason = "user_disabled"
+    end
   elseif override_timer > 0 then
     status.reason = "cooldown"
   elseif lane_model and forward_speed <= min_active_speed then
