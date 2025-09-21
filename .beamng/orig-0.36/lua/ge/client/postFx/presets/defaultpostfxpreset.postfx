@@ -1,0 +1,62 @@
+{
+	"EnablePostFX": "1",
+
+	"DOF": {
+		"BlurCurve" : "10.000",
+		"BlurCurveNear" : "20.000",
+		"BlurFar" : "0.250",
+		"BlurNear" : "0.000",
+		"Enable": "1",
+		"EnableDebugMode" : "0",
+		"FocusDistance" : "250.000",
+		"FocusAperture" : "100.000"
+	},
+
+	"HDR1": {
+		"Enable": "1",
+		"ColorCorrectionRamp2": "lua/ge/client/postFx/default_color_ramp.png",
+		"adaptRate": "0.1",
+		"blueShiftColor": "0.34279561042786 0.34279671311378 0.92865186929703 1",
+		"brightPassThreshold": "3",
+		"enableBloom": "1",
+		"enableBlueShift": "0",
+		"enabledHSL": "0",
+		"enableToneMapping": "0",
+		"factorHSL": "1 1 1",
+		"gaussMean": "0.2",
+		"gaussMultiplier": "0.2",
+		"gaussStdDev": "2.0",
+		"keyValue": "1",
+		"minLuminace": "1",
+		"whiteCutoff": "0",
+		"enabledHSL": 1,
+		"factorHSL": "1 1 1",
+	},
+
+	"SSAO": {
+		"Enable": "1",
+		"blurDepthTol": "0.3",
+		"blurNormalTol": "0",
+		"lDepthMax": "5",
+		"lDepthMin": "0.165877",
+		"lDepthPow": "0.2",
+		"lNormalPow": "2",
+		"lNormalTol": "2",
+		"lRadius": "0.782834",
+		"lStrength": "0.473934",
+		"overallStrength": "19.6517",
+		"quality": "0",
+		"sDepthMax": "50",
+		"sDepthMin": "0.402844",
+		"sDepthPow": "1",
+		"sNormalPow": "2",
+		"sNormalTol": "2",
+		"sRadius": "0.0957678",
+		"sStrength": "0.56872",
+	},
+
+	"LightRays": {
+		"Enable": "1",
+		"brightScalar": "0.75",
+	}
+}

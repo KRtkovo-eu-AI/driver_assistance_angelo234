@@ -1,0 +1,19 @@
+{
+  "author": "KRtekTM",
+  "css": {
+    "height": "300px",
+    "left": "500px",
+    "min-height": "200px",
+    "min-width": "200px",
+    "top": "100px",
+    "width": "300px"
+  },
+  "description": "Displays point cloud from virtual lidar.",
+  "directive": "virtualLidarApp",
+  "domElement": "<virtual-lidar-app></virtual-lidar-app>",
+  "name": "ADAS - Virtual Lidar Viewer",
+  "types": [
+    "ui.apps.categories.examples"
+  ],
+  "version": "0.1.0"
+}

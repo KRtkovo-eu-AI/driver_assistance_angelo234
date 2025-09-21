@@ -1,0 +1,16 @@
+- drift.lua is the logic behind detecting different stunts and drifts
+- scoring.lua uses drift.lua to create score
+- general.lua serves as the averal system hub
+  - different extensions are loaded/unloaded depending on the "context" and "challengeMode" variables. Eg, in freeroam, "stuntZones.lua" is unloaded, and in challenges that aren't gymkhanas, "stallingSystem.lua" is unloaded
+- stuntZones.lua draw different visual elements of the stuntZones and manages different events related to them
+- statistics.lua manages communications with the game-wide statistics system
+- display.lua is responsible for sending the information to the UI
+- stallingSystem.lua incentivize the player to diversify their drifting technics by lowering the rewards if a certain technic is repeated to many times
+- saveLoad.lua takes care of loading a driftData file and sending its components to the corresponding drift systems (only stunt zones for now)
+- destination.lua ; loads a race file. Detects when a player goes the wrong way
+- bounds.lua loads a site file to use its "bounds" component
+- quickMessages.lua takes care of displaying "Nice drift!" kind of messages in freeroam
+- scoreboard.lua is to gather stats over a drift challenge to display them in the end screen
+- sounds.lua is to create sounds …
+- driftSpots.lua manages the activation/deactivation of the drift spots
+- cruising.lua enables/disables the drift UI apps when drifting in freeroam

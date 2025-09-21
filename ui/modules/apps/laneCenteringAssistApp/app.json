@@ -1,0 +1,19 @@
+{
+  "author": "KRtekTM",
+  "css": {
+    "height": "300px",
+    "left": "500px",
+    "min-height": "200px",
+    "min-width": "200px",
+    "top": "100px",
+    "width": "300px"
+  },
+  "description": "Displays lane centering data.",
+  "directive": "laneCenteringAssistApp",
+  "domElement": "<lane-centering-assist-app></lane-centering-assist-app>",
+  "name": "ADAS - Lane Centering Assist Viewer",
+  "types": [
+    "ui.apps.categories.examples"
+  ],
+  "version": "0.1.0"
+}

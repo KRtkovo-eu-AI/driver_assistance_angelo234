@@ -8,22 +8,23 @@ local dim_distance = 150
 
 local headlights_turned_off = false
 local armed = false
+local desired_light_state = nil
+local pending_light_state = nil
+local last_applied_light_state = nil
+local manual_override_state = nil
 
 --Called when headlights get turned off by user
 local function onHeadlightsOff()
   armed = false
+  manual_override_state = 0
+  desired_light_state = nil
+  pending_light_state = nil
   headlights_turned_off = true
 end
 
 --Called when headlights get turned on by user
 local function onHeadlightsOn()
-  --If in dimmed headlight mode then switch to off
-  if armed then
-    be:getPlayerVehicle(0):queueLuaCommand("electrics.setLightsState(0)")
-
-    armed = false
-    headlights_turned_off = true
-  end
+  headlights_turned_off = false
 end
 
 --If system just switched on, then check if headlights are already in high-beam mode
@@ -37,8 +38,20 @@ end
 local function systemSwitchedOn()
   local light_state = getLightState()
 
-  if light_state == 2 then
-    headlights_turned_off = false
+  if electrics_values_angelo234 ~= nil then
+    light_state = electrics_values_angelo234["lights_state"]
+  end
+
+  manual_override_state = nil
+  pending_light_state = nil
+  desired_light_state = nil
+  last_applied_light_state = light_state
+
+  headlights_turned_off = light_state == 0
+  armed = light_state == 2
+
+  if armed then
+    desired_light_state = 2
   end
 end
 
@@ -78,38 +91,87 @@ local function autoHeadlightFunction(veh, vehs_in_front_table, light_state)
 
   --If vehicle in front exists and distance , then dim headlights
   if distance <= dim_distance then
+    desired_light_state = 1
+
     if light_state ~= 1 then
       logger.log('I', 'auto_headlight_system', 'Attempting to switch to low beams')
+      pending_light_state = 1
       veh:queueLuaCommand("electrics.highbeam = false; electrics.setLightsState(1)")
     end
   else
+    desired_light_state = 2
+
     if light_state ~= 2 then
       logger.log('I', 'auto_headlight_system', 'Attempting to restore high beams')
+      pending_light_state = 2
       veh:queueLuaCommand("electrics.highbeam = true; electrics.setLightsState(2)")
     end
   end
 end
 
 local function update(dt, veh, vehs_in_front_table)
-  local light_state
+  local reported_light_state = getLightState()
+  local light_state = reported_light_state
 
-  if not headlights_turned_off then
-    light_state = getLightState()
-  else
+  if headlights_turned_off then
     light_state = 0
 
-    if getLightState() == 0 then
+    if reported_light_state == 0 then
       headlights_turned_off = false
+    end
+  end
+
+  if pending_light_state and light_state == pending_light_state then
+    last_applied_light_state = light_state
+    pending_light_state = nil
+  end
+
+  if manual_override_state ~= nil then
+    if light_state == 2 then
+      manual_override_state = nil
+      headlights_turned_off = false
+      armed = true
+      desired_light_state = 2
+      last_applied_light_state = 2
+    else
+      manual_override_state = light_state
+      headlights_turned_off = light_state == 0
+      return
+    end
+  end
+
+  if armed and desired_light_state ~= nil then
+    local awaiting_command = pending_light_state ~= nil and pending_light_state == desired_light_state
+    local manual_change = last_applied_light_state ~= nil and light_state ~= last_applied_light_state
+
+    if light_state ~= desired_light_state and light_state ~= 2 and (not awaiting_command or manual_change) then
+      manual_override_state = light_state
+      headlights_turned_off = light_state == 0
+      armed = false
+      desired_light_state = nil
+      pending_light_state = nil
+      return
     end
   end
 
   if not armed then
     if light_state == 2 then
       armed = true
+      manual_override_state = nil
+      headlights_turned_off = false
+      desired_light_state = 2
+      last_applied_light_state = 2
+    else
+      if light_state == 0 then
+        headlights_turned_off = true
+      end
+      return
     end
-  else
-    autoHeadlightFunction(veh, vehs_in_front_table or {}, light_state)
   end
+
+  last_applied_light_state = last_applied_light_state or light_state
+
+  autoHeadlightFunction(veh, vehs_in_front_table or {}, light_state)
 end
 
 M.onHeadlightsOff = onHeadlightsOff

@@ -1,0 +1,196 @@
+{
+//  "codriver_volume_up": {
+//    "cat": "gameplay",
+//    "ctx": "tlua",
+//    "order": -10,
+//    "title": "Rally - Co-driver Volume Up",
+//    "desc": "Increase Co-driver volume.",
+//    "onDown": "extensions.gameplay_rally_inputActions.action_codriver_volume_up()"
+//  },
+//  "codriver_volume_down": {
+//    "cat": "gameplay",
+//    "ctx": "tlua",
+//    "order": -9,
+//    "title": "Rally - Co-driver Volume Down",
+//    "desc": "Decrease Co-driver volume.",
+//    "onDown": "extensions.gameplay_rally_inputActions.action_codriver_volume_down()"
+//  },
+  "codriver_timing_earlier": {
+    "cat": "gameplay",
+    "ctx": "tlua",
+    "order": 1000,
+    "title": "Rally: Co-driver Timing Earlier",
+    "desc": "Make co-driver give calls earlier.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionCodriverCallsEarlier() end"
+  },
+  "codriver_timing_later": {
+    "cat": "gameplay",
+    "ctx": "tlua",
+    "order": 1001,
+    "title": "Rally: Co-driver Timing Later",
+    "desc": "Make co-driver give calls later.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionCodriverCallsLater() end"
+  },
+
+  "cut_voice_transcription": {
+    "cat": "gameplay",
+    "ctx": "tlua",
+    "order": 1010,
+    "title": "Rally: Recce Mark Corner End",
+    "desc": "Mark a corner end during a recce recording.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionTranscribeRecordingCut() end"
+  },
+
+  // "recce_move_pacenote_forward": {
+  //   "cat": "gameplay",
+  //   "ctx": "tlua",
+  //   "order": 1002,
+  //   "title": "Rally: Move Pacenote Forward in Recce App",
+  //   "desc": "Move the next pacenote toward CornerStart along snaproad and save notebook.",
+  //   "onDown": "extensions.gameplay_rally_inputActions.action_recce_move_pacenote_forward()"
+  // },
+  // "recce_move_pacenote_backward": {
+  //   "cat": "gameplay",
+  //   "ctx": "tlua",
+  //   "order": 1003,
+  //   "title": "Rally: Move Pacenote Backward in Recce App",
+  //   "desc": "Move the next pacenote towards vehicle along snaproad and save notebook.",
+  //   "onDown": "extensions.gameplay_rally_inputActions.action_recce_move_pacenote_backward()"
+  // },
+
+  "recce_move_vehicle_forward": {
+    "cat": "gameplay",
+    "ctx": "tlua",
+    "order": 1004,
+    "title": "Rally: Move Vehicle Forward in Recce App",
+    "desc": "Move the next vehicle toward CornerStart along snaproad and save notebook.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionRecceMoveVehicleForward() end"
+  },
+  "recce_move_vehicle_backward": {
+    "cat": "gameplay",
+    "ctx": "tlua",
+    "order": 1005,
+    "title": "Rally: Move Vehicle Backward in Recce App",
+    "desc": "Move the next vehicle towards vehicle along snaproad and save notebook.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionRecceMoveVehicleBackward() end"
+  },
+
+  "rallyEditorSave": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1007,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Save",
+    "desc": "Save the current notebook.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.saveNotebook() end"
+  },
+  "rallyEditorPacenoteSelectNext": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1008,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Select Next Pacenote",
+    "desc": "Select the next pacenote.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.selectNextPacenote() end"
+  },
+  "rallyEditorPacenoteSelectPrev": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1009,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Select Previous Pacenote",
+    "desc": "Select the previous pacenote.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.selectPrevPacenote() end"
+  },
+  "rallyEditorDeselect": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1010,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Deselect",
+    "desc": "Deselect.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.deselect() end"
+  },
+  "rallyEditorInsertMode": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1011,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Edit Note Text",
+    "desc": "Shortcut to focus the cursor on editing the currently selected note text.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.insertMode() end"
+  },
+  "rallyEditorCameraPathPlay": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1012,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Play/Stop Camera Path",
+    "desc": "If a pacenote is selected, play/stop camera path playback.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.cameraPathPlay() end"
+  },
+  "rallyEditorToggleCornerCalls": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1013,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Show/Hide Corner Call Labels",
+    "desc": "If a pacenote is selected, show corner calls along the driveline.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.toggleCornerCalls() end"
+  },
+  "rallyEditorSelectNextWaypoint": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1014,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Select Next Waypoint",
+    "desc": "If a pacenote is selected, select the next waypoint.",
+    "onDown": "if editor_rallyEditor then editor_rallyEditor.selectNextWaypoint() end"
+  },
+  "rallyEditorMoveSelectedWaypointForward": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1015,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Move Waypoint Forward",
+    "desc": "If a waypoint is selected, move forward along snaproad.",
+    "onChange": "if editor_rallyEditor then editor_rallyEditor.moveSelectedWaypointForward(VALUE) end"
+  },
+  "rallyEditorMoveSelectedWaypointBackward": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1016,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Move Waypoint Backward",
+    "desc": "If a waypoint is selected, move backward along snaproad.",
+    "onChange": "if editor_rallyEditor then editor_rallyEditor.moveSelectedWaypointBackward(VALUE) end"
+  },
+  "rallyEditorZoom": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1018,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Zoom",
+    "desc": "Zoom in/out on the current notebook.",
+    "onChange": "if editor_rallyEditor then editor_rallyEditor.mouseWheelZoom(VALUE) end"
+  },
+  "rallyEditorDebugDrawOpacity": {
+    "cat": "editor",
+    "ctx": "tlua",
+    "order": 1018,
+    "actionMap": "rallyEditor",
+    "title": "RallyEditor: Change DebugDraw Opacity",
+    "desc": "Change the opacity of the debug draw.",
+    "onChange": "if editor_rallyEditor then editor_rallyEditor.changeDebugDrawOpacity(VALUE) end"
+  },
+
+  "recceToggleMouseLikeVehicle": {
+    "cat": "debug",
+    "ctx": "tlua",
+    "order": 1100,
+    "actionMap": "First",
+    "title": "[debug] Rally: RecceApp Toggle Mouse Like Vehicle",
+    "desc": "Toggle the mouse like vehicle mode in the recce app.",
+    "onDown": "if gameplay_rally then gameplay_rally.actionToggleMouseLikeVehicle() end"
+  }
+}

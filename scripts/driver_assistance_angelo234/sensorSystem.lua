@@ -51,7 +51,7 @@ local function getNearbyVehicles(dt, my_veh_props, max_dist, in_front)
     if other_veh:getJBeamFilename() ~= "unicycle" then
       local other_veh_props = extra_utils.getVehicleProperties(other_veh)
 
-      if other_veh_props.id ~= my_veh_props.id then
+      if other_veh_props.id ~= my_veh_props.id and not extra_utils.isVehicleGhost(other_veh, other_veh_props) then
         --Get aproximate distance first between vehicles and return if less than max dist
         local other_bb = other_veh_props.bb
 
@@ -351,10 +351,10 @@ local function pollFrontSensors(dt, veh_props, system_params, aeb_params)
       local veh = data.other_veh
       local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
       local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
-      logger.log('I', 'sensor_system', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
+      logger.log('I', 'front_sensor', string.format('Front sensor detected %s %s at %.1f', veh_type, id, data.shortest_dist))
     end
   elseif front_static_min_dist < 9999 then
-    logger.log('I', 'sensor_system', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
+    logger.log('I', 'front_sensor', string.format('Front sensor detected obstacle at %.1f', front_static_min_dist))
   end
 
   --p:finish(true)
@@ -416,6 +416,17 @@ local function pollRearSensors(dt, veh_props, system_params, rev_aeb_params)
   local other_vehs_data = getNearbyVehicles(dt, veh_props, rev_aeb_params.sensor_max_distance, false)
 
   local data = processRearSensorData(rear_static_min_dist, other_vehs_data, rev_aeb_params)
+
+  if other_vehs_data and #other_vehs_data > 0 then
+    for _, d in pairs(other_vehs_data) do
+      local veh = d.other_veh
+      local id = veh.getJBeamFilename and veh:getJBeamFilename() or tostring(veh:getID())
+      local veh_type = isPlayerVehicle(veh) and 'player vehicle' or 'traffic vehicle'
+      logger.log('I', 'rear_sensor', string.format('Rear sensor detected %s %s at %.1f', veh_type, id, d.shortest_dist))
+    end
+  elseif rear_static_min_dist < 9999 then
+    logger.log('I', 'rear_sensor', string.format('Rear sensor detected obstacle at %.1f', rear_static_min_dist))
+  end
 
   return data
 end

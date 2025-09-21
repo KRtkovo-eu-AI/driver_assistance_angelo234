@@ -1,0 +1,218 @@
+{
+  //   "translate_decal_x_left": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorTransform",
+  //     "onDown": "ui_liveryEditor_tools_transform.translate(-1, 0)",
+  //     "title": "Move Layer Left",
+  //     "desc": "Moves selected layer(s) to the left"
+  //   },
+  //   "translate_decal_x_right": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorTransform",
+  //     "onDown": "ui_liveryEditor_tools_transform.translate(1, 0)",
+  //     "title": "Move Layer Right",
+  //     "desc": "Moves selected layer(s) to the right"
+  //   },
+  //   "translate_decal_y_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorTransform",
+  //     "onDown": "ui_liveryEditor_tools_transform.translate(0, 1)",
+  //     "title": "Move Layer Up",
+  //     "desc": "Moves selected layer(s) up"
+  //   },
+  //   "translate_decal_y_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorTransform",
+  //     "onDown": "ui_liveryEditor_tools_transform.translate(0, -1)",
+  //     "title": "Move Layer Down",
+  //     "desc": "Moves selected layer(s) down"
+  //   },
+  //   "rotate_decal_left": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorRotate",
+  //     "onDown": "ui_liveryEditor_tools_transform.rotate(1, false)",
+  //     "title": "Rotate Layer Left",
+  //     "desc": "Rotates selected layer(s) left"
+  //   },
+  //   "rotate_decal_right": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorRotate",
+  //     "onDown": "ui_liveryEditor_tools_transform.rotate(1, true)",
+  //     "title": "Rotate Layer Right",
+  //     "desc": "Rotates selected layer(s) right"
+  //   },
+  //   "scale_decal_x_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(-1, 0)",
+  //     "title": "Decrease Layer Width",
+  //     "desc": "Decreases the width of the selected layer(s)"
+  //   },
+  //   "scale_decal_x_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(1, 0)",
+  //     "title": "Increase Layer Width",
+  //     "desc": "Increases the width of the selected layer(s)"
+  //   },
+  //   "scale_decal_y_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(0, -1)",
+  //     "title": "Decrease Layer Height",
+  //     "desc": "Decreases the height of the selected layer(s)"
+  //   },
+  //   "scale_decal_y_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(0, 1)",
+  //     "title": "Increase Layer Height",
+  //     "desc": "Increases the height of the selected layer(s)"
+  //   },
+  //   "scale_decal_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(-1, -1)",
+  //     "title": "Decrease Layer Scale",
+  //     "desc": "Decreases both the width and height of the selected layer(s)"
+  //   },
+  //   "scale_decal_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorScale",
+  //     "onDown": "ui_liveryEditor_tools_transform.scale(1, 1)",
+  //     "title": "Increase Layer Scale",
+  //     "desc": "Increases both the width and height of the selected layer(s)"
+  //   },
+  //   "skew_decal_x_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorSkew",
+  //     "onDown": "ui_liveryEditor_tools_transform.skew(1, 0)",
+  //     "title": "Skew Layer Right",
+  //     "desc": "Skews layer to the right"
+  //   },
+  //   "skew_decal_x_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorSkew",
+  //     "onDown": "ui_liveryEditor_tools_transform.skew(-1, 0)",
+  //     "title": "Skew Layer Left",
+  //     "desc": "Skews layer to the left"
+  //   },
+  //   "skew_decal_y_up": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorSkew",
+  //     "onDown": "ui_liveryEditor_tools_transform.skew(0, 1)",
+  //     "title": "Skew Layer Up",
+  //     "desc": "Skews layer to the top"
+  //   },
+  //   "skew_decal_y_down": {
+  //     "cat": "editor",
+  //     "order": 1,
+  //     "ctx": "tlua",
+  //     "actionMap": "liveryEditorSkew",
+  //     "onDown": "ui_liveryEditor_tools_transform.skew(0, -1)",
+  //     "title": "Skew Layer Down",
+  //     "desc": "Skews layer to the bottom"
+  //   },
+  // "toggle_request_apply_decal": {
+  //   "cat": "gameplay",
+  //   "order": 1,
+  //   "ctx": "tlua",
+  //   "actionMap": "liveryEditorTransformStamp",
+  //   "onDown": "ui_liveryEditor_editMode.toggleRequestApply()",
+  //   "title": "Request Apply Decal",
+  //   "desc": "Show decal and wait for apply action"
+  // },
+  "activate_previous_layer": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorEditMode",
+    "onDown": "ui_liveryEditor_editMode.setActiveLayerDirection(-1)",
+    "title": "Activate Previous Layer",
+    "desc": "Sets previous layer as target for the livery editor edit mode tools"
+  },
+  "activate_next_layer": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorEditMode",
+    "onDown": "ui_liveryEditor_editMode.setActiveLayerDirection(1)",
+    "title": "Activate Previous Layer",
+    "desc": "Sets previous layer as target for the livery editor edit mode tools"
+  },
+  "duplicate_active_layer": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorEditMode",
+    "onDown": "ui_liveryEditor_editMode.duplicateActiveLayer()",
+    "title": "Duplicate Active Layer Layer",
+    "desc": "Duplicates current active layer"
+  },
+  // "stamp_decal": {
+  //   "cat": "gameplay",
+  //   "order": 1,
+  //   "ctx": "tlua",
+  //   "actionMap": "liveryEditorTransformStamp",
+  //   "onDown": "ui_liveryEditor_editMode.apply()",
+  //   "title": "Stamp Decal",
+  //   "desc": "Position and apply decal using mouse"
+  // },
+  "rotate_left_decal": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorTransform",
+    "onChange": "ui_liveryEditor_layerEdit.holdRotate(-1, VALUE)",
+    "title": "Rotate Left",
+    "desc": "Rotates layer left"
+  },
+  "rotate_right_decal": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorTransform",
+    "onChange": "ui_liveryEditor_layerEdit.holdRotate(1, VALUE)",
+    "title": "Rotate Right",
+    "desc": "Rotates layer right"
+  },
+  "stamp_decal": {
+    "cat": "gameplay",
+    "order": 1,
+    "ctx": "tlua",
+    "actionMap": "liveryEditorTransformStamp",
+    "onDown": "ui_liveryEditor_layerEdit.stampDecal()",
+    "title": "Stamp Decal",
+    "desc": "Position and apply decal using mouse"
+  }
+}

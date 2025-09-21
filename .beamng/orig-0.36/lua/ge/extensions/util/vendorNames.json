@@ -1,0 +1,30 @@
+// incomplete list of vendor names
+{
+  "bngremotectrlv1" : "Phone App by BeamNG GmbH.",
+  "0000" : "Hitec",
+  "0079" : "CSL",
+  "044d" : "Thrustmaster", // an old vendor ID?
+  "044f" : "Thrustmaster",
+  "24c6" : "Thrustmaster",
+  "045e" : "Microsoft",
+  "046d" : "Logitech",
+  "054c" : "Sony",
+  "0583" : "Genius",
+  "0738" : "Saitek",
+  "0810" : "Personal Communication Systems",
+  "0e8f" : "Hama",
+  "0eb7" : "Fanatec",
+  "1dd2" : "Leo Bodnar",
+  "11ff" : "PXN", // this USB Vendor ID was used by SpeedLink in the past
+  "1038" : "SimRaceWay",
+  "1209" : "OpenFFBoard",
+  "16c0" : "SHH",
+  "16d0" : "Simucube",
+  "1cbe" : "Sim-Plicity",
+  "1fc9" : "SimXperience",
+  "30b7" : "Heusinkveld",
+  "a020" : "Heusinkveld", // weird... a second VID for a heusinkveld.
+  "346e" : "Moza",
+  "3416" : "CAMMUS",
+}
+

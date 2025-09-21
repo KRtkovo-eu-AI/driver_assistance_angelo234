@@ -1,6 +1,7 @@
 local M = {}
 
 require("lua/common/luaProfiler")
+local mapmgr = require("lua/vehicle/mapmgr")
 
 --For efficiency
 local max = math.max
@@ -14,9 +15,55 @@ local abs = math.abs
 local sqrt = math.sqrt
 local floor = math.floor
 local ceil = math.ceil
+local function clamp(value, low, high)
+  if value < low then return low end
+  if value > high then return high end
+  return value
+end
+
+local graph_data
+local graph_positions
+local graph_radius
+local graph_links
+
+local function refreshGraphData()
+  graph_data = mapmgr and mapmgr.mapData or graph_data
+  if graph_data and graph_data.graph then
+    graph_positions = graph_data.positions
+    graph_radius = graph_data.radius
+    graph_links = graph_data.graph
+  else
+    graph_positions = nil
+    graph_radius = nil
+    graph_links = nil
+  end
+end
 
 local map_nodes = map.getMap().nodes
 local findClosestRoad = map.findClosestRoad
+
+refreshGraphData()
+
+local function getRoadRules()
+  if mapmgr and mapmgr.rules then
+    return mapmgr.rules
+  end
+  if map and type(map.getRoadRules) == "function" then
+    local ok, rules = pcall(map.getRoadRules)
+    if ok and type(rules) == "table" then
+      return rules
+    end
+  end
+  return nil
+end
+
+local function getTrafficSide()
+  local rules = getRoadRules()
+  if rules and rules.rightHandDrive ~= nil then
+    return rules.rightHandDrive and "left" or "right"
+  end
+  return nil
+end
 
 local function getPart(partName)
   local vehData = core_vehicle_manager.getPlayerVehicleData()
@@ -25,6 +72,162 @@ local function getPart(partName)
 end
 
 local vehs_props_reusing = {}
+
+local function safeCallMethod(obj, name)
+  if not obj then return nil end
+  local fn = obj[name]
+  if type(fn) ~= "function" then return nil end
+  local ok, res = pcall(fn, obj)
+  if ok then return res end
+  return nil
+end
+
+local function safeCallFunction(fn, ...)
+  if type(fn) ~= "function" then return nil end
+  local ok, res = pcall(fn, ...)
+  if ok then return res end
+  return nil
+end
+
+local function hasGhostTrait(candidate)
+  if not candidate then return false end
+
+  local truthyChecks = {
+    "isGhost",
+    "getIsGhost",
+    "isTrafficGhost",
+    "isGhostModeEnabled"
+  }
+
+  for _, name in ipairs(truthyChecks) do
+    local res = safeCallMethod(candidate, name)
+    if res then return true end
+  end
+
+  local falseyChecks = {
+    "getActive",
+    "isActive",
+    "getActiveStatus"
+  }
+
+  for _, name in ipairs(falseyChecks) do
+    local res = safeCallMethod(candidate, name)
+    if res ~= nil then
+      if res == false then return true end
+      if type(res) == "string" then
+        local lowered = res:lower()
+        if lowered == "ghost" or lowered == "ghosted" or lowered == "ghosting"
+          or lowered == "inactive" then
+          return true
+        end
+      end
+    end
+  end
+
+  local shown = safeCallMethod(candidate, "isObjectShown")
+  if shown ~= nil and shown == false then return true end
+
+  local hidden = safeCallMethod(candidate, "isObjectHidden")
+  if hidden ~= nil and hidden == true then return true end
+
+  local visible = safeCallMethod(candidate, "getMeshVisibility")
+  if visible ~= nil and visible == false then return true end
+
+  return false
+end
+
+local function getVehicleDataSafe(id)
+  if not id or not core_vehicle_manager then return nil end
+  local data = safeCallFunction(core_vehicle_manager.getVehicleData, id)
+  if data ~= nil then return data end
+  if type(core_vehicle_manager.getVehicleData) == "function" then
+    local ok, res = pcall(core_vehicle_manager.getVehicleData, core_vehicle_manager, id)
+    if ok then return res end
+  end
+  return nil
+end
+
+local function vehicleDataMarksGhost(data)
+  if not data then return false end
+
+  if data.ghost or data.isGhost or data.ghostMode or data.ghosted then
+    return true
+  end
+
+  local booleanFields = {
+    "isSpawned",
+    "spawned",
+    "active",
+    "isActive",
+    "inGame",
+    "isInGame",
+    "visible",
+    "isVisible",
+    "render",
+    "rendered",
+    "renderVisible",
+    "renderedVisible"
+  }
+
+  for _, field in ipairs(booleanFields) do
+    local value = data[field]
+    if value ~= nil and value == false then
+      return true
+    end
+  end
+
+  local stringFields = {
+    "state",
+    "status",
+    "spawnState",
+    "spawn_state",
+    "spawnStatus",
+    "spawn_status",
+    "renderState",
+    "render_state",
+    "visibility",
+    "presence",
+    "mode"
+  }
+
+  for _, field in ipairs(stringFields) do
+    local value = data[field]
+    if type(value) == "string" then
+      local lowered = value:lower()
+      if lowered == "ghost" or lowered == "ghosted" or lowered == "ghosting"
+        or lowered == "despawned" or lowered == "hidden" or lowered == "inactive" then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+local function isVehicleGhost(veh, props)
+  if not veh then return true end
+
+  if hasGhostTrait(veh) or hasGhostTrait(veh.obj) then
+    return true
+  end
+
+  local id = veh.getID and veh:getID()
+  if id then
+    local data = getVehicleDataSafe(id)
+    if vehicleDataMarksGhost(data) then
+      return true
+    end
+  end
+
+  if props and props.bb then
+    local half_extents = props.bb:getHalfExtents()
+    if half_extents and half_extents.x == 0 and half_extents.y == 0 and half_extents.z == 0 then
+      return true
+    end
+  end
+
+  return false
+end
 
 local function getVehicleProperties(veh)
   if not vehs_props_reusing[veh:getID()] then
@@ -73,6 +276,7 @@ local function getVehicleProperties(veh)
 
   return props
 end
+
 
 local function getPathLen(path, startIdx, stopIdx)
   if not path then return end
@@ -179,17 +383,147 @@ local function getFuturePositionXYWithAcc(veh_props, time, acc_vec, rel_car_pos)
 end
 
 local function getWaypointPosition(wp)
-  if wp ~= nil then
-    return vec3(map_nodes[wp].pos)
-  else
-    return vec3(-1,-1,-1)
+  if not wp then return nil end
+  if not graph_positions then
+    refreshGraphData()
   end
+  if graph_positions and graph_positions[wp] then
+    return vec3(graph_positions[wp])
+  end
+  if map_nodes and map_nodes[wp] and map_nodes[wp].pos then
+    return vec3(map_nodes[wp].pos)
+  end
+  return nil
+end
+
+local function flipLaneString(lanes)
+  if type(lanes) ~= "string" then return lanes end
+  local buffer = {}
+  for i = #lanes, 1, -1 do
+    local ch = lanes:sub(i, i)
+    if ch == '+' then
+      buffer[#buffer + 1] = '-'
+    elseif ch == '-' then
+      buffer[#buffer + 1] = '+'
+    else
+      buffer[#buffer + 1] = ch
+    end
+  end
+  return table.concat(buffer)
+end
+
+local function countLaneDirections(lanes)
+  if type(lanes) ~= "string" then return 0, 0 end
+  local forward, reverse = 0, 0
+  for i = 1, #lanes do
+    local byte = lanes:byte(i)
+    if byte == 43 then -- "+"
+      forward = forward + 1
+    elseif byte == 45 then -- "-"
+      reverse = reverse + 1
+    end
+  end
+  return forward, reverse
+end
+
+local function extractLaneData(start_wp, end_wp)
+  if not start_wp or not end_wp then return nil end
+  if not graph_links then
+    refreshGraphData()
+  end
+
+  local edge = graph_links and graph_links[start_wp] and graph_links[start_wp][end_wp]
+  if not edge and map_nodes and map_nodes[start_wp] and map_nodes[start_wp].links then
+    edge = map_nodes[start_wp].links[end_wp]
+  end
+
+  if not edge then return nil end
+
+  local lanes = edge.lanes or edge.laneConfig or edge.lane_string or edge.laneString
+  if lanes and edge.inNode and edge.inNode ~= start_wp then
+    lanes = flipLaneString(lanes)
+  end
+
+  return {
+    lanes = lanes,
+    laneWidth = edge.laneWidth or edge.lane_width or edge.widthPerLane,
+    roadWidth = edge.roadWidth or edge.road_width or edge.width,
+    radius = edge.radius,
+    oneWay = edge.oneWay,
+    data = edge
+  }
+end
+
+local function computeLaneCountAndWidth(wps_info)
+  local data = extractLaneData(wps_info.start_wp, wps_info.end_wp)
+  if not data then return nil end
+
+  local lanes = data.lanes and data.lanes:gsub("%s+", "") or data.lanes
+  if lanes == "" then lanes = nil end
+
+  local forward, reverse = countLaneDirections(lanes)
+  if forward == 0 and reverse > 0 then
+    -- lane config might be oriented opposite of our travel direction
+    lanes = flipLaneString(lanes)
+    forward, reverse = reverse, forward
+  end
+
+  local total = forward + reverse
+  if forward <= 0 and total <= 0 then
+    return nil
+  end
+
+  local lane_count = forward > 0 and forward or total
+
+  local max_lane_width = 3.75
+  local lane_width = nil
+
+  local width_hint = data.laneWidth
+  if width_hint and width_hint > 0 then
+    if width_hint > max_lane_width * 1.5 and total > 0 then
+      lane_width = width_hint / total
+    else
+      lane_width = width_hint
+    end
+  end
+
+  if (not lane_width or lane_width <= 0) then
+    local road_width = data.roadWidth
+    if road_width and road_width > 0 then
+      local divisor = total > 0 and total or lane_count
+      if divisor > 0 then
+        lane_width = road_width / divisor
+      end
+    end
+  end
+
+  if (not lane_width or lane_width <= 0) then
+    local radius = data.radius or wps_info.wp_radius
+    if radius and radius > 0 then
+      local divisor = total > 0 and total or lane_count
+      if divisor > 0 then
+        lane_width = (radius * 2.0) / divisor
+      end
+    end
+  end
+
+  if lane_width and lane_width > 0 then
+    lane_width = clamp(lane_width, 1.8, max_lane_width)
+  end
+
+  return lane_width, lane_count
 end
 
 local function getLaneWidth(wps_info)
   local max_lane_width = 3.75
-  local lane_width = 0
-  local lanes = 0
+  local lane_width, lanes = computeLaneCountAndWidth(wps_info)
+
+  if lane_width and lanes and lanes > 0 then
+    return lane_width, lanes
+  end
+
+  lane_width = 0
+  lanes = 0
 
   if wps_info.one_way then
     if wps_info.wp_radius * 2 < max_lane_width then
@@ -247,14 +581,37 @@ local function getWaypointsProperties(veh_props, start_wp, end_wp, start_wp_pos,
   local wps_props = {}
 
   --Get lane width
-  local wp_radius = map_nodes[start_wp].radius
-  local my_start_links = map_nodes[start_wp].links
+  if not graph_positions and (not map_nodes or not map_nodes[start_wp]) then
+    refreshGraphData()
+  end
+
+  local wp_radius = 0
+  if graph_radius and graph_radius[start_wp] then
+    wp_radius = graph_radius[start_wp]
+  elseif map_nodes and map_nodes[start_wp] and map_nodes[start_wp].radius then
+    wp_radius = map_nodes[start_wp].radius
+  end
 
   local one_way = false
-
-  for wp, data in pairs(my_start_links) do
-    one_way = data.oneWay
-    break
+  if graph_links and graph_links[start_wp] then
+    local link = graph_links[start_wp][end_wp]
+    if link and link.oneWay ~= nil then
+      one_way = link.oneWay ~= 0
+    else
+      for _, data in pairs(graph_links[start_wp]) do
+        if data.oneWay ~= nil then
+          one_way = data.oneWay ~= 0
+          break
+        end
+      end
+    end
+  elseif map_nodes and map_nodes[start_wp] and map_nodes[start_wp].links then
+    for _, data in pairs(map_nodes[start_wp].links) do
+      if data.oneWay ~= nil then
+        one_way = data.oneWay
+        break
+      end
+    end
   end
 
   wps_props.start_wp = start_wp
@@ -349,7 +706,7 @@ local function getWaypointStartEndAdvanced(my_veh_props, veh_props, position, pa
 
   for _, curr_wps_props in pairs(wps_reusing) do
     --Get direction between our waypoints and one of its linked waypoints
-    local wp_dir = (curr_wps_props.end_wp_pos - curr_wps_props.start_wp_pos):normalized()
+  local wp_dir = (curr_wps_props.end_wp_pos - curr_wps_props.start_wp_pos):normalized()
 
     --Angle between waypoint dir and car dir
     local angle = acos(wp_dir:dot(veh_props.dir))
@@ -375,6 +732,39 @@ local function getWaypointStartEndAdvanced(my_veh_props, veh_props, position, pa
   end
 
   return min_wp_props_angle[2]
+end
+
+local function getWaypointSegmentFromNodes(my_veh_props, veh_props, start_wp, end_wp)
+  if not start_wp or not end_wp then return nil end
+
+  local start_wp_pos = getWaypointPosition(start_wp)
+  local end_wp_pos = getWaypointPosition(end_wp)
+
+  if not start_wp_pos or not end_wp_pos then
+    return nil
+  end
+
+  local lat_dist_from_wp = 0
+
+  if veh_props and veh_props.center_pos then
+    local start_xy = start_wp_pos:z0()
+    local end_xy = end_wp_pos:z0()
+    local veh_xy = veh_props.center_pos:z0()
+    local seg_vec = end_xy - start_xy
+    local seg_len_sq = seg_vec:squaredLength()
+
+    if seg_len_sq > 1e-9 then
+      local xnorm = clamp((veh_xy - start_xy):dot(seg_vec) / seg_len_sq, 0, 1)
+      local lane_point = start_xy + seg_vec * xnorm
+      local seg_dir = toNormXYVec(seg_vec)
+      if seg_dir:length() > 1e-6 then
+        local right = vec3(seg_dir.y, -seg_dir.x, 0)
+        lat_dist_from_wp = (veh_xy - lane_point):dot(right)
+      end
+    end
+  end
+
+  return getWaypointsProperties(veh_props or my_veh_props, start_wp, end_wp, start_wp_pos, end_wp_pos, lat_dist_from_wp)
 end
 
 --Check if other car is on the same road as me (not lane)
@@ -469,6 +859,7 @@ end
 local function onClientPostStartMission(levelpath)
   map_nodes = map.getMap().nodes
   findClosestRoad = map.findClosestRoad
+  refreshGraphData()
 end
 
 M.getPart = getPart
@@ -481,10 +872,60 @@ M.getWaypointPosition = getWaypointPosition
 M.getLaneWidth = getLaneWidth
 M.getWhichSideOfWaypointsCarIsOn = getWhichSideOfWaypointsCarIsOn
 M.getWaypointStartEnd = getWaypointStartEnd
+M.getWaypointsProperties = getWaypointsProperties
 M.getWaypointStartEndAdvanced = getWaypointStartEndAdvanced
+M.getWaypointSegmentFromNodes = getWaypointSegmentFromNodes
+local function getClosestRoadInfo(position)
+  if not position or not findClosestRoad then return nil end
+  local wp1, wp2, distance = findClosestRoad(position)
+  if not wp1 or not wp2 then return nil end
+  return wp1, wp2, distance
+end
+
+M.getGraphData = function()
+  if not graph_data or not graph_links then
+    refreshGraphData()
+  end
+  return graph_data
+end
+M.getGraphLinks = function(node)
+  if not graph_links then
+    refreshGraphData()
+  end
+  if graph_links and graph_links[node] then
+    return graph_links[node]
+  end
+  if map_nodes and map_nodes[node] then
+    return map_nodes[node].links
+  end
+  return nil
+end
+M.getGraphLinkData = function(node, neighbor)
+  if not node or not neighbor then return nil end
+  if graph_links and graph_links[node] then
+    return graph_links[node][neighbor]
+  end
+  if map_nodes and map_nodes[node] and map_nodes[node].links then
+    return map_nodes[node].links[neighbor]
+  end
+  return nil
+end
+M.getMapNode = function(id)
+  if not map_nodes then return nil end
+  return map_nodes[id]
+end
+M.getClosestRoadInfo = getClosestRoadInfo
+M.getClosestRoadDistance = function(position)
+  local _, _, distance = getClosestRoadInfo(position)
+  if distance == nil then return nil end
+  return math.abs(distance)
+end
 M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
 M.onClientPostStartMission = onClientPostStartMission
+M.isVehicleGhost = isVehicleGhost
+M.getRoadRules = getRoadRules
+M.getTrafficSide = getTrafficSide
 
 return M

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>{{reportTitle}}</title>
+    <style>
+      body { font-family: monospace; margin: 8px; padding: 0; }
+      .header-info { margin-bottom: 12px; }
+      .flame-outer { user-select: none; position: relative; width: 100%; overflow: hidden; border: 1px solid #ccc; height: 400px; }
+      #timeline { position: absolute; top: 0; left: 0; height: 20px; background: #f0f0f0; width: 100%; }
+      #timeline .timeline-mark { position: absolute; top: 0; width:1px; height: 20px; background: #888; }
+      #timeline .time-label { position: absolute; top: 3px; font-size: 10px; }
+      #visibleRangeLabel { position: absolute; top: 20px; left: 5px; font-size: 11px; background: rgba(255,255,255,0.8); padding: 2px 4px; border: 1px solid #ccc; }
+      #flameContainer { position: absolute; left: 0; top: 40px; width: 800px; height: 400px; }
+      .flame-bar {
+        position: absolute;
+        box-sizing: border-box;
+        height: 18px; line-height:16px;
+        font-size: 11px; color: #fff;
+        overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+        border: 1px solid #777;
+        cursor: pointer;
+      }
+      .flame-bar:hover { border-color: #444; box-shadow: 0 0 4px rgba(0,0,0,0.5); z-index: 99; }
+      .highlight {
+        background-color: #ffeb3b !important;
+        color: #000 !important;
+        transition: background-color 0.5s ease;
+      }
+      table { margin-top: 20px; border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ccc; padding: 4px; font-size: 12px; }
+      .tooltip {
+        position: absolute;
+        background: rgba(0,0,0,0.85);
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        z-index: 100;
+        pointer-events: none;
+        max-width: 300px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        display: none;
+      }
+      .tooltip-row {
+        display: flex;
+        margin-bottom: 3px;
+      }
+      .tooltip-label {
+        font-weight: bold;
+        margin-right: 8px;
+        min-width: 80px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header-info">
+      <h1>Vehicle Profiler</h1>
+      <p>Report generated on: 2025-02-27</p>
+      <p>Total profiler calls: <span id="totalEvents"></span></p>
+      <p>Total time range: <span id="totalTime"></span> s</p>
+      <p>Events per second: <span id="eventsPerSecond"></span></p>
+    </div>
+
+    <div id="flameOuter" class="flame-outer">
+      <div id="timeline"></div>
+      <div id="visibleRangeLabel">Visible Range: -</div>
+      <div id="flameContainer"></div>
+    </div>
+
+    <small>Usage: double-click a flame bar to jump to the row, drag to pan, wheel to zoom</small>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Start</th>
+          <th>Duration</th>
+          <th>Count</th>
+          <th>% of Parent</th>
+        </tr>
+      </thead>
+      <tbody id="profiler-table-body"></tbody>
+    </table>
+
+    <script>
+      var profilerData = {{{ profilerJSON }}};
+    </script>
+
+    <script>
+    (function() {
+      const baseWidth = 800;
+      const totalRange = profilerData.duration || 1;
+      const flameOuter = document.getElementById("flameOuter");
+      const flameContainer = document.getElementById("flameContainer");
+      const tableBody = document.getElementById("profiler-table-body");
+      const visibleRangeLabel = document.getElementById("visibleRangeLabel");
+
+      // Use a key derived from the page title for localStorage
+      const lsKeyBase = 'simpleProfiler_' + encodeURIComponent(document.title);
+      const lsKeyScale = lsKeyBase + '_scaleX';
+      const lsKeyOffset = lsKeyBase + '_offsetX';
+
+      // Default zoom and offset
+      let scaleX = 1.0;
+      let offsetX = 0;
+
+      // Attempt to restore saved zoom/position from localStorage
+      const savedScale = localStorage.getItem(lsKeyScale);
+      if (savedScale !== null) {
+        scaleX = parseFloat(savedScale);
+        if (isNaN(scaleX) || scaleX <= 0) {
+          scaleX = 1.0;
+        }
+      }
+      const savedOffset = localStorage.getItem(lsKeyOffset);
+      if (savedOffset !== null) {
+        offsetX = parseFloat(savedOffset);
+        if (isNaN(offsetX)) {
+          offsetX = 0;
+        }
+      }
+
+      let isPanning = false;
+      let lastMouseX = 0;
+
+      function createBar(node, depth, parentDur = 1, parentStart = 0) {
+        const startTime = node.startTime || 0;
+        const duration = node.duration || 0;
+        const callCount = node.callCount || 1;
+        node.name = node.name || 'unknown';
+        const pctOfParent = parentDur > 0 ? (duration / parentDur) * 100 : 0;
+
+        let barEl = document.createElement("div");
+        barEl.className = "flame-bar";
+        barEl.style.background = getColorFromName(node.name);
+        barEl.style.left = `${(startTime / totalRange) * baseWidth}px`;
+        barEl.style.width = `${Math.max((duration / totalRange) * baseWidth, 1)}px`;
+        barEl.style.top = `${depth * 20}px`;
+        barEl.textContent = node.name;
+        barEl.dataset.uniqueId = node.name.replace(/\s+/g, '_');
+        barEl.dataset.start = startTime;
+        barEl.dataset.dur = duration;
+        barEl.dataset.depth = depth;
+        barEl.dataset.count = callCount;
+        barEl.dataset.pct = pctOfParent.toFixed(2);
+        barEl.dataset.name = node.name;
+
+        barEl.addEventListener("dblclick", function() {
+          highlightRow(node.name);
+        });
+
+        // Add mouseover and mouseout events for tooltip
+        barEl.addEventListener("mouseover", showTooltip);
+        barEl.addEventListener("mouseout", hideTooltip);
+        barEl.addEventListener("mousemove", moveTooltip);
+
+        flameContainer.appendChild(barEl);
+
+        let rowEl = document.createElement("tr");
+        rowEl.id = `row_${node.name.replace(/\s+/g, '_')}`;
+        rowEl.innerHTML = `
+          <td>${"&nbsp;".repeat(depth * 2)}${node.name}</td>
+          <td>${startTime.toFixed(3)}</td>
+          <td>${duration.toFixed(3)}</td>
+          <td>${callCount}</td>
+          <td>${pctOfParent.toFixed(2)}%</td>
+        `;
+        tableBody.appendChild(rowEl);
+
+        let childNodes = [];
+        if (Array.isArray(node.children)) {
+          childNodes = node.children;
+        } else if (typeof node.children === "object" && node.children !== null) {
+          childNodes = Object.values(node.children);
+        }
+
+        childNodes.forEach(child => createBar(child, depth + 1, duration, startTime));
+      }
+
+      function highlightRow(uniqueId) {
+        document.querySelectorAll(".highlight").forEach(el => el.classList.remove("highlight"));
+        let row = document.getElementById(`row_${uniqueId.replace(/\s+/g, '_')}`);
+        if (row) {
+          row.classList.add("highlight");
+          row.scrollIntoView({ behavior: "smooth", block: "center" });
+          setTimeout(() => row.classList.remove("highlight"), 3000);
+        }
+      }
+
+      function getColorFromName(name) {
+        // Simple hash function to generate a number from a string
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+          hash = ((hash << 5) - hash) + name.charCodeAt(i);
+          hash = hash & hash; // Convert to 32bit integer
+        }
+
+        // Use the hash to generate HSL color with good saturation and lightness
+        // This ensures readable and visually distinct colors
+        const hue = Math.abs(hash % 360);
+        const saturation = 65 + Math.abs((hash >> 8) % 20); // 65-85%
+        const lightness = 45 + Math.abs((hash >> 16) % 15); // 45-60%
+
+        return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      }
+
+      function recalcPositions() {
+        // Save to localStorage so it persists
+        localStorage.setItem(lsKeyScale, scaleX);
+        localStorage.setItem(lsKeyOffset, offsetX);
+
+        // Re-set container width
+        const scaledWidth = baseWidth * scaleX;
+        flameContainer.style.width = `${scaledWidth}px`;
+        flameContainer.style.left = `${offsetX}px`;
+
+        // Update all flame bars
+        document.querySelectorAll(".flame-bar").forEach(bar => {
+          const start = parseFloat(bar.dataset.start);
+          const dur = parseFloat(bar.dataset.dur);
+          const depth = parseInt(bar.dataset.depth, 10);
+
+          let leftPx = (start / totalRange) * baseWidth * scaleX;
+          let widthPx = (dur / totalRange) * baseWidth * scaleX;
+          if (widthPx < 1) widthPx = 1;
+
+          bar.style.left = `${leftPx}px`;
+          bar.style.top = `${depth * 20}px`;
+          bar.style.width = `${widthPx}px`;
+        });
+
+        updateVisibleRange();
+      }
+
+      // Create tooltip element
+      const tooltip = document.createElement('div');
+      tooltip.className = 'tooltip';
+      document.body.appendChild(tooltip);
+
+      // Create a map to store global stats for each function name at each depth level
+      const globalStats = new Map();
+
+      // Calculate global stats for each function name at each depth level
+      function calculateGlobalStats() {
+        document.querySelectorAll(".flame-bar").forEach(bar => {
+          const name = bar.dataset.name;
+          const depth = parseInt(bar.dataset.depth, 10);
+          const duration = parseFloat(bar.dataset.dur);
+          const count = parseInt(bar.dataset.count, 10);
+
+          const key = `${name}_${depth}`;
+
+          if (!globalStats.has(key)) {
+            globalStats.set(key, { totalDuration: 0, totalCount: 0, instances: 0 });
+          }
+
+          const stats = globalStats.get(key);
+          stats.totalDuration += duration;
+          stats.totalCount += count;
+          stats.instances += 1;
+        });
+      }
+
+      function showTooltip(event) {
+        const bar = event.currentTarget;
+        const name = bar.dataset.name;
+        const depth = parseInt(bar.dataset.depth, 10);
+        const start = parseFloat(bar.dataset.start).toFixed(4);
+        const duration = parseFloat(bar.dataset.dur).toFixed(4);
+        const count = bar.dataset.count;
+        const pct = bar.dataset.pct;
+
+        // Get global stats for this function name at this depth level
+        const key = `${name}_${depth}`;
+        const stats = globalStats.get(key) || { totalDuration: 0, totalCount: 0, instances: 0 };
+
+        // Format tooltip content with all available data
+        tooltip.innerHTML = `
+          <div class="tooltip-row"><div class="tooltip-label">Name:</div> <div>${name}</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Start:</div> <div>${start}s</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Duration:</div> <div>${duration}s</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Call Count:</div> <div>${count}</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">% of Parent:</div> <div>${pct}%</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Depth:</div> <div>${depth}</div></div>
+          <div class="tooltip-row" style="margin-top: 8px; border-top: 1px solid #555; padding-top: 8px;">
+            <div class="tooltip-label" style="font-size: 13px; color: #ffeb3b;">Global Stats (Level ${depth}):</div>
+          </div>
+          <div class="tooltip-row"><div class="tooltip-label">Instances:</div> <div>${stats.instances}</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Total Calls:</div> <div>${stats.totalCount}</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Total Time:</div> <div>${stats.totalDuration.toFixed(4)}s</div></div>
+          <div class="tooltip-row"><div class="tooltip-label">Avg Time:</div> <div>${(stats.totalDuration / stats.instances).toFixed(4)}s</div></div>
+        `;
+
+        tooltip.style.display = 'block';
+        moveTooltip(event);
+      }
+
+      function hideTooltip() {
+        tooltip.style.display = 'none';
+      }
+
+      function moveTooltip(event) {
+        // Position tooltip near the cursor but not directly under it
+        const padding = 15;
+        tooltip.style.left = (event.pageX + padding) + 'px';
+
+        // Check if tooltip would go off the bottom of the screen
+        const tooltipHeight = tooltip.offsetHeight;
+        const viewportHeight = window.innerHeight;
+
+        if (event.pageY + tooltipHeight + padding > viewportHeight) {
+          // Position above cursor if it would go off bottom
+          tooltip.style.top = (event.pageY - tooltipHeight - padding) + 'px';
+        } else {
+          // Otherwise position below cursor
+          tooltip.style.top = (event.pageY + padding) + 'px';
+        }
+      }
+
+      function updateVisibleRange() {
+        const flameOuterWidth = flameOuter.clientWidth;
+        const scaledWidth = baseWidth * scaleX;
+
+        const leftVisX = -offsetX;
+        const rightVisX = leftVisX + flameOuterWidth;
+
+        const clampedLeft = Math.max(leftVisX, 0);
+        const clampedRight = Math.min(rightVisX, scaledWidth);
+
+        const fracStart = (clampedLeft / scaledWidth);
+        const fracEnd = (clampedRight / scaledWidth);
+
+        const timeStart = fracStart * totalRange;
+        const timeEnd = fracEnd * totalRange;
+        visibleRangeLabel.textContent =
+          `Visible Range: ${timeStart.toFixed(4)} - ${timeEnd.toFixed(4)} (Duration: ${(timeEnd-timeStart).toFixed(4)})`;
+      }
+
+      // Zoom on wheel with improved focus on mouse cursor
+      flameOuter.addEventListener("wheel", function(evt) {
+        evt.preventDefault();
+
+        // Use a stronger zoom factor for more responsive zooming
+        const zoomFactor = 1.75;
+
+        // Get mouse position relative to the chart container
+        const mouseX = evt.clientX - flameOuter.getBoundingClientRect().left;
+        const chartX = mouseX - offsetX;
+
+        // Store the old scale for ratio calculation
+        const oldScale = scaleX;
+
+        // Apply zoom based on wheel direction
+        if (evt.deltaY < 0) {
+          scaleX *= zoomFactor; // Zoom in
+        } else {
+          scaleX /= zoomFactor; // Zoom out
+          if (scaleX < 0.1) scaleX = 0.1; // Prevent extreme zoom out
+        }
+
+        // Calculate new chart position to keep mouse point fixed
+        const newChartX = chartX * (scaleX / oldScale);
+        offsetX = mouseX - newChartX;
+
+        recalcPositions();
+      }, { passive: false });
+
+      // Improved panning implementation
+      flameOuter.addEventListener("mousedown", function(evt) {
+        // Only start panning with left mouse button
+        if (evt.button !== 0) return;
+        isPanning = true;
+        lastMouseX = evt.clientX;
+        flameOuter.style.cursor = "grabbing";
+      });
+
+      flameOuter.addEventListener("mousemove", function(evt) {
+        if (!isPanning) return;
+
+        // Direct 1:1 pixel movement for accurate panning
+        const dx = evt.clientX - lastMouseX;
+        lastMouseX = evt.clientX;
+        offsetX += dx;
+
+        // Update position immediately for responsive feel
+        flameContainer.style.left = `${offsetX}px`;
+
+        // Only update the visible range label during drag for performance
+        updateVisibleRange();
+      });
+
+      flameOuter.addEventListener("mouseup", function() {
+        if (isPanning) {
+          isPanning = false;
+          flameOuter.style.cursor = "default";
+          recalcPositions(); // Full recalculation after drag ends
+        }
+      });
+
+      flameOuter.addEventListener("mouseleave", function() {
+        if (isPanning) {
+          isPanning = false;
+          flameOuter.style.cursor = "default";
+          recalcPositions();
+        }
+      });
+
+      // Process only the children of the root node instead of the root itself
+      if (profilerData.children && profilerData.children.length > 0) {
+        // Process each child of the root node
+        profilerData.children.forEach((child, index) => {
+          createBar(child, 0, profilerData.duration, profilerData.startTime);
+        });
+      } else if (typeof profilerData.children === "object" && profilerData.children !== null) {
+        // Handle case where children is an object instead of array
+        Object.values(profilerData.children).forEach((child, index) => {
+          createBar(child, 0, profilerData.duration, profilerData.startTime);
+        });
+      }
+
+      document.getElementById("totalEvents").textContent = profilerData.stats.eventCount;
+      document.getElementById("totalTime").textContent = profilerData.stats.duration.toFixed(4);
+      document.getElementById("eventsPerSecond").textContent = profilerData.stats.eventsPerSec.toFixed(2);
+
+      // Calculate global stats after all bars are created
+      calculateGlobalStats();
+      recalcPositions();
+    })();
+    </script>
+  </body>
+</html>

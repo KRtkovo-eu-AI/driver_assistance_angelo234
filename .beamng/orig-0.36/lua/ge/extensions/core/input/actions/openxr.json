@@ -1,0 +1,4 @@
+{
+"enableHeadset"           :{"cat":"camera",  "order":  70, "ctx": "tlua", "onDown"  :"extensions.render_openxr.toggle()", "actionMap": "First", "title": "ui.inputActions.camera.enableHeadset.title" },
+"centerHeadset"           :{"cat":"camera",  "order":  71, "ctx": "tlua", "onChange":"extensions.render_openxr.center(VALUE)", "actionMap": "First", "title": "ui.inputActions.camera.centerHeadset.title" },
+}

@@ -5,6 +5,9 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: read
+      checks: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,78 +15,160 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y lua5.3 liblua5.3-dev luarocks nodejs
-          sudo luarocks install busted
+          sudo luarocks install laura
       - name: Lua syntax check
         id: lua
         continue-on-error: true
         run: |
-          files=$(find . -name '*.lua')
-          if [ -n "$files" ]; then
-            echo 'Lua files:'
-            printf '%s\n' $files
-            errors=0
-            for f in $files; do
-              if ! luac -p "$f"; then
-                errors=$((errors+1))
-              fi
-            done
-            count=$(printf '%s\n' "$files" | wc -l)
-          else
+          set -o pipefail
+
+          quote_attr() {
+            python3 -c $'import sys\nfrom xml.sax.saxutils import quoteattr\nprint(quoteattr(sys.argv[1]))' "$1"
+          }
+
+          escape_xml() {
+            python3 -c $'import sys\nfrom xml.sax.saxutils import escape\nsys.stdout.write(escape(sys.stdin.read()))'
+          }
+
+          mkdir -p reports
+          report="reports/lua.xml"
+          tmp_body=$(mktemp)
+
+          mapfile -d '' -t files < <(find . -path './.beamng' -prune -o -name '*.lua' -print0)
+
+          count=${#files[@]}
+          errors=0
+
+          if [ "$count" -eq 0 ]; then
             echo 'No Lua files'
-            count=0
-            errors=0
+          else
+            echo 'Lua files:'
+            printf '%s\n' "${files[@]}"
           fi
+
+          : > "$tmp_body"
+          for file in "${files[@]}"; do
+            rel="${file#./}"
+            quoted_name=$(quote_attr "$rel")
+            if output=$(luac -p "$file" 2>&1); then
+              printf '  <testcase classname="lua.syntax" name=%s></testcase>\n' "$quoted_name" >> "$tmp_body"
+            else
+              errors=$((errors+1))
+              printf 'Lua syntax error in %s\n' "$file"
+              failure_text=$(printf '%s' "$output" | escape_xml)
+              printf '  <testcase classname="lua.syntax" name=%s><failure message="Syntax error">%s</failure></testcase>\n' "$quoted_name" "$failure_text" >> "$tmp_body"
+            fi
+          done
+
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '<testsuite name="Lua syntax" tests="%s" failures="%s">\n' "$count" "$errors"
+            cat "$tmp_body"
+            echo '</testsuite>'
+          } > "$report"
+
+          rm -f "$tmp_body"
+
+          if [ "$count" -gt 0 ]; then
+            files_output=$(printf '%s\n' "${files[@]}")
+          else
+            files_output=""
+          fi
+
           printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
-          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files_output" >> "$GITHUB_OUTPUT"
+
           if [ "$errors" -ne 0 ]; then exit 1; fi
       - name: JS syntax check
         id: js
         continue-on-error: true
         run: |
-          files=$(find . -name '*.js')
-          if [ -n "$files" ]; then
-            echo 'JS files:'
-            printf '%s\n' $files
-            errors=0
-            for f in $files; do
-              if ! node --check "$f"; then
-                errors=$((errors+1))
-              fi
-            done
-            count=$(printf '%s\n' "$files" | wc -l)
-          else
+          set -o pipefail
+
+          quote_attr() {
+            python3 -c $'import sys\nfrom xml.sax.saxutils import quoteattr\nprint(quoteattr(sys.argv[1]))' "$1"
+          }
+
+          escape_xml() {
+            python3 -c $'import sys\nfrom xml.sax.saxutils import escape\nsys.stdout.write(escape(sys.stdin.read()))'
+          }
+
+          mkdir -p reports
+          report="reports/js.xml"
+          tmp_body=$(mktemp)
+
+          mapfile -d '' -t files < <(find . -path './.beamng' -prune -o -name '*.js' -print0)
+
+          count=${#files[@]}
+          errors=0
+
+          if [ "$count" -eq 0 ]; then
             echo 'No JavaScript files'
-            count=0
-            errors=0
+          else
+            echo 'JS files:'
+            printf '%s\n' "${files[@]}"
           fi
+
+          : > "$tmp_body"
+          for file in "${files[@]}"; do
+            rel="${file#./}"
+            quoted_name=$(quote_attr "$rel")
+            if output=$(node --check "$file" 2>&1); then
+              printf '  <testcase classname="js.syntax" name=%s></testcase>\n' "$quoted_name" >> "$tmp_body"
+            else
+              errors=$((errors+1))
+              printf 'JavaScript syntax error in %s\n' "$file"
+              failure_text=$(printf '%s' "$output" | escape_xml)
+              printf '  <testcase classname="js.syntax" name=%s><failure message="Syntax error">%s</failure></testcase>\n' "$quoted_name" "$failure_text" >> "$tmp_body"
+            fi
+          done
+
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '<testsuite name="JS syntax" tests="%s" failures="%s">\n' "$count" "$errors"
+            cat "$tmp_body"
+            echo '</testsuite>'
+          } > "$report"
+
+          rm -f "$tmp_body"
+
+          if [ "$count" -gt 0 ]; then
+            files_output=$(printf '%s\n' "${files[@]}")
+          else
+            files_output=""
+          fi
+
           printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
-          printf 'files<<EOF\n%s\nEOF\n' "$files" >> "$GITHUB_OUTPUT"
+          printf 'files<<EOF\n%s\nEOF\n' "$files_output" >> "$GITHUB_OUTPUT"
+
           if [ "$errors" -ne 0 ]; then exit 1; fi
-      - name: Busted tests
-        id: busted
+      - name: Laura tests
+        id: laura
         continue-on-error: true
         run: |
-          output=$(busted)
+          set -o pipefail
+
+          mkdir -p reports
+          lua .scripts/run_laura_tests.lua spec reports/laura.xml reports/laura_summary.json
           status=$?
-          echo "$output"
-          summary=$(echo "$output" | tail -n 1)
-          successes=$(echo "$summary" | awk '{print $1}')
-          failures=$(echo "$summary" | awk '{print $4}')
-          errors=$(echo "$summary" | awk '{print $7}')
-          pending=$(echo "$summary" | awk '{print $10}')
-          if ! [[ "$successes" =~ ^[0-9]+$ ]]; then successes=0; fi
-          if ! [[ "$failures" =~ ^[0-9]+$ ]]; then failures=0; fi
-          if ! [[ "$errors" =~ ^[0-9]+$ ]]; then errors=0; fi
-          if ! [[ "$pending" =~ ^[0-9]+$ ]]; then pending=0; fi
-          total=$((successes + failures + errors + pending))
-          printf 'total=%s\n' "$total" >> "$GITHUB_OUTPUT"
-          printf 'successes=%s\n' "$successes" >> "$GITHUB_OUTPUT"
-          printf 'failures=%s\n' "$failures" >> "$GITHUB_OUTPUT"
-          printf 'errors=%s\n' "$errors" >> "$GITHUB_OUTPUT"
-          printf 'pending=%s\n' "$pending" >> "$GITHUB_OUTPUT"
-          exit $status
+
+          if [ -f reports/laura_summary.json ]; then
+            python3 -c $'import json\nfrom pathlib import Path\npath = Path("reports/laura_summary.json")\ntry:\n    data = json.loads(path.read_text())\nexcept Exception:\n    data = {}\nfor key, default in (("tests", 0), ("passed", 0), ("failures", 0), ("errors", 0), ("skipped", 0), ("time", 0.0)):\n    value = data.get(key, default)\n    print(f"{key}={value}")' >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo 'tests=0'
+              echo 'passed=0'
+              echo 'failures=0'
+              echo 'errors=0'
+              echo 'skipped=0'
+              echo 'time=0'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
       - name: Report results
         id: report
         if: always()
@@ -96,25 +181,27 @@ jobs:
           JS_COUNT: ${{ steps.js.outputs.count }}
           JS_ERRORS: ${{ steps.js.outputs.errors }}
           JS_FILES: ${{ steps.js.outputs.files }}
-          BUSTED_OUTCOME: ${{ steps.busted.outcome }}
-          BUSTED_TOTAL: ${{ steps.busted.outputs.total }}
-          BUSTED_SUCCESS: ${{ steps.busted.outputs.successes }}
-          BUSTED_FAILURES: ${{ steps.busted.outputs.failures }}
-          BUSTED_ERRORS: ${{ steps.busted.outputs.errors }}
-          BUSTED_PENDING: ${{ steps.busted.outputs.pending }}
+          LAURA_OUTCOME: ${{ steps.laura.outcome }}
+          LAURA_TESTS: ${{ steps.laura.outputs.tests }}
+          LAURA_PASSED: ${{ steps.laura.outputs.passed }}
+          LAURA_FAILURES: ${{ steps.laura.outputs.failures }}
+          LAURA_ERRORS: ${{ steps.laura.outputs.errors }}
+          LAURA_SKIPPED: ${{ steps.laura.outputs.skipped }}
+          LAURA_STATUS: ${{ steps.laura.outputs.status }}
         run: |
           LUA_COUNT=${LUA_COUNT:-0}
           LUA_ERRORS=${LUA_ERRORS:-0}
           JS_COUNT=${JS_COUNT:-0}
           JS_ERRORS=${JS_ERRORS:-0}
-          BUSTED_TOTAL=${BUSTED_TOTAL:-0}
-          BUSTED_SUCCESS=${BUSTED_SUCCESS:-0}
-          BUSTED_FAILURES=${BUSTED_FAILURES:-0}
-          BUSTED_ERRORS=${BUSTED_ERRORS:-0}
-          BUSTED_PENDING=${BUSTED_PENDING:-0}
-          total_success=$((BUSTED_SUCCESS + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
-          total_fail=$((BUSTED_FAILURES + LUA_ERRORS + JS_ERRORS))
-          total_error=$((BUSTED_ERRORS))
+          LAURA_TESTS=${LAURA_TESTS:-0}
+          LAURA_PASSED=${LAURA_PASSED:-0}
+          LAURA_FAILURES=${LAURA_FAILURES:-0}
+          LAURA_ERRORS=${LAURA_ERRORS:-0}
+          LAURA_SKIPPED=${LAURA_SKIPPED:-0}
+          LAURA_STATUS=${LAURA_STATUS:-0}
+          total_success=$((LAURA_PASSED + LUA_COUNT - LUA_ERRORS + JS_COUNT - JS_ERRORS))
+          total_fail=$((LAURA_FAILURES + LUA_ERRORS + JS_ERRORS))
+          total_error=$((LAURA_ERRORS))
 
           summary_file=test-results.md
           badge_file=tests-badge.svg
@@ -155,16 +242,20 @@ jobs:
             fi
 
             echo
-            echo "### Busted"
-            if [ "$BUSTED_OUTCOME" = "success" ]; then
-              echo "✅ Tests passed"
+            echo "### Laura"
+            if [ "$LAURA_OUTCOME" = "success" ] && [ "$LAURA_STATUS" -eq 0 ] && [ $((LAURA_FAILURES + LAURA_ERRORS)) -eq 0 ]; then
+              echo "✅ $LAURA_PASSED passed, $LAURA_SKIPPED skipped out of $LAURA_TESTS"
             else
-              echo "❌ Tests failed"
+              echo "❌ Laura tests reported $LAURA_FAILURES failures and $LAURA_ERRORS errors out of $LAURA_TESTS"
+              if [ "$LAURA_STATUS" -ne 0 ]; then
+                echo "- Runner exit status: $LAURA_STATUS"
+              fi
             fi
-            echo "- Total: $BUSTED_TOTAL"
-            echo "- Successes: $BUSTED_SUCCESS"
-            echo "- Failures: $BUSTED_FAILURES"
-            echo "- Errors: $BUSTED_ERRORS"
+            echo "- Total: $LAURA_TESTS"
+            echo "- Passed: $LAURA_PASSED"
+            echo "- Failures: $LAURA_FAILURES"
+            echo "- Errors: $LAURA_ERRORS"
+            echo "- Skipped: $LAURA_SKIPPED"
 
             echo
             echo "### Overall"
@@ -183,6 +274,15 @@ jobs:
           printf 'total_fail=%s\n' "$total_fail" >> "$GITHUB_OUTPUT"
           printf 'total_error=%s\n' "$total_error" >> "$GITHUB_OUTPUT"
 
+      - name: Publish test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Test results
+          path: reports/*.xml
+          reporter: java-junit
+          fail-on-error: false
+
       - name: Upload report artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -191,6 +291,7 @@ jobs:
           path: |
             test-results.md
             tests-badge.svg
+            reports/*.xml
 
       - name: Annotate check name
         if: always()
@@ -222,7 +323,20 @@ jobs:
         env:
           TOT_FAIL: ${{ steps.report.outputs.total_fail }}
           TOT_ERROR: ${{ steps.report.outputs.total_error }}
+          LUA_OUTCOME: ${{ steps.lua.outcome }}
+          JS_OUTCOME: ${{ steps.js.outcome }}
+          LAURA_OUTCOME: ${{ steps.laura.outcome }}
+          LAURA_STATUS: ${{ steps.laura.outputs.status }}
         run: |
+          TOT_FAIL=${TOT_FAIL:-0}
+          TOT_ERROR=${TOT_ERROR:-0}
+          LAURA_STATUS=${LAURA_STATUS:-0}
+          if [ "$LUA_OUTCOME" != "success" ] || [ "$JS_OUTCOME" != "success" ] || [ "$LAURA_OUTCOME" != "success" ]; then
+            exit 1
+          fi
+          if [ "$LAURA_STATUS" -ne 0 ]; then
+            exit 1
+          fi
           if [ $((TOT_FAIL + TOT_ERROR)) -ne 0 ]; then
             exit 1
           fi
