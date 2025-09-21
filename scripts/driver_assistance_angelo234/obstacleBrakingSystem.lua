@@ -98,31 +98,153 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local best
   local side_best
   local lidar_best
-  local slope_threshold = groundThreshold + height_allowance
-  for _, p in ipairs(scan) do
-    local rel = p - origin
-    local forward = rel:dot(dir)
-    local lateral = math.abs(rel:dot(right))
-    local height = rel:dot(up)
 
-    -- check forward obstacles
-    if forward > 0 then
-      if height >= groundThreshold and height <= roofClearance then
-        if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
-          if height >= slope_threshold and lateral <= half_width then
-            latest_point_cloud[#latest_point_cloud + 1] = p
-            best = best and math.min(best, forward) or forward
-            lidar_best = lidar_best and math.min(lidar_best, forward) or forward
+  if use_lidar and #scan > 0 then
+    local bin_size = aeb_params.lidar_forward_bin_size or 1.0
+    local min_clearance = aeb_params.lidar_min_clearance or 0.35
+    local ground_variation_limit = aeb_params.lidar_ground_variation_limit or 0.25
+    local ground_fit_margin = aeb_params.lidar_ground_fit_margin or 0.15
+    local min_points_per_bin = aeb_params.lidar_min_points_per_bin or 1
+    local max_fit_slope = math.tan(math.rad(aeb_params.lidar_max_fit_slope_deg or 18))
+
+    local bins = {}
+    local bin_order = {}
+
+    for idx, p in ipairs(scan) do
+      local rel = p - origin
+      local forward = rel:dot(dir)
+      local lateral = math.abs(rel:dot(right))
+      local height = rel:dot(up)
+
+      if forward > 0 then
+        if height >= groundThreshold and height <= roofClearance then
+          if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
+            if lateral <= half_width then
+              local bin_idx = math.floor(forward / bin_size)
+              local bin = bins[bin_idx]
+              if not bin then
+                bin = {
+                  minHeight = height,
+                  maxHeight = height,
+                  minForward = forward,
+                  forwardSum = forward,
+                  count = 1,
+                  indices = {idx}
+                }
+                bins[bin_idx] = bin
+                bin_order[#bin_order + 1] = bin_idx
+              else
+                if height < bin.minHeight then bin.minHeight = height end
+                if height > bin.maxHeight then bin.maxHeight = height end
+                if forward < bin.minForward then bin.minForward = forward end
+                bin.forwardSum = bin.forwardSum + forward
+                bin.count = bin.count + 1
+                bin.indices[#bin.indices + 1] = idx
+              end
+            end
           end
+        end
+      end
+
+      if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
+        local clearance = lateral - half_width
+        if clearance >= 0 then
+          side_best = side_best and math.min(side_best, clearance) or clearance
         end
       end
     end
 
-    -- check potential side collisions near the vehicle
-    if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
-      local clearance = lateral - half_width
-      if clearance >= 0 then
-        side_best = side_best and math.min(side_best, clearance) or clearance
+    local ground_samples = {}
+    for _, bin_idx in ipairs(bin_order) do
+      local bin = bins[bin_idx]
+      if bin and bin.count >= min_points_per_bin then
+        local span = bin.maxHeight - bin.minHeight
+        if span <= ground_variation_limit then
+          local center_forward = bin.forwardSum / bin.count
+          ground_samples[#ground_samples + 1] = {forward = center_forward, height = bin.minHeight}
+        end
+      end
+    end
+
+    local slope
+    local intercept
+    if #ground_samples >= 2 then
+      local sum_f, sum_h, sum_fh, sum_ff = 0, 0, 0, 0
+      for _, sample in ipairs(ground_samples) do
+        sum_f = sum_f + sample.forward
+        sum_h = sum_h + sample.height
+        sum_fh = sum_fh + sample.forward * sample.height
+        sum_ff = sum_ff + sample.forward * sample.forward
+      end
+      local n = #ground_samples
+      local denom = n * sum_ff - sum_f * sum_f
+      if math.abs(denom) > 1e-6 then
+        slope = (n * sum_fh - sum_f * sum_h) / denom
+        intercept = (sum_h - slope * sum_f) / n
+      end
+    end
+
+    if not slope then
+      local veh_dir = veh_props.dir
+      local horiz = math.sqrt(veh_dir.x * veh_dir.x + veh_dir.y * veh_dir.y)
+      if horiz < 1e-3 then horiz = 1e-3 end
+      slope = veh_dir.z / horiz
+      intercept = groundThreshold
+    end
+
+    if not intercept then
+      if #ground_samples >= 1 then
+        local first = ground_samples[1]
+        intercept = first.height - slope * first.forward
+      else
+        intercept = groundThreshold
+      end
+    end
+
+    if slope > max_fit_slope then slope = max_fit_slope end
+    if slope < -max_fit_slope then slope = -max_fit_slope end
+
+    local added_points = {}
+    for _, bin_idx in ipairs(bin_order) do
+      local bin = bins[bin_idx]
+      if bin and bin.count >= min_points_per_bin then
+        local forward_mean = bin.forwardSum / bin.count
+        local ground_est = intercept + slope * forward_mean + ground_fit_margin
+        if ground_est > bin.minHeight then
+          ground_est = bin.minHeight
+        end
+        local clearance = bin.maxHeight - ground_est
+        if clearance >= min_clearance then
+          best = best and math.min(best, bin.minForward) or bin.minForward
+          lidar_best = lidar_best and math.min(lidar_best, bin.minForward) or bin.minForward
+          for _, point_idx in ipairs(bin.indices) do
+            if not added_points[point_idx] then
+              local point = scan[point_idx]
+              if point then
+                local rel = point - origin
+                local height = rel:dot(up)
+                if height >= ground_est + min_clearance * 0.5 then
+                  latest_point_cloud[#latest_point_cloud + 1] = point
+                  added_points[point_idx] = true
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  else
+    for _, p in ipairs(scan) do
+      local rel = p - origin
+      local forward = rel:dot(dir)
+      local lateral = math.abs(rel:dot(right))
+      local height = rel:dot(up)
+
+      if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
+        local clearance = lateral - half_width
+        if clearance >= 0 then
+          side_best = side_best and math.min(side_best, clearance) or clearance
+        end
       end
     end
   end
