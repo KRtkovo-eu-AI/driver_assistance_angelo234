@@ -1589,6 +1589,12 @@ local function getLaneCenteringData()
   return data
 end
 
+local function receiveLaneCenteringAiRoute(payload)
+  if lane_centering_system and lane_centering_system.updateAiRouteData then
+    lane_centering_system.updateAiRouteData(payload)
+  end
+end
+
 local function setVirtualLidarPcdExportEnabled(flag)
   local enabled = flag and true or false
   virtual_lidar_pcd.enabled = enabled
@@ -1716,6 +1722,7 @@ M.getVirtualLidarOverheadPointCloud = getVirtualLidarOverheadPointCloud
 M.getVehicleColor = getVehicleColor
 M.getVirtualLidarData = getVirtualLidarData
 M.getLaneCenteringData = getLaneCenteringData
+M.receiveLaneCenteringAiRoute = receiveLaneCenteringAiRoute
 M._resetVirtualLidarPointCloud = resetVirtualLidarPointCloud
 M._virtual_lidar_point_cloud = function() return virtual_lidar_point_cloud end
 M._virtual_lidar_overhead_point_cloud = function() return virtual_lidar_overhead_point_cloud end
