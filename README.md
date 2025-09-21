@@ -131,7 +131,7 @@ Autopilot piggybacks on BeamNG’s navigation AI: once the hardware slot is inst
      - Vehicle should be on an incline (~4° or more), in first gear or drive (or reverse if rear is uphill), press brakes until you see “Hill Start Assist Activated.”  
      - Release occurs when accelerator is pressed or after 3 seconds.  
 
-   - Automatic Headlight Dimming (if enabled later):
+   - Automatic Headlight Dimming:
      - Toggle via key binding. After enabling, when using high beams, system will auto-dim if other vehicles are detected.
 
    - Obstacle Collision Automatic Emergency Braking:
