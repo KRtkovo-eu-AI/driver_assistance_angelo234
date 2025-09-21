@@ -18,6 +18,7 @@ local M = {}
 -- table under that global so that dependent modules can safely call back into
 -- the extension without needing to guard against a missing reference.
 rawset(_G, 'scripts_driver__assistance__angelo234_extension', M)
+rawset(_G, 'laneCenteringPrevEnableElectrics', nil)
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 

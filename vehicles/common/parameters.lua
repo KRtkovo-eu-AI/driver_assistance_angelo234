@@ -103,7 +103,11 @@ M.lane_centering_params = {
     offroad_distance_min = 1.5,
     offroad_distance_release_min = 1.0,
     lane_data_grace = 1.0,
-    lane_data_hold_extend = 1.2,
+    lane_data_hold_extend = 2.8,
+    lane_data_hold_max = 7.0,
+    lane_hold_recovery_rate = 1.2,
+    lane_hold_extend_trigger = 20,
+    lane_hold_extend_distance = 55,
     offroad_distance_margin = 0.6,
     offroad_confirm_time = 0.35,
     offroad_release_time = 0.5,
@@ -116,6 +120,13 @@ M.lane_centering_params = {
     assist_weight_gain = 4.0,
     min_active_speed = 40 / 3.6, -- 40 km/h expressed in m/s
     lane_offset_smooth = 0.2,
+    signal_override_duration = 2.6,
+    signal_override_turn_threshold = 0.22,
+    signal_override_turn_penalty = 3.0,
+    signal_override_block_penalty = 7.5,
+    signal_override_bonus = 0.45,
+    signal_override_release_threshold = 0.1,
+    signal_suppression_cooldown = 0.35,
 }
 
 return M
