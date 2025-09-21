@@ -401,6 +401,94 @@ local function computeBranchOrientation(prev_node, node, next_node, veh_dir)
   return align, turn
 end
 
+local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
+  if not initial_wps or not veh_props then return nil end
+
+  local start_node = initial_wps.start_wp
+  local end_node = initial_wps.end_wp
+  if not end_node then return nil end
+
+  local neighbors = extra_utils.getGraphLinks(end_node)
+  if not neighbors then return nil end
+
+  local params_table = params or {}
+  local min_align = params_table.prefer_straight_min_align or 0
+  local gate_penalty = params_table.prefer_straight_gate_penalty or 0
+
+  if min_align > 1 then min_align = 1 end
+  if min_align < -1 then min_align = -1 end
+
+  local end_pos = extra_utils.getWaypointPosition(end_node)
+  if not end_pos then return nil end
+  end_pos = vec3(end_pos.x, end_pos.y, veh_props.center_pos.z)
+
+  local base_dir = nil
+  if start_node then
+    local start_pos = extra_utils.getWaypointPosition(start_node)
+    if start_pos then
+      start_pos = vec3(start_pos.x, start_pos.y, veh_props.center_pos.z)
+      base_dir = extra_utils.toNormXYVec(end_pos - start_pos)
+      if base_dir:length() < 1e-6 then
+        base_dir = nil
+      end
+    end
+  end
+  if not base_dir then
+    base_dir = extra_utils.toNormXYVec(veh_props.dir)
+    if base_dir:length() < 1e-6 then
+      base_dir = nil
+    end
+  end
+  if not base_dir then return nil end
+
+  local best_neighbor = nil
+  local best_align = nil
+  local best_score = -huge
+
+  for neighbor, link in pairs(neighbors) do
+    if neighbor ~= start_node then
+      local link_data = link or extra_utils.getGraphLinkData(end_node, neighbor)
+      if link_data then
+        if link_data.oneWay and link_data.inNode and link_data.inNode ~= end_node then
+          goto continue
+        end
+        if link_data.drivability and link_data.drivability <= 0 then
+          goto continue
+        end
+
+        local neighbor_pos = extra_utils.getWaypointPosition(neighbor)
+        if neighbor_pos then
+          neighbor_pos = vec3(neighbor_pos.x, neighbor_pos.y, veh_props.center_pos.z)
+          local delta = neighbor_pos - end_pos
+          if delta:squaredLength() > 1e-6 then
+            local direction = extra_utils.toNormXYVec(delta)
+            if direction:length() >= 1e-6 then
+              local align = direction:dot(base_dir)
+              local score = align
+              if link_data.gated and link_data.gated ~= 0 then
+                score = score - gate_penalty
+              end
+
+              if score > best_score then
+                best_score = score
+                best_neighbor = neighbor
+                best_align = align
+              end
+            end
+          end
+        end
+      end
+    end
+    ::continue::
+  end
+
+  if best_neighbor and best_align and best_align >= min_align then
+    return best_neighbor, best_align
+  end
+
+  return nil
+end
+
 local function gatherBranchSpecs(map_data, nodes, params, veh_props, branch_length)
   if not map_data or not map_data.getPathTWithState or not nodes then return {} end
 
@@ -500,7 +588,12 @@ local function buildSegmentPlan(veh_props, initial_wps, params, target_length)
   if use_prev then
     state = prev_path
   else
-    state = extra_utils.toNormXYVec(veh_props.dir)
+    local straight_neighbor = selectStraightThroughNeighbor(initial_wps, veh_props, params)
+    if straight_neighbor then
+      state = {state_node, straight_neighbor}
+    else
+      state = extra_utils.toNormXYVec(veh_props.dir)
+    end
   end
 
   local branch_extra = params.branch_lookahead or 60
