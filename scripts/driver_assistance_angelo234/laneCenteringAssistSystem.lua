@@ -656,13 +656,6 @@ local function getTurnSignalState()
   return left, right, left or right
 end
 
-local function suppressTurnSignals(veh)
-  if not veh then return end
-  veh:queueLuaCommand(
-    "electrics.set_left_signal(false);electrics.set_right_signal(false);electrics.stop_turn_signal();electrics.set_warn_signal(false)"
-  )
-end
-
 local function updateSignalOverride(dt, veh, params, enabled)
   dt = dt or 0
   if not enabled then
@@ -705,7 +698,10 @@ local function updateSignalOverride(dt, veh, params, enabled)
 
     local cooldown = params.signal_suppression_cooldown or 0.35
     if lane_state.signal_suppression_cooldown <= 0 then
-      suppressTurnSignals(veh)
+      -- Allow the player or external systems to control turn signals even when
+      -- Lane Centering Assist intervenes. We keep tracking the cooldown value to
+      -- preserve the existing timing behaviour expected by the rest of the
+      -- system, but we deliberately avoid forcing the electrics state here.
       lane_state.signal_suppression_cooldown = max(cooldown, 0)
     end
   else
