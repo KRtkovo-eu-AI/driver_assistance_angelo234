@@ -126,6 +126,8 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local tall_ratio_threshold = aeb_params.lidar_tall_ratio_threshold or 0.2
     local sustained_bins_required = math.max(1, aeb_params.lidar_sustained_bins or 2)
     local block_min_points = aeb_params.lidar_block_min_points or 2
+    local min_profile_clearance = aeb_params.lidar_profile_min_clearance
+      or math.max(height_allowance + 0.1, min_clearance * 0.9)
 
     local bins = {}
     local bin_list = {}
@@ -249,9 +251,15 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         prev_bin_idx = bin.idx
 
         local forward_mean = bin.forwardSum / bin.count
-        local ground_est = intercept + slope * forward_mean + ground_fit_margin
-        if ground_est > bin.minHeight then
-          ground_est = bin.minHeight
+        local predicted_ground = intercept + slope * forward_mean
+        local ground_est = predicted_ground + ground_fit_margin
+        if bin.minHeight - predicted_ground < ground_fit_margin * 1.5 then
+          if ground_est > bin.minHeight then
+            ground_est = bin.minHeight
+          end
+        end
+        if ground_est < groundThreshold then
+          ground_est = groundThreshold
         end
         local clearance = bin.maxHeight - ground_est
         local above_allow_count = 0
@@ -282,7 +290,9 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         local ratio = above_allow_count / bin.count
         local tall_ratio = tall_count / bin.count
         local qualifies_height = clearance >= min_clearance or tall_ratio >= tall_ratio_threshold
-        local qualifies_block = ratio >= occupancy_ratio_threshold and bin.count >= block_min_points
+        local qualifies_block = ratio >= occupancy_ratio_threshold
+          and clearance >= min_profile_clearance
+          and bin.count >= block_min_points
         local qualifies_bin = false
         local forward_hit
         local reason
