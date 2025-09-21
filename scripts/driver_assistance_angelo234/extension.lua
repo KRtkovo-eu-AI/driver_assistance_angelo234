@@ -61,6 +61,7 @@ local lane_centering_ai_uses_speed_control = false
 local autopilot_system_on = false
 local autopilot_ai_active = false
 local autopilot_current_target = nil
+local lane_centering_autopilot_block_notified = false
 
 local autopilotDisengage
 local refreshAutopilotState = function() end
@@ -531,7 +532,7 @@ local autopilot_enable_template = [[
       autopilotPrevEnableElectrics = prevEnableElectrics
     end
     if ai then
-      ai.setState({mode='traffic', manoeuvre=false})
+      ai.setState({mode='manual', manoeuvre=false})
       if ai.setParameters then
         ai.setParameters({enableElectrics = true})
       end
@@ -554,6 +555,7 @@ local autopilot_enable_template = [[
 
 local autopilot_retarget_template = [[
     if ai then
+      ai.setState({mode='manual', manoeuvre=false})
       ai.setSpeedMode('legal')
       ai.driveInLane('on')
       ai.setAvoidCars('off')
@@ -703,6 +705,14 @@ local function refreshLaneCenteringAiState(dt, veh)
 end
 
 local function setLaneCenteringAssistActive(active, reason)
+  if active and autopilot_system_on then
+    if reason == 'user_toggle' or not lane_centering_autopilot_block_notified then
+      ui_message("Lane Centering Assist unavailable: Autopilot active")
+      lane_centering_autopilot_block_notified = true
+    end
+    return
+  end
+
   if not hasLaneCenteringAssistPart() then
     if lane_centering_ai_active then
       applyLaneCenteringAiState(false, 'missing_part')
@@ -826,13 +836,11 @@ end
 local function autopilotEngage(target, announce)
   local veh = be:getPlayerVehicle(0)
   if not veh then return false end
-  if lane_centering_assist_on then
-    setLaneCenteringAssistActive(false, 'autopilot')
-  end
   queueAutopilotEnable(veh, target)
   autopilot_system_on = true
   autopilot_ai_active = true
   autopilot_current_target = target
+  lane_centering_autopilot_block_notified = false
   rawset(_G, 'autopilot_mode_active_angelo234', true)
   if announce then
     ui_message(announce)
@@ -850,6 +858,7 @@ autopilotDisengage = function(message)
   autopilot_system_on = false
   autopilot_ai_active = false
   autopilot_current_target = nil
+  lane_centering_autopilot_block_notified = false
   rawset(_G, 'autopilot_mode_active_angelo234', nil)
   if message then
     ui_message(message)
@@ -889,6 +898,11 @@ local function toggleAutopilotSystem()
 
   if not hasAutopilotSystem() then
     ui_message("Autopilot not installed")
+    return
+  end
+
+  if lane_centering_assist_on or lane_centering_ai_active then
+    ui_message("Autopilot unavailable: Lane Centering Assist active")
     return
   end
 
