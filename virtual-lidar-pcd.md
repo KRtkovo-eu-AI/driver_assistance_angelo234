@@ -1,6 +1,6 @@
 # Virtual LiDAR – PCD export & streaming
 
-This guide expands on the summary in the [README](../README.md) and walks through practical workflows for the exported point clouds.
+This guide expands on the summary in the [README](README.md) and walks through practical workflows for the exported point clouds.
 
 ## Performance warnings
 
@@ -28,6 +28,11 @@ The export adds an `intensity` channel that categorizes points for quick filteri
 - If no fresh frame is available, the server sends `PING\n` once per second as a heartbeat. Clients should ignore these lines.
 
 ## Client examples
+
+### C# console app: subscribes to the TCP stream, catches PCD data stream into memory and allows to save whole drive scan record into one file
+- project is stored under `_PCDclient` folder
+- precompiled binary available in the releases as `ADAS-plus-PCD-client.zip`
+- export the zip, run the exe file from the command line, it will ask you to specify the stream `IP:port` value, let you stop capturing the stream with `CTRL+c` after which you specify the filename to save the PCD data. File could be open for example by [CloudCompare](https://www.cloudcompare.org).
 
 ### Python: subscribe to the TCP stream with Open3D
 

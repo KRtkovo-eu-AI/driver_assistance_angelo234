@@ -84,7 +84,7 @@ If you do not override the path, the module writes `latest.pcd` into `settings/k
 
 The virtual LiDAR refreshes internally at 20 Hz, but exporting/streaming is throttled to at most one PCD frame every 0.25 s (≈4 Hz) to limit I/O overhead.
 
-You can find full workflows and ready-to-run client examples in [docs/virtual-lidar-pcd.md](docs/virtual-lidar-pcd.md).
+You can find full workflows and ready-to-run client examples in [virtual-lidar-pcd.md](virtual-lidar-pcd.md).
 
 ---
 
