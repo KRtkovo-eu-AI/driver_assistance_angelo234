@@ -333,45 +333,57 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
           end
         end
 
-        local ratio = above_allow_count / bin.count
-        local tall_ratio = tall_count / bin.count
+        local ratio = bin.count > 0 and (above_allow_count / bin.count) or 0
+        local tall_ratio = bin.count > 0 and (tall_count / bin.count) or 0
+        local is_far = forward_mean >= far_distance_threshold
         local ratio_threshold = occupancy_ratio_threshold
-        if forward_mean >= far_distance_threshold then
+        if is_far then
           ratio_threshold = math.min(ratio_threshold, far_block_ratio_threshold)
         end
-        local qualifies_height = clearance >= min_clearance or tall_ratio >= tall_ratio_threshold
-        local qualifies_block = ratio >= ratio_threshold
-          and clearance >= min_profile_clearance
-          and bin.count >= block_min_points
-        local qualifies_bin = false
-        local forward_hit
-        local reason
+        if ratio_threshold < 0.05 then ratio_threshold = 0.05 end
+        local block_points_needed = block_min_points
+        if is_far and block_points_needed > 1 then
+          block_points_needed = 1
+        end
+        local required_block_bins = sustained_bins_required
+        if is_far then
+          required_block_bins = 1
+        end
+        local required_tall_streak = tall_bin_sustain
+        if is_far then
+          required_tall_streak = 1
+        end
 
-        if nearest_tall_forward then
+        local qualifies_tall_now = tall_count > 0 and clearance >= min_clearance
+        local qualifies_profile_now = ratio >= ratio_threshold
+          and clearance >= min_profile_clearance
+          and bin.count >= block_points_needed
+
+        if qualifies_tall_now then
           tall_streak = tall_streak + 1
         else
           tall_streak = 0
         end
 
-        local qualifies_by_tall = nearest_tall_forward and tall_streak >= tall_bin_sustain
-
-        if qualifies_height then
-          consecutive_block_bins = sustained_bins_required
-        elseif qualifies_block then
+        if qualifies_profile_now then
           consecutive_block_bins = consecutive_block_bins + 1
         else
           consecutive_block_bins = 0
         end
 
-        if qualifies_height or qualifies_by_tall then
+        local qualifies_bin = false
+        local forward_hit
+        local reason
+
+        if qualifies_tall_now and (tall_streak >= required_tall_streak or is_far) then
           qualifies_bin = true
           forward_hit = nearest_tall_forward or nearest_allow_forward or bin.minForward
-          if qualifies_by_tall and not qualifies_height then
-            reason = 'tall-streak'
-          else
-            reason = 'height'
-          end
-        elseif qualifies_block and consecutive_block_bins >= sustained_bins_required then
+          reason = is_far and 'tall-far' or 'tall'
+        elseif tall_ratio >= tall_ratio_threshold and clearance >= min_clearance then
+          qualifies_bin = true
+          forward_hit = nearest_tall_forward or nearest_allow_forward or bin.minForward
+          reason = 'tall-ratio'
+        elseif qualifies_profile_now and (consecutive_block_bins >= required_block_bins or is_far) then
           qualifies_bin = true
           forward_hit = nearest_allow_forward or bin.minForward
           reason = 'profile'
@@ -388,7 +400,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
           best = best and math.min(best, forward_hit) or forward_hit
           lidar_best = lidar_best and math.min(lidar_best, forward_hit) or forward_hit
           local point_height_threshold = ground_est + height_allowance
-          if (qualifies_height or qualifies_by_tall) and tall_count > 0 then
+          if tall_count > 0 then
             local limit = ground_est + min_clearance * 0.5
             if point_height_threshold > limit then
               point_height_threshold = limit
