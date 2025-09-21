@@ -1105,7 +1105,8 @@ local function update(dt, veh, system_params, enabled)
     active = false,
     available = false,
     reason = nil,
-    driverOverride = false
+    driverOverride = false,
+    aiTrafficControlsSpeed = false
   }
 
   if not installed then
@@ -1170,6 +1171,7 @@ local function update(dt, veh, system_params, enabled)
   end
 
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
+  local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
   local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
 
   local override_value = driver_axis ~= nil and clamp(driver_axis, -1, 1) or driver_input
@@ -1252,7 +1254,9 @@ local function update(dt, veh, system_params, enabled)
 
   assist_info.driverOverride = status.driverOverride
   assist_info.aiTrafficActive = ai_mode_active
+  assist_info.aiTrafficControlsSpeed = ai_speed_control_active
   status.aiTrafficActive = ai_mode_active
+  status.aiTrafficControlsSpeed = ai_speed_control_active
 
   latest_data = {
     status = status,
