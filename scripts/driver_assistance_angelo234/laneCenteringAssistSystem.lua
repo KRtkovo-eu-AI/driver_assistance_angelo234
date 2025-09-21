@@ -31,7 +31,7 @@ local warning_played = false
 local steering_pid = nil
 local steering_smoother = nil
 local controller_signature = nil
-local override_timer = 0
+local activation_grace_timer = 0
 local activation_handler = nil
 local last_assist_delta = 0
 
@@ -1088,13 +1088,14 @@ local function buildAssistInfo(params, lane_model)
 end
 
 local function update(dt, veh, system_params, enabled)
-  override_timer = max(override_timer - (dt or 0), 0)
+  activation_grace_timer = max(activation_grace_timer - (dt or 0), 0)
 
   local params = (system_params and system_params.lane_centering_params) or {}
   local steer_limit = params.steer_limit or 0.15
   local disable_threshold = params.override_threshold or 0.2
   local assist_weight_gain = params.assist_weight_gain or 4.0
   local min_active_speed = params.min_active_speed or 1.0
+  local activation_grace_period = max(params.activation_override_grace or 1.0, 0)
 
   local prev_status = latest_data and latest_data.status or nil
   local previously_active = prev_status and prev_status.active
@@ -1182,8 +1183,6 @@ local function update(dt, veh, system_params, enabled)
     if not assist_low_speed_shutdown then
       status.reason = "user_disabled"
     end
-  elseif override_timer > 0 then
-    status.reason = "cooldown"
   elseif lane_model and forward_speed <= min_active_speed then
     status.reason = "low_speed"
   elseif not lane_model then
@@ -1192,15 +1191,20 @@ local function update(dt, veh, system_params, enabled)
 
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
   local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
-  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
+  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed
   local newly_active = assist_ready and not previously_active
 
+  if newly_active then
+    activation_grace_timer = activation_grace_period
+  end
+
+  local ignoring_driver_override = activation_grace_timer > 0
+
   local override_value = driver_axis ~= nil and clamp(driver_axis, -1, 1) or driver_input
-  if assist_ready and abs(override_value) > disable_threshold then
+  if assist_ready and not ignoring_driver_override and abs(override_value) > disable_threshold then
     status.driverOverride = true
     status.reason = "driver_override"
     assist_ready = false
-    override_timer = params.override_cooldown or 5
     warning_played = false
     lane_state.prev_path_nodes = nil
     resetControllers()
@@ -1247,6 +1251,7 @@ local function update(dt, veh, system_params, enabled)
     status.reason = nil
   else
     resetControllers()
+    activation_grace_timer = 0
   end
 
   if newly_active and activation_handler then
