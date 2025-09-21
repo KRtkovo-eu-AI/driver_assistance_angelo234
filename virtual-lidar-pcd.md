@@ -4,28 +4,28 @@ This guide expands on the summary in the [README](../README.md) and walks throug
 
 ## Performance warnings
 
-- Each frame export is throttled to one write every 0.25 s (≈4 Hz). The publisher stages data through a temporary file when possible for atomic overwrites, but on sandboxed builds it falls back to writing the target `latest.pcd` directly. Either approach still produces noticeable I/O activity, especially on SSDs with limited endurance. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L239】
-- When you need live data with the lowest possible latency (for example to feed another visualizer), rely on the TCP stream, which delivers frames without touching the disk and enables `tcp-nodelay` to actively reduce queuing. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L118】
+- Each frame export is throttled to one write every 0.25 s (≈4 Hz). The publisher stages data through a temporary file when possible for atomic overwrites, but on sandboxed builds it falls back to writing the target `latest.pcd` directly. Either approach still produces noticeable I/O activity, especially on SSDs with limited endurance.
+- When you need live data with the lowest possible latency (for example to feed another visualizer), rely on the TCP stream, which delivers frames without touching the disk and enables `tcp-nodelay` to actively reduce queuing.
 
 ## PCD header structure
 
 When exporting to disk the module uses the binary PCD format with the following header and payload layout:
 
-1. The `FIELDS x y z intensity`, `SIZE 4 4 4 4`, `TYPE F F F F`, and `COUNT 1 1 1 1` declarations announce four 32-bit floating-point values in the order `x`, `y`, `z`, `intensity`. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L205-L233】
-2. Point values are packed with `string.pack('<ffff', ...)`, meaning little-endian `float32` tuples. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L24-L55】
-3. The header also contains the sensor orientation and position (`VIEWPOINT`), derived from the vehicle transform and written as a quaternion. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L225-L236】
+1. The `FIELDS x y z intensity`, `SIZE 4 4 4 4`, `TYPE F F F F`, and `COUNT 1 1 1 1` declarations announce four 32-bit floating-point values in the order `x`, `y`, `z`, `intensity`.
+2. Point values are packed with `string.pack('<ffff', ...)`, meaning little-endian `float32` tuples.
+3. The header also contains the sensor orientation and position (`VIEWPOINT`), derived from the vehicle transform and written as a quaternion.
 4. Using the information above you can recreate a complete header outside the game if a client application requires it—see the examples below.
 
 ## Intensity channels
 
-The export adds an `intensity` channel that categorizes points for quick filtering: the main scan (1.0), samples classified as ground (0.2), and samples outlining the player vehicle (0.8). You can map these values to custom colors or masks in your tooling. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
+The export adds an `intensity` channel that categorizes points for quick filtering: the main scan (1.0), samples classified as ground (0.2), and samples outlining the player vehicle (0.8). You can map these values to custom colors or masks in your tooling.
 
 ## TCP frame format
 
-- The server listens on `127.0.0.1:23511` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency. 【F:scripts/driver_assistance_angelo234/extension.lua†L84-L125】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L44-L79】
-- Every frame starts with an ASCII line `PCD <length>\n`, where `<length>` is the byte size of the upcoming binary blob. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L90-L113】
-- The header is followed by raw binary data (`float32` ×4 per point) in the exact same layout as the file export. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L24-L55】【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L200-L239】
-- If no fresh frame is available, the server sends `PING\n` once per second as a heartbeat. Clients should ignore these lines. 【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L70-L88】
+- The server listens on `127.0.0.1:23511` until you override the host or port in the console. Each connected client receives data in non-blocking mode with `tcp-nodelay` to minimise latency.
+- Every frame starts with an ASCII line `PCD <length>\n`, where `<length>` is the byte size of the upcoming binary blob.
+- The header is followed by raw binary data (`float32` ×4 per point) in the exact same layout as the file export.
+- If no fresh frame is available, the server sends `PING\n` once per second as a heartbeat. Clients should ignore these lines.
 
 ## Client examples
 
@@ -127,4 +127,4 @@ Adjust the header if your downstream application needs the real sensor pose—th
 
 ### Working with the export file (tail)
 
-For lightweight processing without custom code you can monitor `latest.pcd` with a command such as `tail -F "C:\\Users\\ok\\AppData\\Local\\BeamNG.drive\\current\\settings\\krtektm_lidar\\latest.pcd"`. Every overwrite indicates a new frame; automation scripts can react to the change by loading the file (for example through `open3d.io.read_point_cloud`). Because of the I/O load described earlier, prefer the TCP stream whenever you need near-real-time data. 【F:scripts/driver_assistance_angelo234/lidarPcdPublisher.lua†L69-L144】【F:scripts/driver_assistance_angelo234/lidarPcdStreamServer.lua†L64-L118】
+For lightweight processing without custom code you can monitor `latest.pcd` with a command such as `tail -F "C:\\Users\\ok\\AppData\\Local\\BeamNG.drive\\current\\settings\\krtektm_lidar\\latest.pcd"`. Every overwrite indicates a new frame; automation scripts can react to the change by loading the file (for example through `open3d.io.read_point_cloud`). Because of the I/O load described earlier, prefer the TCP stream whenever you need near-real-time data.
