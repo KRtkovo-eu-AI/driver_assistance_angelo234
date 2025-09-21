@@ -5,6 +5,7 @@ local M = {}
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 local virtual_lidar = require('scripts/driver_assistance_angelo234/virtualLidar')
+local logger = require('scripts/driver_assistance_angelo234/logger')
 
 local OBSTACLE_LIDAR_MAX_RAYS = 150
 
@@ -96,6 +97,8 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   latest_point_cloud = {}
   local best
   local side_best
+  local lidar_best
+  local slope_threshold = groundThreshold + height_allowance
   for _, p in ipairs(scan) do
     local rel = p - origin
     local forward = rel:dot(dir)
@@ -103,17 +106,17 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local height = rel:dot(up)
 
     -- check forward obstacles
-      if forward > 0 then
-        if height >= groundThreshold and height <= roofClearance then
-          if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
-            local slope_height = height - height_allowance
-            if slope_height > 0 and lateral <= half_width then
-              latest_point_cloud[#latest_point_cloud + 1] = p
-              best = best and math.min(best, forward) or forward
-            end
+    if forward > 0 then
+      if height >= groundThreshold and height <= roofClearance then
+        if not (forward > overhead_dist and height >= roofClearance - overhead_margin) then
+          if height >= slope_threshold and lateral <= half_width then
+            latest_point_cloud[#latest_point_cloud + 1] = p
+            best = best and math.min(best, forward) or forward
+            lidar_best = lidar_best and math.min(lidar_best, forward) or forward
           end
         end
       end
+    end
 
     -- check potential side collisions near the vehicle
     if forward > 0 and forward <= 2 and height >= groundThreshold and height <= roofClearance then
@@ -145,6 +148,10 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     if sensor_best then
       best = best and math.min(best, sensor_best) or sensor_best
     end
+  end
+
+  if use_lidar and lidar_best then
+    logger.log('I', 'lidar', string.format('LiDAR detected obstacle at %.1f', lidar_best))
   end
 
   return best, side_best
