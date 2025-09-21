@@ -17,6 +17,9 @@ local clamp = function(value, low, high)
   return value
 end
 
+local computeAverageCurvature
+local computePathLength
+
 local latest_data = {
   status = {
     installed = false,
@@ -1019,7 +1022,7 @@ local function buildAiRoutePreview(veh_props, initial_wps, desired_offset, param
   return geometry
 end
 
-local function computeAverageCurvature(center_local, sample_limit)
+computeAverageCurvature = function(center_local, sample_limit)
   if not center_local or #center_local < 3 then return 0 end
 
   local max_samples = min(#center_local - 2, sample_limit or 10)
@@ -1058,7 +1061,7 @@ local function computeAverageCurvature(center_local, sample_limit)
   return sum / count
 end
 
-local function computePathLength(points)
+computePathLength = function(points)
   if not points or #points < 2 then return 0 end
   local length = 0
   for i = 2, #points do
