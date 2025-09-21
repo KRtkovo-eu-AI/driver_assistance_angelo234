@@ -33,11 +33,27 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
   dir.z = 0
+  if dir:length() < 1e-6 and veh_props.dir then
+    dir = vec3(veh_props.dir.x, veh_props.dir.y, 0)
+  end
+  if dir:length() < 1e-6 then
+    dir = vec3(1, 0, 0)
+  end
   dir = dir:normalized()
   -- use world up so pitch/roll of the vehicle doesn't tilt the scan
   local up = vec3(0, 0, 1)
-  local forwardOffset = 1.5
-  local origin = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z + 0.5)
+  local lidar_origin_height = aeb_params.lidar_origin_height or 0.5
+  local forwardOffset = aeb_params.lidar_forward_offset or 1.5
+  local front_retract = aeb_params.lidar_front_retract or 0.15
+  if front_retract < 0.05 then front_retract = 0.05 end
+  local origin_base
+  local front_pos = veh_props.front_pos
+  if front_pos and front_pos.x and front_pos.y and front_pos.z then
+    origin_base = front_pos - dir * front_retract
+  else
+    origin_base = vec3(pos.x + dir.x * forwardOffset, pos.y + dir.y * forwardOffset, pos.z)
+  end
+  local origin = vec3(origin_base.x, origin_base.y, origin_base.z + lidar_origin_height)
   -- ignore points below groundThreshold or above the vehicle roof to avoid
   -- triggering on walkways or bridges that are safe to pass under
   local groundThreshold = -0.3
@@ -112,7 +128,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local block_min_points = aeb_params.lidar_block_min_points or 2
 
     local bins = {}
-    local bin_order = {}
+    local bin_list = {}
 
     for idx, p in ipairs(scan) do
       local rel = p - origin
@@ -128,6 +144,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
               local bin = bins[bin_idx]
               if not bin then
                 bin = {
+                  idx = bin_idx,
                   minHeight = height,
                   maxHeight = height,
                   minForward = forward,
@@ -136,7 +153,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
                   indices = {idx}
                 }
                 bins[bin_idx] = bin
-                bin_order[#bin_order + 1] = bin_idx
+                bin_list[#bin_list + 1] = bin
               else
                 if height < bin.minHeight then bin.minHeight = height end
                 if height > bin.maxHeight then bin.maxHeight = height end
@@ -158,10 +175,16 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
       end
     end
 
+    table.sort(bin_list, function(a, b)
+      if a.minForward == b.minForward then
+        return a.idx < b.idx
+      end
+      return a.minForward < b.minForward
+    end)
+
     local ground_samples = {}
-    for _, bin_idx in ipairs(bin_order) do
-      local bin = bins[bin_idx]
-      if bin and bin.count >= min_points_per_bin then
+    for _, bin in ipairs(bin_list) do
+      if bin.count >= min_points_per_bin then
         local span = bin.maxHeight - bin.minHeight
         if span <= ground_variation_limit then
           local center_forward = bin.forwardSum / bin.count
@@ -214,9 +237,17 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local log_tall_ratio
     local log_reason
     local consecutive_block_bins = 0
-    for _, bin_idx in ipairs(bin_order) do
-      local bin = bins[bin_idx]
-      if bin and bin.count >= min_points_per_bin then
+    local tall_streak = 0
+    local tall_bin_sustain = math.max(1, aeb_params.lidar_tall_bin_sustain or 2)
+    local prev_bin_idx = nil
+    for _, bin in ipairs(bin_list) do
+      if bin.count >= min_points_per_bin then
+        if prev_bin_idx and bin.idx - prev_bin_idx > 1 then
+          consecutive_block_bins = 0
+          tall_streak = 0
+        end
+        prev_bin_idx = bin.idx
+
         local forward_mean = bin.forwardSum / bin.count
         local ground_est = intercept + slope * forward_mean + ground_fit_margin
         if ground_est > bin.minHeight then
@@ -225,6 +256,8 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         local clearance = bin.maxHeight - ground_est
         local above_allow_count = 0
         local tall_count = 0
+        local nearest_allow_forward
+        local nearest_tall_forward
         for _, point_idx in ipairs(bin.indices) do
           local point = scan[point_idx]
           if point then
@@ -232,8 +265,15 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
             local height = rel:dot(up)
             if height >= ground_est + height_allowance then
               above_allow_count = above_allow_count + 1
+              local forward_val = rel:dot(dir)
+              if not nearest_allow_forward or forward_val < nearest_allow_forward then
+                nearest_allow_forward = forward_val
+              end
               if height >= ground_est + min_clearance then
                 tall_count = tall_count + 1
+                if not nearest_tall_forward or forward_val < nearest_tall_forward then
+                  nearest_tall_forward = forward_val
+                end
               end
             end
           end
@@ -244,32 +284,55 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         local qualifies_height = clearance >= min_clearance or tall_ratio >= tall_ratio_threshold
         local qualifies_block = ratio >= occupancy_ratio_threshold and bin.count >= block_min_points
         local qualifies_bin = false
+        local forward_hit
+        local reason
+
+        if nearest_tall_forward then
+          tall_streak = tall_streak + 1
+        else
+          tall_streak = 0
+        end
+
+        local qualifies_by_tall = nearest_tall_forward and tall_streak >= tall_bin_sustain
 
         if qualifies_height then
           consecutive_block_bins = sustained_bins_required
-          qualifies_bin = true
         elseif qualifies_block then
           consecutive_block_bins = consecutive_block_bins + 1
-          if consecutive_block_bins >= sustained_bins_required then
-            qualifies_bin = true
-          end
         else
           consecutive_block_bins = 0
         end
 
-        if qualifies_bin then
-          local forward_hit = bin.minForward
+        if qualifies_height or qualifies_by_tall then
+          qualifies_bin = true
+          forward_hit = nearest_tall_forward or nearest_allow_forward or bin.minForward
+          if qualifies_by_tall and not qualifies_height then
+            reason = 'tall-streak'
+          else
+            reason = 'height'
+          end
+        elseif qualifies_block and consecutive_block_bins >= sustained_bins_required then
+          qualifies_bin = true
+          forward_hit = nearest_allow_forward or bin.minForward
+          reason = 'profile'
+        end
+
+        if qualifies_bin and forward_hit then
+          if forward_hit < 0 then forward_hit = 0 end
           if not lidar_best or forward_hit < lidar_best then
             log_clearance = clearance
             log_ratio = ratio
             log_tall_ratio = tall_ratio
-            log_reason = qualifies_height and "height" or "profile"
+            log_reason = reason or 'profile'
           end
           best = best and math.min(best, forward_hit) or forward_hit
           lidar_best = lidar_best and math.min(lidar_best, forward_hit) or forward_hit
           local point_height_threshold = ground_est + height_allowance
-          if qualifies_height and point_height_threshold > ground_est + min_clearance * 0.5 then
-            point_height_threshold = ground_est + min_clearance * 0.5
+          if (qualifies_height or qualifies_by_tall) and tall_count > 0 then
+            local limit = ground_est + min_clearance * 0.5
+            if point_height_threshold > limit then
+              point_height_threshold = limit
+            end
           end
           for _, point_idx in ipairs(bin.indices) do
             if not added_points[point_idx] then
