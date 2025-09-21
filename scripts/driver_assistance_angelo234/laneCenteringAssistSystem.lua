@@ -68,7 +68,16 @@ local lane_state = {
   lane_width = nil,
   prev_path_nodes = nil,
   traffic_side = nil,
-  travel_sign = nil
+  travel_sign = nil,
+  offroad = false,
+  last_road_distance = nil,
+  offroad_confirm_timer = 0,
+  offroad_release_timer = 0,
+  last_lane_model = nil,
+  lane_loss_timer = 0,
+  ai_conflict = false,
+  ai_conflict_confirm_timer = 0,
+  ai_conflict_release_timer = 0
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -653,6 +662,18 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
   local params_table = params or {}
   local min_align = params_table.prefer_straight_min_align or 0
   local gate_penalty = params_table.prefer_straight_gate_penalty or 0
+  local fallback_align = params_table.prefer_straight_fallback_align
+  if fallback_align == nil then
+    fallback_align = min_align
+    if fallback_align > 0 then
+      fallback_align = fallback_align * 0.5
+    end
+  end
+  fallback_align = clamp(fallback_align, -1, 1)
+  local score_margin = params_table.prefer_straight_score_margin or 0.15
+  if score_margin < 0 then score_margin = 0 end
+  local flow_bonus = params_table.prefer_straight_flow_bonus or 0.25
+  local lane_bonus_weight = params_table.prefer_straight_lane_bonus or 0.08
 
   if min_align > 1 then min_align = 1 end
   if min_align < -1 then min_align = -1 end
@@ -680,9 +701,24 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
   end
   if not base_dir then return nil end
 
+  local natural_neighbor, natural_flow = nil, nil
+  if extra_utils.getRoadNaturalContinuation then
+    natural_neighbor, natural_flow = extra_utils.getRoadNaturalContinuation(start_node, end_node)
+  end
+  local natural_align = nil
+  if natural_neighbor then
+    natural_align = select(1, computeBranchOrientation(start_node, end_node, natural_neighbor, veh_props.dir))
+    if not neighbors[natural_neighbor] then
+      natural_neighbor = nil
+      natural_align = nil
+      natural_flow = nil
+    end
+  end
+
   local best_neighbor = nil
   local best_align = nil
   local best_score = -huge
+  local second_score = nil
 
   for neighbor, link in pairs(neighbors) do
     if neighbor ~= start_node then
@@ -708,10 +744,32 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
                 score = score - gate_penalty
               end
 
+              local lane_config = link_data.lanes
+              if not lane_config and extra_utils.getEdgeLaneConfig then
+                lane_config = extra_utils.getEdgeLaneConfig(end_node, neighbor)
+              end
+              if lane_config and extra_utils.countLanesInDirection then
+                local forward_lanes = extra_utils.countLanesInDirection(lane_config, '+')
+                if forward_lanes and forward_lanes > 0 then
+                  score = score + lane_bonus_weight * forward_lanes
+                end
+              end
+              if natural_neighbor and neighbor == natural_neighbor then
+                score = score + flow_bonus
+                if natural_flow and natural_flow > 0 then
+                  score = score + flow_bonus * 0.25
+                end
+              end
+
               if score > best_score then
+                if best_neighbor ~= nil then
+                  second_score = best_score
+                end
                 best_score = score
                 best_neighbor = neighbor
                 best_align = align
+              elseif second_score == nil or score > second_score then
+                second_score = score
               end
             end
           end
@@ -721,11 +779,80 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
     ::continue::
   end
 
-  if best_neighbor and best_align and best_align >= min_align then
-    return best_neighbor, best_align
+  if best_neighbor and best_align then
+    if best_align >= min_align then
+      return best_neighbor, best_align
+    end
+
+    if best_align > 0 and best_align >= fallback_align then
+      if not second_score or best_score >= (second_score + score_margin) then
+        return best_neighbor, best_align
+      end
+    end
+  end
+
+  if natural_neighbor and natural_align then
+    if natural_align >= fallback_align then
+      return natural_neighbor, natural_align
+    end
   end
 
   return nil
+end
+
+local function detectAiRouteConflict(lane_model, veh_props, params)
+  if not lane_model or not veh_props then return false end
+
+  local path = lane_model.path
+  local route = lane_model.route or (path and path.routePreview)
+  if not path or not route then return false end
+
+  local path_nodes = path.nodes
+  local route_nodes = route.nodes
+  if not path_nodes or not route_nodes then return false end
+  if #path_nodes < 3 or #route_nodes < 3 then return false end
+
+  if route.seq and ai_route_state.seq and route.seq ~= ai_route_state.seq then
+    return false
+  end
+
+  local prev = path_nodes[1]
+  local current = path_nodes[2]
+  local lane_next = path_nodes[3]
+  if not prev or not current or not lane_next then return false end
+
+  if route_nodes[1] ~= prev or route_nodes[2] ~= current then
+    return false
+  end
+
+  local route_next = route_nodes[3]
+  if not route_next or route_next == lane_next then
+    return false
+  end
+
+  local _, lane_turn = computeBranchOrientation(prev, current, lane_next, veh_props.dir)
+  local _, route_turn = computeBranchOrientation(prev, current, route_next, veh_props.dir)
+
+  local straight_threshold = clamp(params.ai_route_conflict_straight_threshold or 0.12, 0, 1)
+  local turn_threshold = clamp(params.ai_route_conflict_turn_threshold or 0.28, straight_threshold, 1)
+
+  local lane_mag = abs(lane_turn or 0)
+  local route_mag = abs(route_turn or 0)
+  local diff = abs((route_turn or 0) - (lane_turn or 0))
+
+  if route_mag >= turn_threshold and lane_mag <= straight_threshold then
+    return true
+  end
+
+  if lane_mag >= turn_threshold and route_mag <= straight_threshold then
+    return true
+  end
+
+  if diff >= turn_threshold and (lane_mag >= turn_threshold or route_mag >= turn_threshold) then
+    return true
+  end
+
+  return false
 end
 
 local function gatherBranchSpecs(map_data, nodes, params, veh_props, branch_length)
@@ -898,6 +1025,10 @@ local function buildPathGeometryFromSegments(veh_props, segments_list, desired_o
   local segments_used = 0
   local last_dir = nil
   local last_wps = nil
+  local active_offsets = nil
+  local lane_left_bound = nil
+  local lane_right_bound = nil
+  local lane_slot_width = nil
 
   for i = 1, #segments_list do
     local wps = segments_list[i]
@@ -914,8 +1045,34 @@ local function buildPathGeometryFromSegments(veh_props, segments_list, desired_o
           lane_width_sum = lane_width_sum + wps.lane_width
           lane_width_count = lane_width_count + 1
         end
-        local offsets = buildLaneOffsets(wps.lane_width or lane_width_est, wps.num_of_lanes or 1)
+        local offsets = nil
+        if wps.forward_lane_offsets and #wps.forward_lane_offsets > 0 then
+          offsets = wps.forward_lane_offsets
+          if not active_offsets then
+            active_offsets = {}
+            for j = 1, #offsets do
+              active_offsets[j] = offsets[j]
+            end
+          end
+        else
+          offsets = buildLaneOffsets(wps.lane_width or lane_width_est, wps.num_of_lanes or 1)
+          if not active_offsets then
+            active_offsets = {}
+            for j = 1, #offsets do
+              active_offsets[j] = offsets[j]
+            end
+          end
+        end
         preferred_offset = selectOffset(offsets, preferred_offset)
+        if not lane_left_bound and wps.forward_lane_left then
+          lane_left_bound = wps.forward_lane_left
+        end
+        if not lane_right_bound and wps.forward_lane_right then
+          lane_right_bound = wps.forward_lane_right
+        end
+        if not lane_slot_width and wps.forward_lane_slot_width then
+          lane_slot_width = wps.forward_lane_slot_width
+        end
 
         local start_center = vec3(start_pos.x + seg_right.x * preferred_offset, start_pos.y + seg_right.y * preferred_offset, start_pos.z)
         local end_center = vec3(end_pos.x + seg_right.x * preferred_offset, end_pos.y + seg_right.y * preferred_offset, end_pos.z)
@@ -1008,7 +1165,10 @@ local function buildPathGeometryFromSegments(veh_props, segments_list, desired_o
     last_wps = last_wps,
     truncated = truncated,
     lane_width_sum = lane_width_sum,
-    lane_width_count = lane_width_count
+    lane_width_count = lane_width_count,
+    laneOffsets = active_offsets,
+    laneBounds = (lane_left_bound and lane_right_bound) and {left = lane_left_bound, right = lane_right_bound} or nil,
+    laneSlotWidth = lane_slot_width
   }
 end
 
@@ -1337,10 +1497,19 @@ local function computeLaneModel(veh_props, params)
     lane_state.traffic_side = traffic_side
   end
 
-  local offsets = buildLaneOffsets(lane_width, wps.num_of_lanes or 1)
-  if #offsets == 0 then
+  local offsets = nil
+  if wps.forward_lane_offsets and #wps.forward_lane_offsets > 0 then
+    offsets = wps.forward_lane_offsets
+  else
+    offsets = buildLaneOffsets(lane_width, wps.num_of_lanes or 1)
+  end
+  if not offsets or #offsets == 0 then
     lane_state.desired_offset = nil
     return nil
+  end
+  local lane_bounds = nil
+  if wps.forward_lane_left and wps.forward_lane_right then
+    lane_bounds = {left = wps.forward_lane_left, right = wps.forward_lane_right}
   end
 
   local start_xy = vec3(wps.start_wp_pos.x, wps.start_wp_pos.y, 0)
@@ -1402,6 +1571,28 @@ local function computeLaneModel(veh_props, params)
   lane_state.prev_wps = path.last_wps or wps
   lane_state.lane_width = path.lane_width or lane_width
 
+  local lane_offsets_active = nil
+  if path.laneOffsets and #path.laneOffsets > 0 then
+    lane_offsets_active = {}
+    for i = 1, #path.laneOffsets do
+      lane_offsets_active[i] = path.laneOffsets[i]
+    end
+  elseif offsets and #offsets > 0 then
+    lane_offsets_active = {}
+    for i = 1, #offsets do
+      lane_offsets_active[i] = offsets[i]
+    end
+  end
+
+  local lane_bounds_active = nil
+  if path.laneBounds and (path.laneBounds.left or path.laneBounds.right) then
+    lane_bounds_active = {left = path.laneBounds.left, right = path.laneBounds.right}
+  elseif lane_bounds then
+    lane_bounds_active = {left = lane_bounds.left, right = lane_bounds.right}
+  end
+
+  local lane_slot_width_active = path.laneSlotWidth or wps.forward_lane_slot_width
+
   local route_preview = buildAiRoutePreview(veh_props, wps, lane_state.desired_offset, params)
 
   local lane_dir_norm = path.dir
@@ -1462,7 +1653,9 @@ local function computeLaneModel(veh_props, params)
       normalized = normalized_error,
       legal = legal_offset,
       legalError = legal_error,
-      legalNormalized = legal_normalized
+      legalNormalized = legal_normalized,
+      range = lane_bounds_active,
+      offsets = lane_offsets_active
     },
     heading = {
       vehicle = {x = vehicle_dir.x, y = vehicle_dir.y},
@@ -1487,7 +1680,10 @@ local function computeLaneModel(veh_props, params)
       segmentStep = path.segment_step or 0,
       branches = path.branches or {},
       nodes = path.nodes,
-      routePreview = route_info
+      routePreview = route_info,
+      laneBounds = lane_bounds_active,
+      laneOffsets = lane_offsets_active,
+      laneSlotWidth = lane_slot_width_active
     },
     speed = veh_props.speed,
     xnorm = xnorm,
@@ -1505,10 +1701,11 @@ local function computeLaneModel(veh_props, params)
     lane_model.heading.future = {x = future_dir.x, y = future_dir.y}
   end
 
-  if offsets and #offsets > 0 then
+  local lanes_meta_offsets = lane_offsets_active or offsets
+  if lanes_meta_offsets and #lanes_meta_offsets > 0 then
     local lane_offsets = {}
-    for i = 1, #offsets do
-      lane_offsets[i] = offsets[i]
+    for i = 1, #lanes_meta_offsets do
+      lane_offsets[i] = lanes_meta_offsets[i]
     end
 
     local selected_offset = path.offset or desired_offset or current_offset or 0
@@ -1544,7 +1741,9 @@ local function computeLaneModel(veh_props, params)
       selectedIndex = selected_index,
       legalIndex = legal_index,
       trafficSide = traffic_side,
-      orientation = orientation_sign
+      orientation = orientation_sign,
+      bounds = lane_bounds_active,
+      slotWidth = lane_slot_width_active
     }
   end
 
@@ -1575,7 +1774,8 @@ local function buildAssistInfo(params, lane_model)
 end
 
 local function update(dt, veh, system_params, enabled)
-  activation_grace_timer = max(activation_grace_timer - (dt or 0), 0)
+  local dt_value = dt or 0
+  activation_grace_timer = max(activation_grace_timer - dt_value, 0)
   updateDoubleChime(dt)
 
   local params = (system_params and system_params.lane_centering_params) or {}
@@ -1599,7 +1799,15 @@ local function update(dt, veh, system_params, enabled)
     available = false,
     reason = nil,
     driverOverride = false,
-    aiTrafficControlsSpeed = false
+    aiTrafficControlsSpeed = false,
+    offRoad = false,
+    roadDistance = nil,
+    offRoadThreshold = nil,
+    onRoadThreshold = nil,
+    laneDataHold = false,
+    laneDataFresh = false,
+    laneDataGrace = 0,
+    aiRouteConflict = false
   }
 
   if not installed then
@@ -1607,6 +1815,15 @@ local function update(dt, veh, system_params, enabled)
     lane_state.desired_offset = nil
     lane_state.lane_width = nil
     lane_state.prev_path_nodes = nil
+    lane_state.offroad = false
+    lane_state.last_road_distance = nil
+    lane_state.offroad_confirm_timer = 0
+    lane_state.offroad_release_timer = 0
+    lane_state.last_lane_model = nil
+    lane_state.lane_loss_timer = 0
+    lane_state.ai_conflict = false
+    lane_state.ai_conflict_confirm_timer = 0
+    lane_state.ai_conflict_release_timer = 0
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -1620,33 +1837,313 @@ local function update(dt, veh, system_params, enabled)
   end
 
   if not veh then
+    lane_state.last_lane_model = nil
+    lane_state.lane_loss_timer = 0
+    lane_state.ai_conflict = false
+    lane_state.ai_conflict_confirm_timer = 0
+    lane_state.ai_conflict_release_timer = 0
     latest_data = {status = status}
     return
   end
 
   local veh_props = extra_utils.getVehicleProperties(veh)
   if not veh_props then
+    lane_state.last_lane_model = nil
+    lane_state.lane_loss_timer = 0
+    lane_state.ai_conflict = false
+    lane_state.ai_conflict_confirm_timer = 0
+    lane_state.ai_conflict_release_timer = 0
     latest_data = {status = status}
     return
   end
 
-  local lane_model = computeLaneModel(veh_props, params)
-  if not lane_model then
-    status.reason = "no_lane_data"
-    warning_played = false
-    resetControllers()
+  local lane_model_raw = computeLaneModel(veh_props, params)
+  local lane_data_grace = params.lane_data_grace or 0.9
+  if lane_data_grace < 0 then lane_data_grace = 0 end
+  local lane_loss_timer = lane_state.lane_loss_timer or 0
+  local lane_model = lane_model_raw
+  if lane_model_raw then
+    lane_state.last_lane_model = lane_model_raw
+    lane_loss_timer = 0
   else
-    status.available = true
+    lane_loss_timer = lane_loss_timer + dt_value
+    if lane_state.last_lane_model and lane_loss_timer <= lane_data_grace then
+      lane_model = lane_state.last_lane_model
+    else
+      lane_model = nil
+    end
+  end
+  lane_state.lane_loss_timer = lane_loss_timer
+  local lane_model_valid = lane_model_raw ~= nil
+  local lane_hold_active = (not lane_model_valid) and lane_model ~= nil
+  status.laneDataGrace = lane_data_grace
+
+  local lane_width_hint = params.default_lane_width or 3.75
+  if lane_state.lane_width and lane_state.lane_width > 0 then
+    lane_width_hint = lane_state.lane_width
+  end
+  if lane_model and lane_model.width and lane_model.width > 0 then
+    lane_width_hint = lane_model.width
+  end
+
+  local offroad_ratio = clamp(params.offroad_distance_ratio or 0.65, 0, 2)
+  local offroad_release_ratio = clamp(params.offroad_distance_release_ratio or 0.5, 0, offroad_ratio)
+  local offroad_min_distance = params.offroad_distance_min or 1.5
+  local offroad_release_min = params.offroad_distance_release_min or (offroad_min_distance * 0.5)
+  if offroad_release_min > offroad_min_distance then
+    offroad_release_min = offroad_min_distance * 0.8
+  end
+
+  local road_distance_sample = extra_utils.getClosestRoadDistance(veh_props.center_pos)
+  local road_distance = nil
+  local distance_valid = road_distance_sample ~= nil
+  if distance_valid then
+    road_distance = abs(road_distance_sample)
+    lane_state.last_road_distance = road_distance
+  else
+    road_distance = lane_state.last_road_distance
+  end
+
+  local offroad_disable_threshold = max(offroad_min_distance, lane_width_hint * offroad_ratio)
+  local offroad_enable_threshold = max(offroad_release_min, lane_width_hint * offroad_release_ratio)
+  if offroad_enable_threshold > offroad_disable_threshold then
+    offroad_enable_threshold = offroad_disable_threshold * 0.8
+  end
+  if offroad_enable_threshold < 0 then offroad_enable_threshold = 0 end
+
+  status.roadDistance = road_distance
+  status.offRoadThreshold = offroad_disable_threshold
+  status.onRoadThreshold = offroad_enable_threshold
+
+  local lane_data_hold_extend = params.lane_data_hold_extend or 0
+  if lane_data_hold_extend < 0 then lane_data_hold_extend = 0 end
+  local lane_data_hold_limit = lane_data_grace + lane_data_hold_extend
+  if not lane_model_valid and lane_state.last_lane_model then
+    if lane_loss_timer <= lane_data_hold_limit then
+      if not lane_model then
+        local can_hold = (not distance_valid) or (road_distance and road_distance < offroad_disable_threshold)
+        if can_hold then
+          lane_model = lane_state.last_lane_model
+        end
+      end
+    elseif lane_loss_timer > lane_data_hold_limit then
+      lane_state.last_lane_model = nil
+      if not lane_model_valid then
+        lane_model = nil
+      end
+    end
+  elseif lane_state.last_lane_model and lane_loss_timer > lane_data_hold_limit then
+    lane_state.last_lane_model = nil
+  end
+
+  lane_hold_active = (not lane_model_valid) and lane_model ~= nil
+  if lane_model then
+    lane_model.holdActive = lane_hold_active or nil
+    lane_model.fresh = lane_model_valid or nil
+  end
+  status.laneDataGrace = lane_data_hold_limit
+
+  local prev_offroad = lane_state.offroad and true or false
+  local offroad = prev_offroad
+  local confirm_timer = lane_state.offroad_confirm_timer or 0
+  local release_timer = lane_state.offroad_release_timer or 0
+  local confirm_time = max(params.offroad_confirm_time or 0.35, 0)
+  local release_time = max(params.offroad_release_time or 0.5, 0)
+  local offroad_distance_margin = params.offroad_distance_margin
+  if offroad_distance_margin == nil then
+    offroad_distance_margin = lane_width_hint * 0.15
+  end
+  if offroad_distance_margin < 0 then
+    offroad_distance_margin = 0
+  end
+
+  local lane_confidence = false
+  if lane_model then
+    local lane_width_check = lane_model.width or lane_width_hint
+    if lane_width_check and lane_width_check > 0 then
+      local lane_error_abs = abs(lane_model.offset and lane_model.offset.error or 0)
+      local lane_error_ratio = params.offroad_lane_error_ratio or 0.65
+      if lane_error_abs <= lane_width_check * lane_error_ratio then
+        lane_confidence = true
+      else
+        local bounds = lane_model.offset and lane_model.offset.range or nil
+        if not bounds and lane_model.path and lane_model.path.laneBounds then
+          bounds = lane_model.path.laneBounds
+        end
+        local current_offset_value = lane_model.offset and lane_model.offset.current or nil
+        if bounds and current_offset_value then
+          local margin_ratio = params.offroad_lane_range_margin or 0.45
+          if margin_ratio < 0 then margin_ratio = 0 end
+          local margin = lane_width_check * margin_ratio
+          local left_bound = bounds.left or -lane_width_check
+          local right_bound = bounds.right or lane_width_check
+          if current_offset_value >= (left_bound - margin) and current_offset_value <= (right_bound + margin) then
+            lane_confidence = true
+          end
+        end
+      end
+    end
+  end
+
+  local maintain_onroad = (lane_model and (lane_confidence or not distance_valid or (road_distance and road_distance < offroad_disable_threshold)))
+    or (lane_hold_active and (lane_confidence or not distance_valid or (road_distance and road_distance < offroad_disable_threshold)))
+
+  if maintain_onroad then
+    offroad = false
+    confirm_timer = 0
+    if prev_offroad then
+      release_timer = 0
+    end
+  elseif road_distance and road_distance >= offroad_disable_threshold then
+    if not prev_offroad then
+      local allow_confirm = false
+      if not lane_confidence then
+        if not lane_model_valid then
+          if lane_loss_timer > lane_data_grace or road_distance >= (offroad_disable_threshold + offroad_distance_margin * 2) then
+            allow_confirm = true
+          end
+        else
+          if road_distance >= (offroad_disable_threshold + offroad_distance_margin) then
+            allow_confirm = true
+          end
+        end
+      end
+
+      if allow_confirm then
+        confirm_timer = confirm_timer + dt_value
+        if confirm_timer >= confirm_time then
+          offroad = true
+          release_timer = 0
+        end
+      else
+        confirm_timer = max(confirm_timer - dt_value, 0)
+      end
+    else
+      release_timer = max(release_timer - dt_value, 0)
+    end
+  else
+    if prev_offroad then
+      if road_distance and road_distance <= offroad_enable_threshold then
+        release_timer = release_timer + dt_value
+        if release_timer >= release_time then
+          offroad = false
+          confirm_timer = 0
+        end
+      else
+        release_timer = max(release_timer - dt_value, 0)
+      end
+    else
+      confirm_timer = max(confirm_timer - dt_value, 0)
+    end
+  end
+
+  lane_state.offroad = offroad
+  lane_state.offroad_confirm_timer = confirm_timer
+  lane_state.offroad_release_timer = release_timer
+  status.offRoad = offroad
+  status.laneConfidence = lane_confidence or nil
+  status.laneDataHold = lane_hold_active
+  status.laneDataFresh = lane_model_valid
+
+  if offroad and not prev_offroad then
+    lane_state.prev_wps = nil
+    lane_state.desired_offset = nil
+    lane_state.prev_path_nodes = nil
+    lane_state.lane_width = nil
+    lane_state.last_lane_model = nil
+    lane_state.ai_conflict = false
+    lane_state.ai_conflict_confirm_timer = 0
+    lane_state.ai_conflict_release_timer = 0
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+    ai_route_state.pending = false
+    ai_route_state.pending_timer = 0
+    ai_route_state.timer = 0
+  elseif not offroad and prev_offroad then
+    lane_state.offroad_confirm_timer = 0
+    lane_state.offroad_release_timer = 0
+    lane_state.ai_conflict = false
+    lane_state.ai_conflict_confirm_timer = 0
+    lane_state.ai_conflict_release_timer = 0
+  end
+
+  if offroad then
+    lane_model = nil
+  end
+
+  local prev_ai_conflict = lane_state.ai_conflict and true or false
+  local ai_conflict_active = prev_ai_conflict
+  local ai_conflict_confirm_timer = lane_state.ai_conflict_confirm_timer or 0
+  local ai_conflict_release_timer = lane_state.ai_conflict_release_timer or 0
+  local ai_conflict_detected = false
+
+  local ai_conflict_confirm_time = max(params.ai_route_conflict_confirm_time or 0.4, 0)
+  local ai_conflict_release_time = max(params.ai_route_conflict_release_time or 0.6, 0)
+
+  if lane_model and not offroad then
+    ai_conflict_detected = detectAiRouteConflict(lane_model, veh_props, params)
+    if ai_conflict_detected then
+      ai_conflict_release_timer = 0
+      ai_conflict_confirm_timer = ai_conflict_confirm_timer + dt_value
+      if ai_conflict_confirm_timer >= ai_conflict_confirm_time then
+        ai_conflict_active = true
+      end
+    else
+      ai_conflict_confirm_timer = max(ai_conflict_confirm_timer - dt_value, 0)
+      if ai_conflict_active then
+        ai_conflict_release_timer = ai_conflict_release_timer + dt_value
+        if ai_conflict_release_timer >= ai_conflict_release_time then
+          ai_conflict_active = false
+          ai_conflict_release_timer = 0
+        end
+      else
+        ai_conflict_release_timer = max(ai_conflict_release_timer - dt_value, 0)
+      end
+    end
+  else
+    ai_conflict_detected = false
+    ai_conflict_active = false
+    ai_conflict_confirm_timer = 0
+    ai_conflict_release_timer = 0
+  end
+
+  if not ai_conflict_detected and not ai_conflict_active then
+    ai_conflict_confirm_timer = 0
+  end
+
+  lane_state.ai_conflict = ai_conflict_active
+  lane_state.ai_conflict_confirm_timer = ai_conflict_confirm_timer
+  lane_state.ai_conflict_release_timer = ai_conflict_release_timer
+  status.aiRouteConflict = ai_conflict_active
+  local ai_conflict_transition = ai_conflict_active and not prev_ai_conflict
+
+  local lane_ready = lane_model ~= nil
+  local lane_available = lane_model ~= nil and not ai_conflict_active
+  status.available = lane_available
+  if not lane_ready then
+    if offroad then
+      status.reason = "off_road"
+    else
+      status.reason = "no_lane_data"
+    end
+    warning_played = false
+  elseif ai_conflict_active then
+    status.reason = "ai_route_conflict"
+    warning_played = false
   end
 
   local assist_info = buildAssistInfo(params, lane_model)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
   local assist_low_speed_shutdown = false
+  local offroad_shutdown = false
 
   if previously_active and previously_enabled and enabled and forward_speed <= min_active_speed then
     assist_low_speed_shutdown = true
-    status.reason = "low_speed"
+    if not offroad then
+      status.reason = "low_speed"
+    end
     warning_played = false
     queueDoubleChime()
     if activation_handler then
@@ -1654,6 +2151,36 @@ local function update(dt, veh, system_params, enabled)
     end
     status.enabled = false
     user_enabled = false
+    resetControllers()
+  end
+
+  if offroad then
+    if user_enabled then
+      offroad_shutdown = true
+      status.reason = "off_road"
+      queueDoubleChime()
+      if activation_handler then
+        activation_handler(false, "off_road")
+      end
+    end
+    status.enabled = false
+    user_enabled = false
+    resetControllers()
+  elseif ai_conflict_active then
+    status.reason = "ai_route_conflict"
+    if ai_conflict_transition then
+      warning_played = false
+      queueDoubleChime()
+    end
+    if user_enabled then
+      if activation_handler then
+        activation_handler(false, "ai_route_conflict")
+      end
+    end
+    status.enabled = false
+    user_enabled = false
+    resetControllers()
+  elseif not lane_ready then
     resetControllers()
   end
 
@@ -1674,9 +2201,21 @@ local function update(dt, veh, system_params, enabled)
   end
 
   if not user_enabled then
-    if not assist_low_speed_shutdown then
+    if status.reason == "off_road" then
+      -- keep off-road reason
+    elseif status.reason == "ai_route_conflict" then
+      -- keep conflict reason
+    elseif not assist_low_speed_shutdown and not offroad_shutdown then
       status.reason = "user_disabled"
     end
+  elseif offroad then
+    status.reason = "off_road"
+    if not assist_low_speed_shutdown then
+      warning_played = false
+    end
+  elseif ai_conflict_active then
+    status.reason = "ai_route_conflict"
+    warning_played = false
   elseif lane_model and forward_speed <= min_active_speed then
     status.reason = "low_speed"
   elseif not lane_model then
@@ -1685,14 +2224,14 @@ local function update(dt, veh, system_params, enabled)
 
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
   local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
-  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed
+  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and not ai_conflict_active
   local newly_active = assist_ready and not previously_active
 
   if newly_active then
     activation_grace_timer = activation_grace_period
   end
 
-  if ai_mode_active and veh then
+  if ai_mode_active and veh and not offroad then
     local interval = params.ai_route_refresh_interval or AI_ROUTE_REQUEST_INTERVAL
     if ai_route_state.pending then
       ai_route_state.pending_timer = ai_route_state.pending_timer + (dt or 0)
@@ -1836,11 +2375,21 @@ local function playDeactivationChime()
   queueDoubleChime()
 end
 
+local function isVehicleOnRoad()
+  return lane_state.offroad ~= true
+end
+
+local function getRoadDistance()
+  return lane_state.last_road_distance
+end
+
 M.update = update
 M.getLaneData = getLaneData
 M.setActivationCallback = setActivationCallback
 M.playActivationChime = playActivationChime
 M.playDeactivationChime = playDeactivationChime
 M.updateAiRouteData = updateAiRouteData
+M.isVehicleOnRoad = isVehicleOnRoad
+M.getRoadDistance = getRoadDistance
 
 return M

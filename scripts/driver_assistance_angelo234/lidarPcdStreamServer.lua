@@ -119,15 +119,64 @@ local function acceptClients()
   end
 end
 
+local function createServerSocket(host, port)
+  if socket.bind then
+    local server, err = socket.bind(host, port)
+    if not server then
+      return nil, err
+    end
+    server:settimeout(0)
+    pcall(server.setoption, server, 'reuseaddr', true)
+    return server
+  end
+
+  if not socket.tcp then
+    return nil, 'LuaSocket missing bind() and tcp() helpers'
+  end
+
+  local server, err = socket.tcp()
+  if not server then
+    return nil, err
+  end
+
+  server:settimeout(0)
+  pcall(server.setoption, server, 'reuseaddr', true)
+
+  local ok, bindErr = server:bind(host, port)
+  if not ok then
+    local reason = bindErr or ok
+    server:close()
+    return nil, reason
+  end
+
+  local okListen, listenErr = server:listen(16)
+  if not okListen then
+    local reason = listenErr or okListen
+    server:close()
+    return nil, reason
+  end
+
+  server:settimeout(0)
+
+  return server
+end
+
 function M.start(host, port)
   host = host or state.host or '127.0.0.1'
-  local server, err = socket.bind(host, port)
+  port = port or state.port
+  if not port then
+    return false, 'port_not_specified'
+  end
+
+  -- Always stop any existing listener before attempting to bind to the port
+  M.stop()
+
+  local server, err = createServerSocket(host, port)
   if not server then
     logError(string.format('Failed to start LiDAR PCD stream on %s:%s (%s)', tostring(host), tostring(port), tostring(err)))
     return false, err
   end
-  server:settimeout(0)
-  M.stop()
+
   state.server = server
   state.host = host
   state.port = port

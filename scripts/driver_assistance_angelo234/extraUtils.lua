@@ -2,6 +2,7 @@ local M = {}
 
 require("lua/common/luaProfiler")
 local mapmgr = require("lua/vehicle/mapmgr")
+local string_buffer = require("string.buffer")
 
 --For efficiency
 local max = math.max
@@ -43,6 +44,161 @@ local map_nodes = map.getMap().nodes
 local findClosestRoad = map.findClosestRoad
 
 refreshGraphData()
+
+local lane_string_buffer = string_buffer.new()
+
+local function flipLaneString(lanes)
+  if not lanes or lanes == "" then return lanes end
+  lane_string_buffer:reset()
+  for i = #lanes, 1, -1 do
+    local ch = lanes:byte(i)
+    if ch == 43 then -- '+'
+      lane_string_buffer:put(45)
+    elseif ch == 45 then -- '-'
+      lane_string_buffer:put(43)
+    else
+      lane_string_buffer:put(ch)
+    end
+  end
+  return lane_string_buffer:get()
+end
+
+local function countLanesInDirection(lanes, dir)
+  if not lanes or lanes == "" then return 0 end
+  local target = dir == '-' and 45 or 43
+  local count = 0
+  for i = 1, #lanes do
+    if lanes:byte(i) == target then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function laneRangeIdx(laneConfig)
+  if not laneConfig or laneConfig == "" then return nil end
+  local total = #laneConfig
+  local left_idx, right_idx = nil, nil
+  for i = 1, total do
+    if laneConfig:byte(i) == 43 then
+      left_idx = i
+      break
+    end
+  end
+  if not left_idx then return nil end
+  for i = total, 1, -1 do
+    if laneConfig:byte(i) == 43 then
+      right_idx = i
+      break
+    end
+  end
+  if not right_idx then return nil end
+  return left_idx, right_idx, total
+end
+
+local function laneRange(laneConfig)
+  local left_idx, right_idx, total = laneRangeIdx(laneConfig)
+  if not left_idx or not right_idx then return nil end
+  return (left_idx - 1) / total, right_idx / total, right_idx - left_idx + 1, total
+end
+
+local function getLaneOffsetsFromConfig(laneConfig, halfWidth)
+  if not laneConfig or laneConfig == "" then return nil end
+  if not halfWidth or halfWidth <= 0 then return nil end
+  local total = #laneConfig
+  if total <= 0 then return nil end
+  local offsets = {}
+  for i = 1, total do
+    if laneConfig:byte(i) == 43 then
+      local normalized_center = (i - 0.5) / total
+      offsets[#offsets + 1] = (normalized_center - 0.5) * 2 * halfWidth
+    end
+  end
+  if #offsets == 0 then return nil end
+  return offsets
+end
+
+local function computeAverageLaneSpacing(offsets)
+  if not offsets or #offsets < 2 then return nil end
+  local sorted = {}
+  for i = 1, #offsets do
+    sorted[i] = offsets[i]
+  end
+  table.sort(sorted)
+  local sum = 0
+  local count = 0
+  for i = 2, #sorted do
+    sum = sum + (sorted[i] - sorted[i - 1])
+    count = count + 1
+  end
+  if count == 0 then return nil end
+  return sum / count
+end
+
+local function getLaneBoundsFromConfig(laneConfig, halfWidth)
+  if not laneConfig or not halfWidth or halfWidth <= 0 then return nil end
+  local left_norm, right_norm, lane_slots, total_slots = laneRange(laneConfig)
+  if not left_norm or not right_norm then return nil end
+  local scale = 2 * halfWidth
+  local left = (left_norm - 0.5) * scale
+  local right = (right_norm - 0.5) * scale
+  return left, right, lane_slots, total_slots
+end
+
+local function numOfLanesFromRadius(rad1, rad2)
+  local r1 = tonumber(rad1) or 0
+  local r2 = tonumber(rad2) or r1
+  local min_radius = min(r1, r2)
+  if min_radius <= 0 then
+    min_radius = max(r1, r2)
+  end
+  if min_radius <= 0 then
+    min_radius = 3.6
+  end
+  return max(1, math.floor(min_radius * 2 / 3.61 + 0.5))
+end
+
+local function getEdgeLaneConfig(fromNode, toNode)
+  if not fromNode or not toNode then return nil end
+  if not graph_data or not graph_data.graph then
+    refreshGraphData()
+  end
+  if not graph_data or not graph_data.graph then return nil end
+
+  local graph = graph_data.graph
+  if not graph[fromNode] then return nil end
+  local edge = graph[fromNode][toNode]
+  if not edge then return nil end
+
+  local lanes = edge.lanes
+  if not lanes or lanes == "" then
+    local rad_from, rad_to
+    if graph_data.getEdgeRadii then
+      rad_from, rad_to = graph_data:getEdgeRadii(fromNode, toNode)
+    end
+    rad_from = rad_from or (graph_radius and graph_radius[fromNode])
+    rad_to = rad_to or (graph_radius and graph_radius[toNode])
+    local count = numOfLanesFromRadius(rad_from, rad_to)
+    if edge.oneWay then
+      lanes = ('+'):rep(max(1, count))
+    else
+      local per_dir = max(1, math.floor(count * 0.5 + 0.5))
+      local rules = getRoadRules()
+      local rightHand = rules and rules.rightHandDrive
+      if rightHand then
+        lanes = ('+'):rep(per_dir)..('-'):rep(per_dir)
+      else
+        lanes = ('-'):rep(per_dir)..('+'):rep(per_dir)
+      end
+    end
+  end
+
+  if edge.inNode and edge.inNode ~= fromNode then
+    lanes = flipLaneString(lanes)
+  end
+
+  return lanes
+end
 
 local function getRoadRules()
   if mapmgr and mapmgr.rules then
@@ -397,35 +553,100 @@ local function getWaypointPosition(wp)
 end
 
 local function getLaneWidth(wps_info)
-  local max_lane_width = 3.75
+  local max_lane_width = 4.5
+  local min_lane_width = 2.7
   local lane_width = 0
   local lanes = 0
 
-  if wps_info.one_way then
-    if wps_info.wp_radius * 2 < max_lane_width then
-      --For one lane road
-      lane_width = wps_info.wp_radius * 2.0
+  local half_width = wps_info.wp_radius or 0
+  local lane_config = nil
+  if wps_info.start_wp and wps_info.end_wp then
+    lane_config = getEdgeLaneConfig(wps_info.start_wp, wps_info.end_wp)
+  end
+
+  if lane_config and lane_config ~= "" and half_width > 0 then
+    local offsets = getLaneOffsetsFromConfig(lane_config, half_width)
+    local spacing = computeAverageLaneSpacing(offsets)
+    local left_bound, right_bound, slot_count, slot_total = getLaneBoundsFromConfig(lane_config, half_width)
+    if spacing and spacing > 0 then
+      lane_width = spacing
+    elseif slot_total and slot_total > 0 then
+      lane_width = (half_width * 2) / slot_total
+    end
+    if offsets then
+      lanes = #offsets
+    end
+    if not lanes or lanes <= 0 then
+      lanes = countLanesInDirection(lane_config, '+')
+    end
+    if not lanes or lanes <= 0 then
       lanes = 1
+    end
 
-    elseif wps_info.wp_radius * 2 < max_lane_width * 2 then
-      --For two lane road
-      lane_width = wps_info.wp_radius
-      lanes = 2
+    if lane_width <= 0 then
+      lane_width = (half_width * 2) / max(lanes, 1)
+    end
 
-    elseif wps_info.wp_radius * 2 < max_lane_width * 3 then
-      --For three lane road
-      lane_width = wps_info.wp_radius * 2.0 / 3.0
-      lanes = 3
+    if lane_width > 0 then
+      lane_width = clamp(lane_width, min_lane_width, max_lane_width)
+    end
 
-    elseif wps_info.wp_radius * 2 < max_lane_width * 4 then
-      --For four lane road
-      lane_width = wps_info.wp_radius * 2.0 / 4.0
-      lanes = 4
-
+    wps_info.lane_config = lane_config
+    if offsets and #offsets > 0 then
+      wps_info.forward_lane_offsets = offsets
+    else
+      wps_info.forward_lane_offsets = nil
+    end
+    if left_bound and right_bound then
+      wps_info.forward_lane_left = left_bound
+      wps_info.forward_lane_right = right_bound
+      wps_info.forward_lane_slot_count = slot_count
+      wps_info.forward_lane_total_slots = slot_total
+      wps_info.forward_lane_slot_width = slot_total and slot_total > 0 and (half_width * 2) / slot_total or nil
+    else
+      wps_info.forward_lane_left = nil
+      wps_info.forward_lane_right = nil
+      wps_info.forward_lane_slot_count = nil
+      wps_info.forward_lane_total_slots = nil
+      wps_info.forward_lane_slot_width = nil
     end
   else
-    lane_width = wps_info.wp_radius
-    lanes = 2
+    wps_info.lane_config = lane_config
+    wps_info.forward_lane_offsets = nil
+    wps_info.forward_lane_left = nil
+    wps_info.forward_lane_right = nil
+    wps_info.forward_lane_slot_count = nil
+    wps_info.forward_lane_total_slots = nil
+    wps_info.forward_lane_slot_width = nil
+  end
+
+  if lane_width <= 0 then
+    if wps_info.one_way then
+      if half_width * 2 < max_lane_width then
+        lane_width = half_width * 2.0
+        lanes = 1
+      elseif half_width * 2 < max_lane_width * 2 then
+        lane_width = half_width
+        lanes = 2
+      elseif half_width * 2 < max_lane_width * 3 then
+        lane_width = half_width * 2.0 / 3.0
+        lanes = 3
+      elseif half_width * 2 < max_lane_width * 4 then
+        lane_width = half_width * 2.0 / 4.0
+        lanes = 4
+      end
+    else
+      lane_width = half_width
+      lanes = 2
+    end
+  end
+
+  if lanes <= 0 then
+    lanes = wps_info.one_way and 1 or 2
+  end
+
+  if lane_width <= 0 then
+    lane_width = clamp(half_width, min_lane_width, max_lane_width)
   end
 
   return lane_width, lanes
@@ -512,6 +733,117 @@ local function getWaypointsProperties(veh_props, start_wp, end_wp, start_wp_pos,
   wps_props.veh_side_of_wp = my_veh_side_of_wp
 
   return wps_props
+end
+
+local function getRoadNaturalContinuation(prev_node, current_node)
+  if not prev_node or not current_node then return nil end
+  if not graph_data or not graph_data.graph then
+    refreshGraphData()
+  end
+  if not graph_data or not graph_data.graph then return nil end
+
+  local graph = graph_data.graph
+  local positions = graph_data.positions or graph_positions
+  if not graph[current_node] or not graph[prev_node] then return nil end
+
+  local in_edge = graph[prev_node][current_node]
+  if not in_edge then return nil end
+
+  local lane_config = getEdgeLaneConfig(prev_node, current_node)
+  if not lane_config or lane_config == "" then return nil end
+
+  local in_lane_count = countLanesInDirection(lane_config, '+')
+  if in_lane_count <= 0 then return nil end
+
+  local in_radius_current, in_radius_prev
+  if graph_data.getEdgeRadii then
+    in_radius_current, in_radius_prev = graph_data:getEdgeRadii(current_node, prev_node)
+  end
+  in_radius_prev = in_radius_prev or (graph_radius and graph_radius[prev_node])
+  in_radius_current = in_radius_current or (graph_radius and graph_radius[current_node])
+  if not in_radius_current or not in_radius_prev then
+    return nil
+  end
+
+  local edge_pos_prev_1, edge_pos_prev_2
+  if graph_data.getEdgePositions then
+    edge_pos_prev_1, edge_pos_prev_2 = graph_data:getEdgePositions(prev_node, current_node)
+  end
+  if not edge_pos_prev_1 or not edge_pos_prev_2 then
+    if positions then
+      edge_pos_prev_1 = positions[prev_node]
+      edge_pos_prev_2 = positions[current_node]
+    end
+  end
+  if not edge_pos_prev_1 or not edge_pos_prev_2 then return nil end
+
+  local in_dir = (vec3(edge_pos_prev_2) - vec3(edge_pos_prev_1))
+  local len = in_dir:length()
+  if len <= 1e-6 then return nil end
+  in_dir:scale(1 / len)
+
+  local lane_flow_base = (in_edge.drivability or 1) * 4 * min(in_radius_current, in_radius_prev) / max(#lane_config, 1)
+  local in_back_lanes = #lane_config - in_lane_count
+  local in_forward_flow = in_lane_count * lane_flow_base
+  local in_backward_flow = in_back_lanes * lane_flow_base
+
+  local best_node = nil
+  local best_score = -1
+  local out_dir = vec3()
+
+  for neighbor, edge in pairs(graph[current_node]) do
+    if neighbor ~= prev_node then
+      local out_lane_config = getEdgeLaneConfig(current_node, neighbor)
+      if out_lane_config and out_lane_config ~= "" then
+        local out_lane_count = countLanesInDirection(out_lane_config, '+')
+        if out_lane_count > 0 then
+          local edge_pos_curr_1, edge_pos_curr_2
+          if graph_data.getEdgePositions then
+            edge_pos_curr_1, edge_pos_curr_2 = graph_data:getEdgePositions(current_node, neighbor)
+          end
+          if not edge_pos_curr_1 or not edge_pos_curr_2 then
+            if positions then
+              edge_pos_curr_1 = positions[current_node]
+              edge_pos_curr_2 = positions[neighbor]
+            end
+          end
+          if edge_pos_curr_1 and edge_pos_curr_2 then
+            out_dir:set(edge_pos_curr_2)
+            out_dir:setSub(edge_pos_curr_1)
+            local out_len = out_dir:length()
+            if out_len > 1e-6 then
+              out_dir:scale(1 / out_len)
+              local dir_coeff = 0.5 * max(0, 1 + out_dir:dot(in_dir))
+              if dir_coeff > 0 then
+                local out_radius_current, out_radius_next
+                if graph_data.getEdgeRadii then
+                  out_radius_current, out_radius_next = graph_data:getEdgeRadii(current_node, neighbor)
+                end
+                out_radius_current = out_radius_current or (graph_radius and graph_radius[current_node]) or in_radius_current
+                out_radius_next = out_radius_next or (graph_radius and graph_radius[neighbor]) or out_radius_current
+                local lane_flow_out
+                if out_lane_count == in_lane_count and (#out_lane_config - out_lane_count) == in_back_lanes then
+                  lane_flow_out = (edge.drivability or 1) * 4 * 0.5 * ((in_radius_current or 0) + (out_radius_current or 0)) / max(#out_lane_config, 1)
+                else
+                  lane_flow_out = (edge.drivability or 1) * 4 * min(out_radius_current or 0, out_radius_next or 0) / max(#out_lane_config, 1)
+                end
+                local out_forward_flow = min(in_forward_flow, out_lane_count * lane_flow_out)
+                local out_backward_lanes = #out_lane_config - out_lane_count
+                local out_backward_flow = min(in_backward_flow, out_backward_lanes * lane_flow_out)
+                local out_flow = out_forward_flow * (1 + out_backward_flow) * dir_coeff
+                if out_flow > best_score then
+                  best_score = out_flow
+                  best_node = neighbor
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return best_node, best_score
 end
 
 --Get start and end waypoints relative to my vehicle nearest to a position
@@ -751,6 +1083,13 @@ M.getWaypointStartEnd = getWaypointStartEnd
 M.getWaypointsProperties = getWaypointsProperties
 M.getWaypointStartEndAdvanced = getWaypointStartEndAdvanced
 M.getWaypointSegmentFromNodes = getWaypointSegmentFromNodes
+local function getClosestRoadInfo(position)
+  if not position or not findClosestRoad then return nil end
+  local wp1, wp2, distance = findClosestRoad(position)
+  if not wp1 or not wp2 then return nil end
+  return wp1, wp2, distance
+end
+
 M.getGraphData = function()
   if not graph_data or not graph_links then
     refreshGraphData()
@@ -783,6 +1122,12 @@ M.getMapNode = function(id)
   if not map_nodes then return nil end
   return map_nodes[id]
 end
+M.getClosestRoadInfo = getClosestRoadInfo
+M.getClosestRoadDistance = function(position)
+  local _, _, distance = getClosestRoadInfo(position)
+  if distance == nil then return nil end
+  return math.abs(distance)
+end
 M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
@@ -790,5 +1135,8 @@ M.onClientPostStartMission = onClientPostStartMission
 M.isVehicleGhost = isVehicleGhost
 M.getRoadRules = getRoadRules
 M.getTrafficSide = getTrafficSide
+M.getEdgeLaneConfig = getEdgeLaneConfig
+M.getRoadNaturalContinuation = getRoadNaturalContinuation
+M.countLanesInDirection = countLanesInDirection
 
 return M
