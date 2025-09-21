@@ -77,7 +77,9 @@ local lane_state = {
   lane_loss_timer = 0,
   ai_conflict = false,
   ai_conflict_confirm_timer = 0,
-  ai_conflict_release_timer = 0
+  ai_conflict_release_timer = 0,
+  lane_offsets = nil,
+  road_edges = nil
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -365,6 +367,151 @@ local function convertSamplesToLocal(samples, normals, veh_props, half_width)
   return center_local, left_local, right_local
 end
 
+local function findNearestSampleIndex(samples)
+  if not samples then return nil end
+  local best_idx = nil
+  local best_dist = huge
+  for i = 1, #samples do
+    local sample = samples[i]
+    if sample and type(sample.y) == "number" then
+      local dist = abs(sample.y)
+      if dist < best_dist then
+        best_dist = dist
+        best_idx = i
+      end
+    end
+  end
+  return best_idx
+end
+
+local function buildLaneOffsetsFromGeometry(path, offsets)
+  if not path or not offsets or #offsets == 0 then return offsets end
+
+  local center = path.center
+  local left = path.left
+  local right = path.right
+  if not center or not left or not right then return offsets end
+
+  local idx = findNearestSampleIndex(center) or 1
+  local center_pt = center[idx]
+  local left_pt = left[idx]
+  local right_pt = right[idx]
+
+  if not center_pt or not left_pt or not right_pt then return offsets end
+  if type(center_pt.x) ~= "number" or type(left_pt.x) ~= "number" or type(right_pt.x) ~= "number" then
+    return offsets
+  end
+
+  local center_x = center_pt.x
+  local road_left = left_pt.x - center_x
+  local road_right = right_pt.x - center_x
+  if not road_left or not road_right then return offsets end
+
+  local total_width = road_right - road_left
+  if not total_width or total_width <= 0.5 then return offsets end
+
+  local lane_count = #offsets
+  local lane_width = total_width / lane_count
+  if lane_width <= 0.5 or lane_width > 7.5 then
+    return offsets
+  end
+
+  local refined = {}
+  local start = road_left + lane_width * 0.5
+  for i = 1, lane_count do
+    refined[i] = start + lane_width * (i - 1)
+  end
+
+  return refined, lane_width, {left = road_left, right = road_right, width = total_width}
+end
+
+local function smoothLaneOffsets(prev, current, smoothing)
+  if not current then return prev end
+  if not prev or #prev ~= #current then return current end
+  smoothing = clamp(smoothing or 0.35, 0, 0.95)
+  local blended = {}
+  for i = 1, #current do
+    local prev_val = prev[i]
+    local curr_val = current[i]
+    if type(prev_val) == "number" and type(curr_val) == "number" then
+      blended[i] = prev_val + (curr_val - prev_val) * (1 - smoothing)
+    else
+      blended[i] = curr_val
+    end
+  end
+  return blended
+end
+
+local function computeLaneBoundsFromOffsets(offsets, lane_width, road_edges)
+  if not offsets or #offsets == 0 or not lane_width or lane_width <= 0 then return nil end
+  local half = lane_width * 0.5
+  local min_edge = huge
+  local max_edge = -huge
+  for i = 1, #offsets do
+    local offset = offsets[i]
+    if type(offset) == "number" then
+      local left_edge = offset - half
+      local right_edge = offset + half
+      if left_edge < min_edge then min_edge = left_edge end
+      if right_edge > max_edge then max_edge = right_edge end
+    end
+  end
+
+  if road_edges then
+    if type(road_edges.left) == "number" then
+      min_edge = math.min(min_edge, road_edges.left)
+    end
+    if type(road_edges.right) == "number" then
+      max_edge = math.max(max_edge, road_edges.right)
+    end
+  end
+
+  if max_edge <= min_edge then return nil end
+
+  return {
+    left = min_edge,
+    right = max_edge,
+    width = max_edge - min_edge
+  }
+end
+
+local function computeRoadDistanceFromModel(lane_model)
+  if not lane_model or not lane_model.offset then return nil end
+  local lanes = lane_model.lanes
+  if not lanes then return nil end
+
+  local lane_width = lanes.width or lane_model.width
+  if not lane_width or lane_width <= 0 then return nil end
+
+  local bounds_left = lanes.roadLeft
+  local bounds_right = lanes.roadRight
+
+  if (bounds_left == nil or bounds_right == nil) and lane_model.road then
+    if bounds_left == nil then bounds_left = lane_model.road.left end
+    if bounds_right == nil then bounds_right = lane_model.road.right end
+  end
+
+  if (bounds_left == nil or bounds_right == nil) and lanes.offsets then
+    local computed = computeLaneBoundsFromOffsets(lanes.offsets, lane_width, nil)
+    if computed then
+      bounds_left = bounds_left or computed.left
+      bounds_right = bounds_right or computed.right
+    end
+  end
+
+  if type(bounds_left) ~= "number" or type(bounds_right) ~= "number" then return nil end
+  if bounds_right <= bounds_left then return nil end
+
+  local current = lane_model.offset.current or 0
+  if current < bounds_left then
+    return bounds_left - current
+  elseif current > bounds_right then
+    return current - bounds_right
+  else
+    return 0
+  end
+end
+
 local function requestAiRouteData(veh)
   if not veh or ai_route_state.pending then return false end
   veh:queueLuaCommand(AI_ROUTE_REQUEST_COMMAND)
@@ -564,6 +711,8 @@ local function selectNextSegment(veh_props, current_wps, params, _preferred_offs
 
     local seg_dir = extra_utils.toNormXYVec(seg_vec)
     local forward_score = seg_dir:dot(current_dir)
+    local forward_min = params.segment_forward_min or -0.2
+    if forward_score < forward_min then return end
     local heading_score = seg_dir:dot(vehicle_dir)
     local drivability = (link and link.drivability) or 1
 
@@ -575,8 +724,16 @@ local function selectNextSegment(veh_props, current_wps, params, _preferred_offs
       penalty = penalty + 1
     end
 
+    local turn_weight = params.segment_turn_penalty or 0.4
+    if turn_weight < 0 then turn_weight = 0 end
+    local turn_mag = abs(current_dir.x * seg_dir.y - current_dir.y * seg_dir.x)
+
     local score =
       forward_score * align_weight + heading_score * heading_weight + drivability * drivability_weight - penalty
+
+    if turn_weight > 0 then
+      score = score - turn_mag * turn_weight
+    end
 
     if score > best_score then
       best_score = score
@@ -1428,6 +1585,8 @@ local function computeLaneModel(veh_props, params)
   local offsets = buildLaneOffsets(lane_width, wps.num_of_lanes or 1)
   if #offsets == 0 then
     lane_state.desired_offset = nil
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     return nil
   end
 
@@ -1483,6 +1642,8 @@ local function computeLaneModel(veh_props, params)
   local path = gatherPath(veh_props, wps, desired_offset, params)
   if not path then
     lane_state.desired_offset = desired_offset
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     return nil
   end
 
@@ -1492,16 +1653,36 @@ local function computeLaneModel(veh_props, params)
 
   local route_preview = buildAiRoutePreview(veh_props, wps, lane_state.desired_offset, params)
 
-  local lane_dir_norm = path.dir
-  if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
-    lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
+  local lane_offsets = nil
+  local lane_bounds = nil
+  if offsets and #offsets > 0 then
+    lane_offsets = {}
+    for i = 1, #offsets do
+      lane_offsets[i] = offsets[i]
+    end
+    local geometry_edges = nil
+    if path and path.center and path.left and path.right then
+      local refined, refined_width, road_edges = buildLaneOffsetsFromGeometry(path, lane_offsets)
+      if refined and #refined == #lane_offsets then
+        lane_offsets = refined
+        if refined_width and refined_width > 0 then
+          path.lane_width = refined_width
+        end
+        geometry_edges = road_edges
+      end
+    end
+    if lane_state.lane_offsets and #lane_state.lane_offsets == #lane_offsets then
+      lane_offsets = smoothLaneOffsets(lane_state.lane_offsets, lane_offsets, params.lane_offsets_smooth or 0.35)
+    end
+    table.sort(lane_offsets)
+    lane_bounds = computeLaneBoundsFromOffsets(lane_offsets, path and path.lane_width or lane_width, geometry_edges)
+    lane_state.lane_offsets = lane_offsets
+    lane_state.road_edges = lane_bounds
+  else
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
   end
-  local heading_dir = vehicle_dir
-  if heading_dir:length() < 1e-6 then
-    heading_dir = extra_utils.toNormXYVec(veh_props.dir)
-    vehicle_dir = heading_dir
-  end
-  local heading_error = heading_dir:cross(lane_dir_norm).z
+
   local half_width = (path.lane_width or lane_width) * 0.5
   local target_offset = path.offset or desired_offset
   local lateral_error = current_offset - target_offset
@@ -1519,6 +1700,16 @@ local function computeLaneModel(veh_props, params)
     end
   end
 
+  local lane_dir_norm = path.dir
+  if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
+    lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
+  end
+  local heading_dir = vehicle_dir
+  if heading_dir:length() < 1e-6 then
+    heading_dir = extra_utils.toNormXYVec(veh_props.dir)
+    vehicle_dir = heading_dir
+  end
+  local heading_error = heading_dir:cross(lane_dir_norm).z
   local future_dir = path.future_dir
   local curvature = path.curvature or 0
 
@@ -1593,12 +1784,7 @@ local function computeLaneModel(veh_props, params)
     lane_model.heading.future = {x = future_dir.x, y = future_dir.y}
   end
 
-  if offsets and #offsets > 0 then
-    local lane_offsets = {}
-    for i = 1, #offsets do
-      lane_offsets[i] = offsets[i]
-    end
-
+  if lane_offsets and #lane_offsets > 0 then
     local selected_offset = path.offset or desired_offset or current_offset or 0
     local selected_index = nil
     local legal_index = nil
@@ -1632,7 +1818,18 @@ local function computeLaneModel(veh_props, params)
       selectedIndex = selected_index,
       legalIndex = legal_index,
       trafficSide = traffic_side,
-      orientation = orientation_sign
+      orientation = orientation_sign,
+      roadLeft = lane_bounds and lane_bounds.left or nil,
+      roadRight = lane_bounds and lane_bounds.right or nil,
+      roadWidth = lane_bounds and lane_bounds.width or nil
+    }
+  end
+
+  if lane_bounds then
+    lane_model.road = {
+      left = lane_bounds.left,
+      right = lane_bounds.right,
+      width = lane_bounds.width
     }
   end
 
@@ -1713,6 +1910,8 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict = false
     lane_state.ai_conflict_confirm_timer = 0
     lane_state.ai_conflict_release_timer = 0
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -1731,6 +1930,8 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict = false
     lane_state.ai_conflict_confirm_timer = 0
     lane_state.ai_conflict_release_timer = 0
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     latest_data = {status = status}
     return
   end
@@ -1742,6 +1943,8 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict = false
     lane_state.ai_conflict_confirm_timer = 0
     lane_state.ai_conflict_release_timer = 0
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     latest_data = {status = status}
     return
   end
@@ -1783,14 +1986,31 @@ local function update(dt, veh, system_params, enabled)
     offroad_release_min = offroad_min_distance * 0.8
   end
 
+  local lane_distance = computeRoadDistanceFromModel(lane_model)
   local road_distance_sample = extra_utils.getClosestRoadDistance(veh_props.center_pos)
   local road_distance = nil
-  local distance_valid = road_distance_sample ~= nil
+  local distance_valid = false
+
+  if lane_distance ~= nil then
+    road_distance = lane_distance
+    distance_valid = true
+  end
+
+  if road_distance_sample ~= nil then
+    local sample_distance = abs(road_distance_sample)
+    if distance_valid then
+      road_distance = min(road_distance, sample_distance)
+    else
+      road_distance = sample_distance
+      distance_valid = true
+    end
+  end
+
   if distance_valid then
-    road_distance = abs(road_distance_sample)
     lane_state.last_road_distance = road_distance
   else
     road_distance = lane_state.last_road_distance
+    distance_valid = road_distance ~= nil
   end
 
   local offroad_disable_threshold = max(offroad_min_distance, lane_width_hint * offroad_ratio)
@@ -1912,6 +2132,8 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict = false
     lane_state.ai_conflict_confirm_timer = 0
     lane_state.ai_conflict_release_timer = 0
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -1924,6 +2146,8 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict = false
     lane_state.ai_conflict_confirm_timer = 0
     lane_state.ai_conflict_release_timer = 0
+    lane_state.lane_offsets = nil
+    lane_state.road_edges = nil
   end
 
   if offroad then

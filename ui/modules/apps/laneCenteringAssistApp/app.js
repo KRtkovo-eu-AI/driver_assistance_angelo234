@@ -462,6 +462,12 @@ angular.module('beamng.apps')
         } else if (lane && typeof lane.width === 'number' && isFinite(lane.width)) {
           laneWidthValue = lane.width
         }
+        if (laneInfo && typeof laneInfo.roadWidth === 'number' && isFinite(laneInfo.roadWidth) && laneOffsets && laneOffsets.length) {
+          var derivedLaneWidth = laneInfo.roadWidth / laneOffsets.length
+          if (derivedLaneWidth > 0 && (!laneWidthValue || !isFinite(laneWidthValue) || laneWidthValue <= 0)) {
+            laneWidthValue = derivedLaneWidth
+          }
+        }
 
         var laneHalfWidth = (typeof laneWidthValue === 'number' && isFinite(laneWidthValue)) ? laneWidthValue * 0.5 : null
         var laneOffset = (lane && lane.offset) || {}
@@ -522,6 +528,9 @@ angular.module('beamng.apps')
           if (!laneHalfSpacing && typeof laneWidthValue === 'number' && isFinite(laneWidthValue)) {
             laneHalfSpacing = laneWidthValue * 0.5
           }
+          if ((!laneHalfSpacing || laneHalfSpacing <= 0) && laneInfo && typeof laneInfo.roadWidth === 'number' && isFinite(laneInfo.roadWidth) && laneOffsets.length) {
+            laneHalfSpacing = (laneInfo.roadWidth / laneOffsets.length) * 0.5
+          }
           for (var li = 0; li < laneOffsets.length; li++) {
             var offsetVal = laneOffsets[li]
             if (typeof offsetVal !== 'number' || !isFinite(offsetVal)) continue
@@ -544,6 +553,30 @@ angular.module('beamng.apps')
                 boundaryMap[rightKey] = rightEntry
               }
               rightEntry.count += 1
+            }
+          }
+          if (laneInfo) {
+            if (typeof laneInfo.roadLeft === 'number' && isFinite(laneInfo.roadLeft)) {
+              var leftEdge = laneInfo.roadLeft - baselineOffset
+              var leftEdgeKey = leftEdge.toFixed(4)
+              var existingLeft = boundaryMap[leftEdgeKey]
+              if (!existingLeft) {
+                boundaryMap[leftEdgeKey] = { value: leftEdge, count: laneOffsets.length }
+              } else {
+                existingLeft.value = leftEdge
+                existingLeft.count = Math.max(existingLeft.count, laneOffsets.length)
+              }
+            }
+            if (typeof laneInfo.roadRight === 'number' && isFinite(laneInfo.roadRight)) {
+              var rightEdge = laneInfo.roadRight - baselineOffset
+              var rightEdgeKey = rightEdge.toFixed(4)
+              var existingRight = boundaryMap[rightEdgeKey]
+              if (!existingRight) {
+                boundaryMap[rightEdgeKey] = { value: rightEdge, count: laneOffsets.length }
+              } else {
+                existingRight.value = rightEdge
+                existingRight.count = Math.max(existingRight.count, laneOffsets.length)
+              }
             }
           }
           var boundaryKeys = Object.keys(boundaryMap)

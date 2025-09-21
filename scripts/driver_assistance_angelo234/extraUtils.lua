@@ -396,10 +396,134 @@ local function getWaypointPosition(wp)
   return nil
 end
 
+local function flipLaneString(lanes)
+  if type(lanes) ~= "string" then return lanes end
+  local buffer = {}
+  for i = #lanes, 1, -1 do
+    local ch = lanes:sub(i, i)
+    if ch == '+' then
+      buffer[#buffer + 1] = '-'
+    elseif ch == '-' then
+      buffer[#buffer + 1] = '+'
+    else
+      buffer[#buffer + 1] = ch
+    end
+  end
+  return table.concat(buffer)
+end
+
+local function countLaneDirections(lanes)
+  if type(lanes) ~= "string" then return 0, 0 end
+  local forward, reverse = 0, 0
+  for i = 1, #lanes do
+    local byte = lanes:byte(i)
+    if byte == 43 then -- "+"
+      forward = forward + 1
+    elseif byte == 45 then -- "-"
+      reverse = reverse + 1
+    end
+  end
+  return forward, reverse
+end
+
+local function extractLaneData(start_wp, end_wp)
+  if not start_wp or not end_wp then return nil end
+  if not graph_links then
+    refreshGraphData()
+  end
+
+  local edge = graph_links and graph_links[start_wp] and graph_links[start_wp][end_wp]
+  if not edge and map_nodes and map_nodes[start_wp] and map_nodes[start_wp].links then
+    edge = map_nodes[start_wp].links[end_wp]
+  end
+
+  if not edge then return nil end
+
+  local lanes = edge.lanes or edge.laneConfig or edge.lane_string or edge.laneString
+  if lanes and edge.inNode and edge.inNode ~= start_wp then
+    lanes = flipLaneString(lanes)
+  end
+
+  return {
+    lanes = lanes,
+    laneWidth = edge.laneWidth or edge.lane_width or edge.widthPerLane,
+    roadWidth = edge.roadWidth or edge.road_width or edge.width,
+    radius = edge.radius,
+    oneWay = edge.oneWay,
+    data = edge
+  }
+end
+
+local function computeLaneCountAndWidth(wps_info)
+  local data = extractLaneData(wps_info.start_wp, wps_info.end_wp)
+  if not data then return nil end
+
+  local lanes = data.lanes and data.lanes:gsub("%s+", "") or data.lanes
+  if lanes == "" then lanes = nil end
+
+  local forward, reverse = countLaneDirections(lanes)
+  if forward == 0 and reverse > 0 then
+    -- lane config might be oriented opposite of our travel direction
+    lanes = flipLaneString(lanes)
+    forward, reverse = reverse, forward
+  end
+
+  local total = forward + reverse
+  if forward <= 0 and total <= 0 then
+    return nil
+  end
+
+  local lane_count = forward > 0 and forward or total
+
+  local max_lane_width = 3.75
+  local lane_width = nil
+
+  local width_hint = data.laneWidth
+  if width_hint and width_hint > 0 then
+    if width_hint > max_lane_width * 1.5 and total > 0 then
+      lane_width = width_hint / total
+    else
+      lane_width = width_hint
+    end
+  end
+
+  if (not lane_width or lane_width <= 0) then
+    local road_width = data.roadWidth
+    if road_width and road_width > 0 then
+      local divisor = total > 0 and total or lane_count
+      if divisor > 0 then
+        lane_width = road_width / divisor
+      end
+    end
+  end
+
+  if (not lane_width or lane_width <= 0) then
+    local radius = data.radius or wps_info.wp_radius
+    if radius and radius > 0 then
+      local divisor = total > 0 and total or lane_count
+      if divisor > 0 then
+        lane_width = (radius * 2.0) / divisor
+      end
+    end
+  end
+
+  if lane_width and lane_width > 0 then
+    lane_width = clamp(lane_width, 1.8, max_lane_width)
+  end
+
+  return lane_width, lane_count
+end
+
 local function getLaneWidth(wps_info)
   local max_lane_width = 3.75
-  local lane_width = 0
-  local lanes = 0
+  local lane_width, lanes = computeLaneCountAndWidth(wps_info)
+
+  if lane_width and lanes and lanes > 0 then
+    return lane_width, lanes
+  end
+
+  lane_width = 0
+  lanes = 0
 
   if wps_info.one_way then
     if wps_info.wp_radius * 2 < max_lane_width then
