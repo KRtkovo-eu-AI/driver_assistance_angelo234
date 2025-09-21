@@ -751,6 +751,13 @@ M.getWaypointStartEnd = getWaypointStartEnd
 M.getWaypointsProperties = getWaypointsProperties
 M.getWaypointStartEndAdvanced = getWaypointStartEndAdvanced
 M.getWaypointSegmentFromNodes = getWaypointSegmentFromNodes
+local function getClosestRoadInfo(position)
+  if not position or not findClosestRoad then return nil end
+  local wp1, wp2, distance = findClosestRoad(position)
+  if not wp1 or not wp2 then return nil end
+  return wp1, wp2, distance
+end
+
 M.getGraphData = function()
   if not graph_data or not graph_links then
     refreshGraphData()
@@ -782,6 +789,12 @@ end
 M.getMapNode = function(id)
   if not map_nodes then return nil end
   return map_nodes[id]
+end
+M.getClosestRoadInfo = getClosestRoadInfo
+M.getClosestRoadDistance = function(position)
+  local _, _, distance = getClosestRoadInfo(position)
+  if distance == nil then return nil end
+  return math.abs(distance)
 end
 M.checkIfOtherCarOnSameRoad = checkIfOtherCarOnSameRoad
 M.getCircularDistance = getCircularDistance

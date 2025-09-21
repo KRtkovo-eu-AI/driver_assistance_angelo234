@@ -305,6 +305,12 @@ local function formatLaneCenteringReason(reason)
   if reason == "low_speed" then
     return "Speed below 40 km/h"
   end
+  if reason == "off_road" then
+    return "Vehicle not on road"
+  end
+  if reason == "ai_route_conflict" then
+    return "AI route conflict"
+  end
   if reason and reason ~= "" and reason ~= "user_toggle" then
     return tostring(reason)
   end
@@ -596,6 +602,18 @@ local function setLaneCenteringAssistActive(active, reason)
       end
     end
     return
+  end
+
+  if active and lane_centering_system and lane_centering_system.isVehicleOnRoad then
+    if not lane_centering_system.isVehicleOnRoad() then
+      local detail = formatLaneCenteringReason("off_road") or "Vehicle not on road"
+      ui_message("Lane Centering Assist unavailable: " .. detail)
+      if lane_centering_ai_active then
+        applyLaneCenteringAiState(false, 'off_road_block')
+      end
+      lane_centering_assist_on = false
+      return
+    end
   end
 
   lane_centering_assist_on = active
