@@ -19,6 +19,7 @@ local M = {}
 -- the extension without needing to guard against a missing reference.
 rawset(_G, 'scripts_driver__assistance__angelo234_extension', M)
 rawset(_G, 'laneCenteringPrevEnableElectrics', nil)
+rawset(_G, 'autopilotPrevEnableElectrics', nil)
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
 
@@ -56,6 +57,14 @@ local lane_centering_ai_last_speed = nil
 local lane_centering_ai_refresh_timer = 0
 local lane_centering_ai_last_reason = nil
 local lane_centering_ai_uses_speed_control = false
+
+local autopilot_system_on = false
+local autopilot_ai_active = false
+local autopilot_current_target = nil
+local lane_centering_autopilot_block_notified = false
+
+local autopilotDisengage
+local refreshAutopilotState = function() end
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -310,6 +319,9 @@ local function onExtensionLoaded()
 end
 
 local function onVehicleSwitched(_oid, _nid, player)
+  if autopilotDisengage then
+    autopilotDisengage()
+  end
   init(player)
 end
 
@@ -349,6 +361,10 @@ end
 local function hasLaneCenteringAssistPart()
   return extra_utils.getPart("lane_centering_assist_angelo234")
     or extra_utils.getPart("lane_centering_assist_system_angelo234")
+end
+
+local function hasAutopilotSystem()
+  return extra_utils.getPart("autopilot_angelo234")
 end
 
 local function formatLaneCenteringReason(reason)
@@ -504,6 +520,70 @@ local lane_centering_ai_speed_refresh_template = [[
     end
   ]]
 
+local autopilot_enable_template = [[
+    local prevEnableElectrics = true
+    if ai and ai.getParameters then
+      local params = ai.getParameters()
+      if params and params.enableElectrics ~= nil then
+        prevEnableElectrics = params.enableElectrics and true or false
+      end
+    end
+    if autopilotPrevEnableElectrics == nil then
+      autopilotPrevEnableElectrics = prevEnableElectrics
+    end
+    if ai then
+      ai.setState({mode='manual', manoeuvre=false})
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = true})
+      end
+      ai.setSpeedMode('legal')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+      ai.setTarget(%q)
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', 'ai', true)
+      input.setAllowedInputSource('steering', 'local', false)
+      input.setAllowedInputSource('throttle', 'ai', true)
+      input.setAllowedInputSource('throttle', 'local', false)
+      input.setAllowedInputSource('brake', 'ai', true)
+      input.setAllowedInputSource('brake', 'local', false)
+      input.setAllowedInputSource('parkingbrake', 'ai', true)
+      input.setAllowedInputSource('parkingbrake', 'local', false)
+    end
+  ]]
+
+local autopilot_retarget_template = [[
+    if ai then
+      ai.setState({mode='manual', manoeuvre=false})
+      ai.setSpeedMode('legal')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+      ai.setTarget(%q)
+    end
+  ]]
+
+local autopilot_disable_command = [[
+    local prevEnableElectrics = autopilotPrevEnableElectrics
+    autopilotPrevEnableElectrics = nil
+    if ai then
+      if ai.setParameters and prevEnableElectrics ~= nil then
+        ai.setParameters({enableElectrics = prevEnableElectrics and true or false})
+      end
+      ai.setSpeed(0)
+      ai.setSpeedMode('set')
+      ai.driveInLane('off')
+      ai.setAvoidCars('on')
+      ai.setState({mode='disabled'})
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', nil)
+      input.setAllowedInputSource('throttle', nil)
+      input.setAllowedInputSource('brake', nil)
+      input.setAllowedInputSource('parkingbrake', nil)
+    end
+  ]]
+
 local function queueLaneCenteringAiEnable(veh, target_speed, use_speed_control)
   local command = nil
   if use_speed_control then
@@ -625,6 +705,14 @@ local function refreshLaneCenteringAiState(dt, veh)
 end
 
 local function setLaneCenteringAssistActive(active, reason)
+  if active and autopilot_system_on then
+    if reason == 'user_toggle' or not lane_centering_autopilot_block_notified then
+      ui_message("Lane Centering Assist unavailable: Autopilot active")
+      lane_centering_autopilot_block_notified = true
+    end
+    return
+  end
+
   if not hasLaneCenteringAssistPart() then
     if lane_centering_ai_active then
       applyLaneCenteringAiState(false, 'missing_part')
@@ -701,6 +789,137 @@ local function toggleLaneCenteringSystem()
   end
 
   setLaneCenteringAssistActive(not lane_centering_assist_on, "user_toggle")
+end
+
+local function autopilotHasNavigationTarget()
+  local gm = core_groundMarkers
+  if not gm then return false end
+  local checker = gm.currentlyHasTarget
+  if type(checker) ~= 'function' then return false end
+  local ok, result = pcall(checker)
+  if not ok then return false end
+  return result and true or false
+end
+
+local function getAutopilotRouteTarget()
+  local gm = core_groundMarkers
+  if not gm then return nil end
+  local planner = gm.routePlanner
+  if not planner then return nil end
+  local path = planner.path
+  if type(path) ~= 'table' then return nil end
+  for i = #path, 1, -1 do
+    local node = path[i]
+    local wp = node and node.wp
+    if type(wp) == 'string' and wp ~= '' then
+      return wp
+    end
+  end
+  return nil
+end
+
+local function queueAutopilotEnable(veh, target)
+  if not veh then return end
+  veh:queueLuaCommand(string.format(autopilot_enable_template, target))
+end
+
+local function queueAutopilotDisable(veh)
+  if not veh then return end
+  veh:queueLuaCommand(autopilot_disable_command)
+end
+
+local function queueAutopilotRetarget(veh, target)
+  if not veh then return end
+  veh:queueLuaCommand(string.format(autopilot_retarget_template, target))
+end
+
+local function autopilotEngage(target, announce)
+  local veh = be:getPlayerVehicle(0)
+  if not veh then return false end
+  queueAutopilotEnable(veh, target)
+  autopilot_system_on = true
+  autopilot_ai_active = true
+  autopilot_current_target = target
+  lane_centering_autopilot_block_notified = false
+  rawset(_G, 'autopilot_mode_active_angelo234', true)
+  if announce then
+    ui_message(announce)
+  end
+  return true
+end
+
+autopilotDisengage = function(message)
+  if autopilot_ai_active then
+    local veh = be:getPlayerVehicle(0)
+    if veh then
+      queueAutopilotDisable(veh)
+    end
+  end
+  autopilot_system_on = false
+  autopilot_ai_active = false
+  autopilot_current_target = nil
+  lane_centering_autopilot_block_notified = false
+  rawset(_G, 'autopilot_mode_active_angelo234', nil)
+  if message then
+    ui_message(message)
+  end
+end
+
+refreshAutopilotState = function(dt, veh)
+  if not autopilot_system_on then return end
+  if not hasAutopilotSystem() then
+    autopilotDisengage("Autopilot disengaged: system removed")
+    return
+  end
+  if not veh then
+    autopilotDisengage()
+    return
+  end
+  if not autopilotHasNavigationTarget() then
+    autopilotDisengage("Autopilot disengaged: destination cleared")
+    return
+  end
+  local target = getAutopilotRouteTarget()
+  if not target then
+    autopilotDisengage("Autopilot disengaged: unable to resolve route")
+    return
+  end
+  if target ~= autopilot_current_target then
+    queueAutopilotRetarget(veh, target)
+    autopilot_current_target = target
+  end
+end
+
+local function toggleAutopilotSystem()
+  if autopilot_system_on then
+    autopilotDisengage("Autopilot disengaged")
+    return
+  end
+
+  if not hasAutopilotSystem() then
+    ui_message("Autopilot not installed")
+    return
+  end
+
+  if lane_centering_assist_on or lane_centering_ai_active then
+    ui_message("Autopilot unavailable: Lane Centering Assist active")
+    return
+  end
+
+  if not autopilotHasNavigationTarget() then
+    ui_message("Autopilot unavailable: Please select a destination on the map")
+    return
+  end
+
+  local target = getAutopilotRouteTarget()
+  if not target then
+    ui_message("Autopilot unavailable: Unable to resolve the selected route")
+    return
+  end
+
+  if not autopilotEngage(target, "Autopilot engaged") then
+    ui_message("Autopilot unavailable: Player vehicle not available")
+  end
 end
 
 local function toggleAutoHeadlightSystem()
@@ -1372,6 +1591,7 @@ local function onUpdate(dt)
   hsa_system_update_timer = hsa_system_update_timer + dt
   auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
 
+  refreshAutopilotState(dt, my_veh)
   updateVirtualLidar(dt, my_veh)
 
   --p:finish(true)
@@ -1739,6 +1959,9 @@ local function onInit()
 end
 
 local function onExtensionUnloaded()
+  if autopilotDisengage then
+    autopilotDisengage()
+  end
   stopVirtualLidarStreamServer()
 end
 
@@ -1754,6 +1977,7 @@ M.toggleFCMSystem = toggleFCMSystem
 M.toggleRCMSystem = toggleRCMSystem
 M.toggleObstacleAEBSystem = toggleObstacleAEBSystem
 M.toggleLaneCenteringSystem = toggleLaneCenteringSystem
+M.toggleAutopilotSystem = toggleAutopilotSystem
 M.toggleAutoHeadlightSystem = toggleAutoHeadlightSystem
 M.setACCSystemOn = setACCSystemOn
 M.toggleACCSystem = toggleACCSystem
