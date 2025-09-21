@@ -50,6 +50,11 @@ local prev_auto_headlight_system_on = false
 local acc_system_on = false
 local obstacle_aeb_system_on = true
 local lane_centering_assist_on = false
+local lane_centering_ai_active = false
+local lane_centering_ai_last_speed = nil
+local lane_centering_ai_refresh_timer = 0
+local lane_centering_ai_last_reason = nil
+local lane_centering_ai_uses_speed_control = false
 
 local front_sensor_data = nil
 local rear_sensor_data = nil
@@ -303,8 +308,265 @@ local function formatLaneCenteringReason(reason)
   return nil
 end
 
+local function determineLaneCenteringTargetSpeed(veh)
+  if not veh then return 0, false end
+
+  local target_speed = nil
+
+  if acc_system_on and acc_system and acc_system.getCurrentTargetSpeed then
+    local acc_set_speed, acc_ramped_speed = acc_system.getCurrentTargetSpeed()
+    if acc_ramped_speed and acc_ramped_speed > 0 then
+      target_speed = acc_ramped_speed
+    elseif acc_set_speed and acc_set_speed > 0 then
+      target_speed = acc_set_speed
+    end
+    if target_speed and target_speed > 0 then
+      return target_speed, true
+    end
+  end
+
+  local velocity = veh.getVelocity and veh:getVelocity()
+  if velocity then
+    local speed = vec3(velocity):length()
+    if speed and speed > 0 then
+      target_speed = speed
+    end
+  end
+
+  if not target_speed or target_speed < 0 then
+    target_speed = 0
+  end
+
+  return target_speed, false
+end
+
+local lane_centering_ai_manual_enable_command = [[
+    if ai then
+      local prevEnableElectrics = true
+      if ai.getParameters then
+        local params = ai.getParameters()
+        if params and params.enableElectrics ~= nil then
+          prevEnableElectrics = params.enableElectrics and true or false
+        end
+      end
+      if laneCenteringPrevEnableElectrics == nil then
+        laneCenteringPrevEnableElectrics = prevEnableElectrics
+      end
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = false})
+      end
+      ai.setState({mode='traffic', manoeuvre=false})
+      ai.setSpeedMode('set')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', 'ai', true)
+      input.setAllowedInputSource('steering', 'local', true)
+      input.setAllowedInputSource('throttle', nil)
+      input.setAllowedInputSource('brake', nil)
+      input.setAllowedInputSource('parkingbrake', nil)
+      input.setAllowedInputSource('throttle', 'local', true)
+      input.setAllowedInputSource('brake', 'local', true)
+      input.setAllowedInputSource('parkingbrake', 'local', true)
+    end
+  ]]
+
+local lane_centering_ai_manual_refresh_command = [[
+    if ai then
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = false})
+      end
+      ai.setSpeedMode('set')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', 'ai', true)
+      input.setAllowedInputSource('steering', 'local', true)
+    end
+  ]]
+
+local lane_centering_ai_speed_enable_template = [[
+    if ai then
+      local prevEnableElectrics = true
+      if ai.getParameters then
+        local params = ai.getParameters()
+        if params and params.enableElectrics ~= nil then
+          prevEnableElectrics = params.enableElectrics and true or false
+        end
+      end
+      if laneCenteringPrevEnableElectrics == nil then
+        laneCenteringPrevEnableElectrics = prevEnableElectrics
+      end
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = false})
+      end
+      ai.setState({mode='traffic', manoeuvre=false})
+      ai.setSpeedMode('set')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+      ai.setSpeed(%f)
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', 'ai', true)
+      input.setAllowedInputSource('steering', 'local', true)
+      input.setAllowedInputSource('throttle', 'ai', false)
+      input.setAllowedInputSource('brake', 'ai', false)
+      input.setAllowedInputSource('parkingbrake', 'ai', false)
+      input.setAllowedInputSource('throttle', 'local', true)
+      input.setAllowedInputSource('brake', 'local', true)
+      input.setAllowedInputSource('parkingbrake', 'local', true)
+    end
+  ]]
+
+local lane_centering_ai_speed_refresh_template = [[
+    if ai then
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = false})
+      end
+      ai.setSpeedMode('set')
+      ai.driveInLane('on')
+      ai.setAvoidCars('off')
+      ai.setSpeed(%f)
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', 'ai', true)
+      input.setAllowedInputSource('steering', 'local', true)
+      input.setAllowedInputSource('throttle', 'ai', false)
+      input.setAllowedInputSource('brake', 'ai', false)
+      input.setAllowedInputSource('parkingbrake', 'ai', false)
+      input.setAllowedInputSource('throttle', 'local', true)
+      input.setAllowedInputSource('brake', 'local', true)
+      input.setAllowedInputSource('parkingbrake', 'local', true)
+    end
+  ]]
+
+local function queueLaneCenteringAiEnable(veh, target_speed, use_speed_control)
+  local command = nil
+  if use_speed_control then
+    command = string.format(lane_centering_ai_speed_enable_template, target_speed or 0)
+  else
+    command = lane_centering_ai_manual_enable_command
+  end
+  veh:queueLuaCommand(command)
+end
+
+local function queueLaneCenteringAiDisable(veh)
+  local command = [[
+    local prevEnableElectrics = laneCenteringPrevEnableElectrics
+    laneCenteringPrevEnableElectrics = nil
+    if ai then
+      if prevEnableElectrics == nil then
+        prevEnableElectrics = true
+      end
+      if ai.setParameters then
+        ai.setParameters({enableElectrics = prevEnableElectrics and true or false})
+      end
+      ai.setSpeed(0)
+      ai.setSpeedMode('set')
+      ai.driveInLane('off')
+      ai.setAvoidCars('on')
+      ai.setState({mode='disabled'})
+    end
+    if input and input.setAllowedInputSource then
+      input.setAllowedInputSource('steering', nil)
+      input.setAllowedInputSource('throttle', nil)
+      input.setAllowedInputSource('brake', nil)
+      input.setAllowedInputSource('parkingbrake', nil)
+    end
+  ]]
+  veh:queueLuaCommand(command)
+end
+
+local function applyLaneCenteringAiState(active, reason)
+  lane_centering_ai_last_reason = reason
+  local veh = be:getPlayerVehicle(0)
+  if not veh then
+    lane_centering_ai_active = false
+    lane_centering_ai_last_speed = nil
+    lane_centering_ai_refresh_timer = 0
+    lane_centering_ai_uses_speed_control = false
+    rawset(_G, 'lane_centering_ai_mode_active_angelo234', nil)
+    rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', nil)
+    return
+  end
+
+  if active then
+    local target_speed, use_speed_control = determineLaneCenteringTargetSpeed(veh)
+    queueLaneCenteringAiEnable(veh, target_speed, use_speed_control)
+    lane_centering_ai_active = true
+    lane_centering_ai_uses_speed_control = use_speed_control and true or false
+    lane_centering_ai_last_speed = use_speed_control and target_speed or nil
+    lane_centering_ai_refresh_timer = 0
+    rawset(_G, 'lane_centering_ai_mode_active_angelo234', true)
+    if lane_centering_ai_uses_speed_control then
+      rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', true)
+    else
+      rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', nil)
+    end
+  else
+    queueLaneCenteringAiDisable(veh)
+    lane_centering_ai_active = false
+    lane_centering_ai_uses_speed_control = false
+    lane_centering_ai_last_speed = nil
+    lane_centering_ai_refresh_timer = 0
+    rawset(_G, 'lane_centering_ai_mode_active_angelo234', nil)
+    rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', nil)
+  end
+end
+
+local function refreshLaneCenteringAiState(dt, veh)
+  if not lane_centering_ai_active or not lane_centering_assist_on or not veh then
+    lane_centering_ai_refresh_timer = 0
+    return
+  end
+
+  lane_centering_ai_refresh_timer = lane_centering_ai_refresh_timer + (dt or 0)
+
+  local target_speed, use_speed_control = determineLaneCenteringTargetSpeed(veh)
+
+  if (use_speed_control and not lane_centering_ai_uses_speed_control)
+    or (not use_speed_control and lane_centering_ai_uses_speed_control) then
+    queueLaneCenteringAiEnable(veh, target_speed, use_speed_control)
+    lane_centering_ai_uses_speed_control = use_speed_control and true or false
+    lane_centering_ai_last_speed = use_speed_control and target_speed or nil
+    if lane_centering_ai_uses_speed_control then
+      rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', true)
+    else
+      rawset(_G, 'lane_centering_ai_speed_control_active_angelo234', nil)
+    end
+    lane_centering_ai_refresh_timer = 0
+    return
+  end
+
+  if not use_speed_control then
+    lane_centering_ai_last_speed = nil
+    if lane_centering_ai_refresh_timer >= 0.5 then
+      veh:queueLuaCommand(lane_centering_ai_manual_refresh_command)
+      lane_centering_ai_refresh_timer = 0
+    end
+    return
+  end
+
+  if lane_centering_ai_last_speed == nil then
+    lane_centering_ai_last_speed = target_speed
+  end
+
+  local speed_delta = math.abs((target_speed or 0) - (lane_centering_ai_last_speed or 0))
+
+  if speed_delta > 0.25 or lane_centering_ai_refresh_timer >= 0.5 then
+    veh:queueLuaCommand(string.format(lane_centering_ai_speed_refresh_template, target_speed or 0))
+    lane_centering_ai_last_speed = target_speed
+    lane_centering_ai_refresh_timer = 0
+  end
+end
+
 local function setLaneCenteringAssistActive(active, reason)
   if not hasLaneCenteringAssistPart() then
+    if lane_centering_ai_active then
+      applyLaneCenteringAiState(false, 'missing_part')
+    end
     if active then
       ui_message("Lane Centering Assist not installed")
     end
@@ -316,7 +578,10 @@ local function setLaneCenteringAssistActive(active, reason)
   end
 
   if lane_centering_assist_on == active then
-    if not active then
+    if active then
+      applyLaneCenteringAiState(true, reason)
+    else
+      applyLaneCenteringAiState(false, reason)
       local detail = formatLaneCenteringReason(reason)
       if detail then
         ui_message("Lane Centering Assist disengaged: " .. detail)
@@ -328,8 +593,10 @@ local function setLaneCenteringAssistActive(active, reason)
   lane_centering_assist_on = active
 
   if active then
+    applyLaneCenteringAiState(true, reason)
     ui_message("Lane Centering Assist engaged")
   else
+    applyLaneCenteringAiState(false, reason)
     local detail = formatLaneCenteringReason(reason)
     if detail then
       ui_message("Lane Centering Assist disengaged: " .. detail)
@@ -977,6 +1244,15 @@ local function onUpdate(dt)
             system_params,
             lane_centering_assist_on
           )
+
+          if lane_centering_assist_on then
+            if not lane_centering_ai_active then
+              applyLaneCenteringAiState(true, 'refresh')
+            end
+            refreshLaneCenteringAiState(other_systems_timer * 2, my_veh)
+          elseif lane_centering_ai_active then
+            applyLaneCenteringAiState(false, 'sync')
+          end
 
         phase = 0
       end

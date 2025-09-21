@@ -1105,7 +1105,8 @@ local function update(dt, veh, system_params, enabled)
     active = false,
     available = false,
     reason = nil,
-    driverOverride = false
+    driverOverride = false,
+    aiTrafficControlsSpeed = false
   }
 
   if not installed then
@@ -1143,8 +1144,8 @@ local function update(dt, veh, system_params, enabled)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
 
-  local driver_input = rawget(_G, "input_steering_driver_angelo234")
-    or rawget(_G, "input_steering_angelo234")
+  local driver_axis = rawget(_G, "input_steering_driver_angelo234")
+  local driver_input = driver_axis or rawget(_G, "input_steering_angelo234")
   if driver_input == nil then
     local estimated = 0
     if electrics_values_angelo234 then
@@ -1169,9 +1170,12 @@ local function update(dt, veh, system_params, enabled)
     status.reason = status.reason or "no_lane_data"
   end
 
+  local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
+  local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
   local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
 
-  if assist_ready and abs(driver_input) > disable_threshold then
+  local override_value = driver_axis ~= nil and clamp(driver_axis, -1, 1) or driver_input
+  if assist_ready and abs(override_value) > disable_threshold then
     status.driverOverride = true
     status.reason = "driver_override"
     assist_ready = false
@@ -1203,12 +1207,9 @@ local function update(dt, veh, system_params, enabled)
     local blended = target * assist_weight
     local final = clamp(driver_input + blended, -1, 1)
 
-    last_assist_delta = final - driver_input
+    local applied_delta = final - driver_input
 
-    veh:queueLuaCommand(string.format(
-      "input.event('steering', %f, 'FILTER_LANE_CENTERING', nil, nil, nil, 'lane_centering')",
-      final
-    ))
+    last_assist_delta = 0
 
     assist_info.active = true
     assist_info.steering.target = target
@@ -1219,7 +1220,7 @@ local function update(dt, veh, system_params, enabled)
     assist_info.steering.error = norm_error
     assist_info.steering.headingError = heading_error
     assist_info.steering.curvature = lane_model.curvature or 0
-    assist_info.steering.applied = last_assist_delta
+    assist_info.steering.applied = applied_delta
 
     status.active = true
     status.reason = nil
@@ -1252,6 +1253,10 @@ local function update(dt, veh, system_params, enabled)
   end
 
   assist_info.driverOverride = status.driverOverride
+  assist_info.aiTrafficActive = ai_mode_active
+  assist_info.aiTrafficControlsSpeed = ai_speed_control_active
+  status.aiTrafficActive = ai_mode_active
+  status.aiTrafficControlsSpeed = ai_speed_control_active
 
   latest_data = {
     status = status,

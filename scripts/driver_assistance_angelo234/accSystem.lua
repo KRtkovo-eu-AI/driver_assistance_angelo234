@@ -309,10 +309,15 @@ local function update(dt, veh, system_params, aeb_params, front_sensor_data)
   end
 end
 
+local function getCurrentTargetSpeed()
+  return target_speed, ramped_target_speed
+end
+
 M.onToggled = onToggled
 M.setACCSpeed = setACCSpeed
 M.changeACCSpeed = changeACCSpeed
 M.changeACCFollowingDistance = changeACCFollowingDistance
 M.update = update
+M.getCurrentTargetSpeed = getCurrentTargetSpeed
 
 return M
