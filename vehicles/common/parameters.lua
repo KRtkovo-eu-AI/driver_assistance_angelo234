@@ -25,7 +25,14 @@ M.fwd_aeb_params = {
     num_of_sensors = 9,
     sensors_polled_per_iteration = 1,
     sensor_offset_forward = 0.0,
-    sensor_max_distance = 60
+    sensor_max_distance = 60,
+
+    lidar_detection_extra = 20,
+    lidar_ground_height_window = 0.45,
+    lidar_ground_window_forward_scale = 45,
+    lidar_far_distance_threshold = 40,
+    lidar_far_block_ratio_threshold = 0.3,
+    lidar_bin_gap_tolerance = 2
 }
 
 M.rev_aeb_params = {

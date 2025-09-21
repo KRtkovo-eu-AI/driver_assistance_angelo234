@@ -30,6 +30,7 @@ end
 -- speed is in m/s and is used to relax slope filtering at lower speeds
 local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_sensors, use_lidar)
   local maxDistance = aeb_params.sensor_max_distance
+  local lidar_max_distance = maxDistance
   local pos = veh:getPosition()
   local dir = veh:getDirectionVector()
   dir.z = 0
@@ -62,6 +63,15 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   local right = dir:cross(up)
   local half_width = veh_props.bb:getHalfExtents().x + 0.25
 
+  local fallback_slope = 0
+  if veh_props.dir then
+    local horiz = math.sqrt(veh_props.dir.x * veh_props.dir.x + veh_props.dir.y * veh_props.dir.y)
+    if horiz >= 1e-3 then
+      fallback_slope = veh_props.dir.z / horiz
+    end
+  end
+  local fallback_intercept = groundThreshold
+
   -- allow some vertical rise before considering slope to handle gentle inclines
   local base_allowance = aeb_params.slope_height_allowance or 0.25
   local extra_allowance = 0
@@ -77,11 +87,24 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
 
   local scan = {}
   if use_lidar then
+    local detection_override = aeb_params.lidar_detection_max_distance
+    if detection_override and detection_override > lidar_max_distance then
+      lidar_max_distance = detection_override
+    else
+      local detection_extra = aeb_params.lidar_detection_extra
+      if detection_extra == nil then
+        detection_extra = aeb_params.lidar_detection_default_extra or 20
+      end
+      if detection_extra and detection_extra > 0 then
+        lidar_max_distance = lidar_max_distance + detection_extra
+      end
+    end
+
     scan = virtual_lidar.scan(
       origin,
       dir,
       up,
-      maxDistance,
+      lidar_max_distance,
       math.rad(30),
       math.rad(20),
       30,
@@ -98,7 +121,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         if not extra_utils.isVehicleGhost(other, props) then
           local rel = props.center_pos - origin
           local dist = rel:length()
-          if dist < maxDistance and rel:dot(dir) > 0 then
+          if dist < lidar_max_distance and rel:dot(dir) > 0 then
             local rayDir = rel / dist
             local hit = castRay(origin, origin + rayDir * dist, true, true)
             if hit and hit.obj and hit.obj.getID and hit.obj:getID() == props.id then
@@ -131,6 +154,23 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
 
     local bins = {}
     local bin_list = {}
+    local ground_height_window = aeb_params.lidar_ground_height_window
+    if not ground_height_window then
+      ground_height_window = math.max(ground_fit_margin * 2, 0.45)
+    end
+    local ground_window_forward_scale = aeb_params.lidar_ground_window_forward_scale or 45
+    local far_distance_threshold = aeb_params.lidar_far_distance_threshold or 35
+    local far_block_ratio_threshold = aeb_params.lidar_far_block_ratio_threshold
+    if not far_block_ratio_threshold then
+      far_block_ratio_threshold = occupancy_ratio_threshold * 0.5
+    end
+    if far_block_ratio_threshold > occupancy_ratio_threshold then
+      far_block_ratio_threshold = occupancy_ratio_threshold
+    end
+    if far_block_ratio_threshold < 0.05 then
+      far_block_ratio_threshold = 0.05
+    end
+    local bin_gap_tolerance = math.max(1, aeb_params.lidar_bin_gap_tolerance or 2)
 
     for idx, p in ipairs(scan) do
       local rel = p - origin
@@ -190,7 +230,16 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
         local span = bin.maxHeight - bin.minHeight
         if span <= ground_variation_limit then
           local center_forward = bin.forwardSum / bin.count
-          ground_samples[#ground_samples + 1] = {forward = center_forward, height = bin.minHeight}
+          local expected_ground = fallback_intercept + fallback_slope * center_forward
+          local height_error = math.abs(bin.minHeight - expected_ground)
+          local forward_scale = 1
+          if ground_window_forward_scale and ground_window_forward_scale > 0 then
+            forward_scale = math.max(1, center_forward / ground_window_forward_scale)
+          end
+          local allowed_error = ground_height_window * forward_scale
+          if height_error <= allowed_error then
+            ground_samples[#ground_samples + 1] = {forward = center_forward, height = bin.minHeight}
+          end
         end
       end
     end
@@ -214,11 +263,8 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     end
 
     if not slope then
-      local veh_dir = veh_props.dir
-      local horiz = math.sqrt(veh_dir.x * veh_dir.x + veh_dir.y * veh_dir.y)
-      if horiz < 1e-3 then horiz = 1e-3 end
-      slope = veh_dir.z / horiz
-      intercept = groundThreshold
+      slope = fallback_slope
+      intercept = fallback_intercept
     end
 
     if not intercept then
@@ -244,7 +290,7 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local prev_bin_idx = nil
     for _, bin in ipairs(bin_list) do
       if bin.count >= min_points_per_bin then
-        if prev_bin_idx and bin.idx - prev_bin_idx > 1 then
+        if prev_bin_idx and bin.idx - prev_bin_idx > bin_gap_tolerance then
           consecutive_block_bins = 0
           tall_streak = 0
         end
@@ -289,8 +335,12 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
 
         local ratio = above_allow_count / bin.count
         local tall_ratio = tall_count / bin.count
+        local ratio_threshold = occupancy_ratio_threshold
+        if forward_mean >= far_distance_threshold then
+          ratio_threshold = math.min(ratio_threshold, far_block_ratio_threshold)
+        end
         local qualifies_height = clearance >= min_clearance or tall_ratio >= tall_ratio_threshold
-        local qualifies_block = ratio >= occupancy_ratio_threshold
+        local qualifies_block = ratio >= ratio_threshold
           and clearance >= min_profile_clearance
           and bin.count >= block_min_points
         local qualifies_bin = false
