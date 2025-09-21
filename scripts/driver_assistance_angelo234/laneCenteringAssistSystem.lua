@@ -66,7 +66,66 @@ local lane_state = {
   prev_wps = nil,
   desired_offset = nil,
   lane_width = nil,
-  prev_path_nodes = nil
+  prev_path_nodes = nil,
+  traffic_side = nil,
+  travel_sign = nil
+}
+
+local AI_ROUTE_REQUEST_INTERVAL = 0.8
+local AI_ROUTE_REQUEST_COMMAND = [[
+local routeData = nil
+if ai and ai.dumpCurrentRoute and type(debug) == 'table' and type(debug.getupvalue) == 'function' then
+  local idx = 1
+  while true do
+    local name, value = debug.getupvalue(ai.dumpCurrentRoute, idx)
+    if not name then break end
+    if name == 'currentRoute' then
+      routeData = value
+      break
+    end
+    idx = idx + 1
+  end
+end
+
+if routeData and routeData.path and #routeData.path > 1 then
+  local simplified = {}
+  for i = 1, #routeData.path do
+    local node = routeData.path[i]
+    if type(node) == 'number' then
+      simplified[#simplified + 1] = node
+    end
+  end
+
+  local totalCount = #simplified
+  local limit = 240
+  if totalCount > limit then
+    local trimmed = {}
+    for i = 1, limit do
+      trimmed[#trimmed + 1] = simplified[i]
+    end
+    simplified = trimmed
+  end
+
+  local ok, encoded = pcall(jsonEncode, {path = simplified, total = totalCount})
+  if ok and encoded then
+    obj:queueGameEngineLua(string.format('extensions.driver_assistance_angelo234.receiveLaneCenteringAiRoute(%q)', encoded))
+  else
+    obj:queueGameEngineLua('extensions.driver_assistance_angelo234.receiveLaneCenteringAiRoute(nil)')
+  end
+else
+  obj:queueGameEngineLua('extensions.driver_assistance_angelo234.receiveLaneCenteringAiRoute(nil)')
+end
+]]
+
+local ai_route_state = {
+  nodes = nil,
+  total_nodes = 0,
+  truncated = false,
+  seq = 0,
+  updated_at = 0,
+  timer = 0,
+  pending = false,
+  pending_timer = 0
 }
 
 local function resetControllers()
@@ -133,6 +192,40 @@ local function selectOffset(offsets, reference)
     end
   end
   return best
+end
+
+local function chooseLegalOffset(offsets, lane_width, traffic_side, orientation_sign)
+  if not offsets or #offsets == 0 or not traffic_side then return nil end
+  local target_sign = traffic_side == 'left' and -1 or 1
+  if orientation_sign and orientation_sign < 0 then
+    target_sign = -target_sign
+  end
+  local reference = nil
+  if lane_width and lane_width > 0 then
+    reference = target_sign * lane_width * 0.5
+  end
+
+  local best = nil
+  local best_dist = huge
+  for _, offset in ipairs(offsets) do
+    if (target_sign < 0 and offset < 0) or (target_sign > 0 and offset > 0) then
+      local dist = reference and abs(offset - reference) or abs(offset)
+      if dist < best_dist then
+        best = offset
+        best_dist = dist
+      end
+    end
+  end
+
+  if best then
+    return best
+  end
+
+  if reference then
+    return selectOffset(offsets, reference)
+  end
+
+  return selectOffset(offsets, 0)
 end
 
 local function makeEdgeKey(a, b)
@@ -207,26 +300,172 @@ local function convertSamplesToLocal(samples, normals, veh_props, half_width)
   if not samples then return center_local, left_local, right_local end
 
   local veh_pos = veh_props.center_pos
-  local dir = veh_props.dir
-  local dir_right = veh_props.dir_right
+
+  local dir_vec = veh_props.dir
+  local dirx, diry, dirz = 0, 1, 0
+  if dir_vec then
+    local len = sqrt(dir_vec.x * dir_vec.x + dir_vec.y * dir_vec.y + dir_vec.z * dir_vec.z)
+    if len > 1e-6 then
+      dirx, diry, dirz = dir_vec.x / len, dir_vec.y / len, dir_vec.z / len
+    end
+  end
+
+  local right_vec = veh_props.dir_right
+  local rightx, righty, rightz = diry, -dirx, 0
+  if right_vec then
+    local len = sqrt(right_vec.x * right_vec.x + right_vec.y * right_vec.y + right_vec.z * right_vec.z)
+    if len > 1e-6 then
+      rightx, righty, rightz = right_vec.x / len, right_vec.y / len, right_vec.z / len
+    end
+  end
+
+  local fallback_norm = {x = rightx, y = righty, z = rightz}
 
   for i = 1, #samples do
     local sample = samples[i]
-    local normal = normals[i] or dir_right
+    local normal = normals[i] or fallback_norm
+    local nx, ny, nz = normal.x, normal.y, normal.z
+    local nlen = sqrt(nx * nx + ny * ny + nz * nz)
+    if nlen > 1e-6 then
+      nx, ny, nz = nx / nlen, ny / nlen, nz / nlen
+    else
+      nx, ny, nz = rightx, righty, rightz
+    end
 
     local center_rel = sample - veh_pos
-    local left_point = vec3(sample.x - normal.x * half_width, sample.y - normal.y * half_width, sample.z)
-    local right_point = vec3(sample.x + normal.x * half_width, sample.y + normal.y * half_width, sample.z)
+    local left_point = vec3(sample.x - nx * half_width, sample.y - ny * half_width, sample.z)
+    local right_point = vec3(sample.x + nx * half_width, sample.y + ny * half_width, sample.z)
 
     local left_rel = left_point - veh_pos
     local right_rel = right_point - veh_pos
 
-    center_local[#center_local + 1] = {x = center_rel:dot(dir_right), y = center_rel:dot(dir)}
-    left_local[#left_local + 1] = {x = left_rel:dot(dir_right), y = left_rel:dot(dir)}
-    right_local[#right_local + 1] = {x = right_rel:dot(dir_right), y = right_rel:dot(dir)}
+    center_local[#center_local + 1] = {
+      x = center_rel.x * rightx + center_rel.y * righty + center_rel.z * rightz,
+      y = center_rel.x * dirx + center_rel.y * diry + center_rel.z * dirz
+    }
+    left_local[#left_local + 1] = {
+      x = left_rel.x * rightx + left_rel.y * righty + left_rel.z * rightz,
+      y = left_rel.x * dirx + left_rel.y * diry + left_rel.z * dirz
+    }
+    right_local[#right_local + 1] = {
+      x = right_rel.x * rightx + right_rel.y * righty + right_rel.z * rightz,
+      y = right_rel.x * dirx + right_rel.y * diry + right_rel.z * dirz
+    }
   end
 
   return center_local, left_local, right_local
+end
+
+local function requestAiRouteData(veh)
+  if not veh or ai_route_state.pending then return false end
+  veh:queueLuaCommand(AI_ROUTE_REQUEST_COMMAND)
+  ai_route_state.pending = true
+  ai_route_state.pending_timer = 0
+  return true
+end
+
+local function updateAiRouteData(payload)
+  ai_route_state.pending = false
+  ai_route_state.pending_timer = 0
+  ai_route_state.seq = ai_route_state.seq + 1
+  ai_route_state.updated_at = os.time and os.time() or 0
+
+  if type(payload) ~= 'string' or payload == '' then
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+    return
+  end
+
+  local ok, data = pcall(jsonDecode, payload)
+  if not ok or type(data) ~= 'table' then return end
+
+  local path = data.path
+  if type(path) ~= 'table' then
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+    return
+  end
+
+  local cleaned = {}
+  for i = 1, #path do
+    local node = tonumber(path[i])
+    if node then
+      cleaned[#cleaned + 1] = node
+    end
+  end
+
+  if #cleaned >= 2 then
+    ai_route_state.nodes = cleaned
+    ai_route_state.total_nodes = tonumber(data.total) or #cleaned
+    ai_route_state.truncated = ai_route_state.total_nodes > #cleaned
+  else
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+  end
+end
+
+local function buildAiRoutePreview(veh_props, initial_wps, desired_offset, params)
+  if not ai_route_state.nodes or not initial_wps then return nil end
+
+  local nodes = ai_route_state.nodes
+  if #nodes < 2 then return nil end
+
+  local start_node = initial_wps.start_wp
+  local end_node = initial_wps.end_wp
+  if not start_node or not end_node then return nil end
+
+  local start_idx = nil
+  for i = 1, #nodes - 1 do
+    if nodes[i] == start_node and nodes[i + 1] == end_node then
+      start_idx = i
+      break
+    end
+  end
+
+  if not start_idx then
+    for i = 1, #nodes do
+      if nodes[i] == start_node then
+        start_idx = i
+        break
+      end
+    end
+  end
+
+  if not start_idx then return nil end
+
+  local node_limit = params.route_preview_node_limit or 120
+  if node_limit < 3 then node_limit = 3 end
+  local end_idx = min(#nodes, start_idx + node_limit - 1)
+  if end_idx <= start_idx then
+    end_idx = min(#nodes, start_idx + 1)
+  end
+
+  local subset = {}
+  for i = start_idx, end_idx do
+    subset[#subset + 1] = nodes[i]
+  end
+  if #subset < 2 then return nil end
+
+  local segments = buildSegmentsFromNodeList(subset, veh_props)
+  if not segments or #segments == 0 then return nil end
+
+  local preview_length = params.route_preview_length
+    or ((params.lookahead_max or 120) + (params.branch_lookahead or 60))
+  preview_length = clamp(preview_length, 40, params.route_preview_max or 600)
+
+  local geometry = buildPathGeometryFromSegments(veh_props, segments, desired_offset, params, preview_length)
+  if not geometry then return nil end
+
+  geometry.nodes = subset
+  geometry.start_index = start_idx
+  geometry.preview_nodes = #subset
+  geometry.total_nodes = ai_route_state.total_nodes or #nodes
+  geometry.seq = ai_route_state.seq
+  geometry.truncated = geometry.truncated or (geometry.preview_nodes < geometry.total_nodes)
+  return geometry
 end
 
 local function computeAverageCurvature(center_local, sample_limit)
@@ -1081,6 +1320,23 @@ local function computeLaneModel(veh_props, params)
     return nil
   end
 
+  local road_rules = extra_utils.getRoadRules and extra_utils.getRoadRules() or nil
+  local right_hand_drive = nil
+  local traffic_side = nil
+  if road_rules and road_rules.rightHandDrive ~= nil then
+    right_hand_drive = road_rules.rightHandDrive and true or false
+    traffic_side = right_hand_drive and 'left' or 'right'
+  end
+  if not traffic_side and extra_utils.getTrafficSide then
+    traffic_side = extra_utils.getTrafficSide()
+  end
+  if traffic_side and lane_state.traffic_side ~= traffic_side then
+    lane_state.traffic_side = traffic_side
+    lane_state.desired_offset = nil
+  elseif traffic_side == nil and lane_state.traffic_side ~= traffic_side then
+    lane_state.traffic_side = traffic_side
+  end
+
   local offsets = buildLaneOffsets(lane_width, wps.num_of_lanes or 1)
   if #offsets == 0 then
     lane_state.desired_offset = nil
@@ -1105,10 +1361,31 @@ local function computeLaneModel(veh_props, params)
     return nil
   end
 
+  local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
+  local orientation_sign = nil
+  if vehicle_dir:length() >= 1e-6 then
+    local alignment = lane_dir:dot(vehicle_dir)
+    if alignment > 0.15 then
+      orientation_sign = 1
+    elseif alignment < -0.15 then
+      orientation_sign = -1
+    end
+  end
+  if orientation_sign and lane_state.travel_sign ~= orientation_sign then
+    lane_state.travel_sign = orientation_sign
+    lane_state.desired_offset = nil
+  elseif orientation_sign then
+    lane_state.travel_sign = orientation_sign
+  end
+
   local lane_right = vec3(lane_dir.y, -lane_dir.x, 0)
   local current_offset = (veh_xy - lane_point_xy):dot(lane_right)
 
   local desired_offset = selectOffset(offsets, lane_state.desired_offset or current_offset)
+  local legal_offset = chooseLegalOffset(offsets, lane_width, traffic_side, orientation_sign)
+  if not lane_state.desired_offset and legal_offset then
+    desired_offset = legal_offset
+  end
 
   local offset_smooth = clamp(params.lane_offset_smooth or 0.0, 0, 1)
   if lane_state.desired_offset then
@@ -1125,12 +1402,18 @@ local function computeLaneModel(veh_props, params)
   lane_state.prev_wps = path.last_wps or wps
   lane_state.lane_width = path.lane_width or lane_width
 
+  local route_preview = buildAiRoutePreview(veh_props, wps, lane_state.desired_offset, params)
+
   local lane_dir_norm = path.dir
   if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
     lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
   end
-  local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
-  local heading_error = vehicle_dir:cross(lane_dir_norm).z
+  local heading_dir = vehicle_dir
+  if heading_dir:length() < 1e-6 then
+    heading_dir = extra_utils.toNormXYVec(veh_props.dir)
+    vehicle_dir = heading_dir
+  end
+  local heading_error = heading_dir:cross(lane_dir_norm).z
   local half_width = (path.lane_width or lane_width) * 0.5
   local target_offset = path.offset or desired_offset
   local lateral_error = current_offset - target_offset
@@ -1139,8 +1422,36 @@ local function computeLaneModel(veh_props, params)
     normalized_error = clamp(lateral_error / half_width, -5, 5)
   end
 
+  local legal_error = nil
+  local legal_normalized = nil
+  if legal_offset then
+    legal_error = current_offset - legal_offset
+    if half_width > 1e-3 then
+      legal_normalized = clamp(legal_error / half_width, -5, 5)
+    end
+  end
+
   local future_dir = path.future_dir
   local curvature = path.curvature or 0
+
+  local route_info = nil
+  if route_preview then
+    route_info = {
+      center = route_preview.center,
+      left = route_preview.left,
+      right = route_preview.right,
+      length = route_preview.length or 0,
+      coveredLength = route_preview.covered_length or route_preview.length or 0,
+      targetLength = route_preview.target_length or 0,
+      nodes = route_preview.nodes,
+      startIndex = route_preview.start_index,
+      previewNodes = route_preview.preview_nodes or (route_preview.nodes and #route_preview.nodes) or 0,
+      totalNodes = route_preview.total_nodes or (ai_route_state.nodes and #ai_route_state.nodes) or 0,
+      truncated = route_preview.truncated or false,
+      seq = route_preview.seq or ai_route_state.seq,
+      updatedAt = ai_route_state.updated_at
+    }
+  end
 
   local lane_model = {
     width = path.lane_width or lane_width,
@@ -1148,7 +1459,10 @@ local function computeLaneModel(veh_props, params)
       current = current_offset,
       target = target_offset,
       error = lateral_error,
-      normalized = normalized_error
+      normalized = normalized_error,
+      legal = legal_offset,
+      legalError = legal_error,
+      legalNormalized = legal_normalized
     },
     heading = {
       vehicle = {x = vehicle_dir.x, y = vehicle_dir.y},
@@ -1160,6 +1474,7 @@ local function computeLaneModel(veh_props, params)
       center = path.center,
       left = path.left,
       right = path.right,
+      offset = path.offset or desired_offset,
       length = path.length or 0,
       targetLength = path.target_length or 0,
       coveredLength = path.covered_length or path.length or 0,
@@ -1171,14 +1486,66 @@ local function computeLaneModel(veh_props, params)
       segmentCap = path.segment_cap,
       segmentStep = path.segment_step or 0,
       branches = path.branches or {},
-      nodes = path.nodes
+      nodes = path.nodes,
+      routePreview = route_info
     },
     speed = veh_props.speed,
-    xnorm = xnorm
+    xnorm = xnorm,
+    route = route_info
   }
+
+  if right_hand_drive ~= nil or traffic_side then
+    lane_model.roadRules = {
+      rightHandDrive = right_hand_drive,
+      trafficSide = traffic_side
+    }
+  end
 
   if future_dir then
     lane_model.heading.future = {x = future_dir.x, y = future_dir.y}
+  end
+
+  if offsets and #offsets > 0 then
+    local lane_offsets = {}
+    for i = 1, #offsets do
+      lane_offsets[i] = offsets[i]
+    end
+
+    local selected_offset = path.offset or desired_offset or current_offset or 0
+    local selected_index = nil
+    local legal_index = nil
+    local best_sel = huge
+    local best_legal = huge
+    for i = 1, #lane_offsets do
+      local offset_value = lane_offsets[i]
+      if offset_value then
+        local sel_dist = abs((selected_offset or 0) - offset_value)
+        if sel_dist < best_sel then
+          best_sel = sel_dist
+          selected_index = i
+        end
+        if legal_offset ~= nil then
+          local legal_dist = abs(legal_offset - offset_value)
+          if legal_dist < best_legal then
+            best_legal = legal_dist
+            legal_index = i
+          end
+        end
+      end
+    end
+
+    lane_model.lanes = {
+      width = path.lane_width or lane_width,
+      count = #lane_offsets,
+      offsets = lane_offsets,
+      selectedOffset = selected_offset,
+      legalOffset = legal_offset,
+      currentOffset = current_offset,
+      selectedIndex = selected_index,
+      legalIndex = legal_index,
+      trafficSide = traffic_side,
+      orientation = orientation_sign
+    }
   end
 
   return lane_model
@@ -1240,6 +1607,12 @@ local function update(dt, veh, system_params, enabled)
     lane_state.desired_offset = nil
     lane_state.lane_width = nil
     lane_state.prev_path_nodes = nil
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+    ai_route_state.pending = false
+    ai_route_state.timer = 0
+    ai_route_state.pending_timer = 0
     warning_played = false
     latest_data = {status = status}
     resetControllers()
@@ -1317,6 +1690,33 @@ local function update(dt, veh, system_params, enabled)
 
   if newly_active then
     activation_grace_timer = activation_grace_period
+  end
+
+  if ai_mode_active and veh then
+    local interval = params.ai_route_refresh_interval or AI_ROUTE_REQUEST_INTERVAL
+    if ai_route_state.pending then
+      ai_route_state.pending_timer = ai_route_state.pending_timer + (dt or 0)
+      local pending_timeout = params.ai_route_timeout or max(interval * 2.5, 2.5)
+      if ai_route_state.pending_timer >= pending_timeout then
+        ai_route_state.pending = false
+        ai_route_state.pending_timer = 0
+      end
+    end
+
+    ai_route_state.timer = ai_route_state.timer + (dt or 0)
+    local need_request = newly_active or ai_route_state.timer >= interval
+    if not ai_route_state.nodes or (lane_model and not lane_model.route) then
+      need_request = true
+    end
+    if need_request then
+      if requestAiRouteData(veh) then
+        ai_route_state.timer = 0
+      end
+    end
+  else
+    ai_route_state.timer = 0
+    ai_route_state.pending = false
+    ai_route_state.pending_timer = 0
   end
 
   local ignoring_driver_override = activation_grace_timer > 0
@@ -1441,5 +1841,6 @@ M.getLaneData = getLaneData
 M.setActivationCallback = setActivationCallback
 M.playActivationChime = playActivationChime
 M.playDeactivationChime = playDeactivationChime
+M.updateAiRouteData = updateAiRouteData
 
 return M

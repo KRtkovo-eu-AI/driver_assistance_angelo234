@@ -162,13 +162,21 @@
     <div>Branches: {{vm.branchInfo}}</div>
     <div>Lane width: {{vm.laneWidth}} m</div>
     <div>Heading error: {{vm.headingError}} °</div>
-    <div>Offset current: {{vm.offsetCurrent}} m</div>
+    <div>Lane offset: {{vm.offsetLane}} m</div>
     <div>Target offset: {{vm.offsetTarget}} m</div>
-    <div>Offset error: {{vm.offsetError}} m</div>
+    <div>Absolute offset: {{vm.offsetAbsolute}} m</div>
     <div>Offset norm: {{vm.offsetNormalized}}</div>
+    <div>Legal target: {{vm.offsetLegal}} m</div>
+    <div>Legal error: {{vm.offsetLegalError}} m</div>
+    <div>Legal norm: {{vm.offsetLegalNormalized}}</div>
     <div>Curvature: {{vm.curvature}}</div>
     <div>Samples: {{vm.pathPoints}}</div>
     <div>Curve radius: {{vm.curvatureRadius}} m</div>
+    <div>Route length: {{vm.routeLength}} m</div>
+    <div>Route nodes: {{vm.routeNodes}}</div>
+    <div>Route span: {{vm.routeSpan}}</div>
+    <div>Route data: {{vm.routeUpdated}}</div>
+    <div>Traffic side: {{vm.trafficSide}}</div>
     <div>Warning: {{vm.warning ? 'YES' : 'No'}}</div>
     <div class="lca-warning" ng-if="vm.warning">Lane boundary proximity</div>
   </div>
