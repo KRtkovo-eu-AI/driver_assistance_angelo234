@@ -70,7 +70,9 @@ local lane_state = {
   traffic_side = nil,
   travel_sign = nil,
   offroad = false,
-  last_road_distance = nil
+  last_road_distance = nil,
+  offroad_confirm_timer = 0,
+  offroad_release_timer = 0
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -1637,6 +1639,10 @@ local function update(dt, veh, system_params, enabled)
     lane_state.desired_offset = nil
     lane_state.lane_width = nil
     lane_state.prev_path_nodes = nil
+    lane_state.offroad = false
+    lane_state.last_road_distance = nil
+    lane_state.offroad_confirm_timer = 0
+    lane_state.offroad_release_timer = 0
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -1660,7 +1666,16 @@ local function update(dt, veh, system_params, enabled)
     return
   end
 
-  local lane_width_hint = lane_state.lane_width or params.default_lane_width or 3.75
+  local lane_model = computeLaneModel(veh_props, params)
+
+  local lane_width_hint = params.default_lane_width or 3.75
+  if lane_state.lane_width and lane_state.lane_width > 0 then
+    lane_width_hint = lane_state.lane_width
+  end
+  if lane_model and lane_model.width and lane_model.width > 0 then
+    lane_width_hint = lane_model.width
+  end
+
   local offroad_ratio = clamp(params.offroad_distance_ratio or 0.65, 0, 2)
   local offroad_release_ratio = clamp(params.offroad_distance_release_ratio or 0.5, 0, offroad_ratio)
   local offroad_min_distance = params.offroad_distance_min or 1.5
@@ -1669,11 +1684,15 @@ local function update(dt, veh, system_params, enabled)
     offroad_release_min = offroad_min_distance * 0.8
   end
 
-  local road_distance = extra_utils.getClosestRoadDistance(veh_props.center_pos)
-  if road_distance ~= nil then
-    road_distance = abs(road_distance)
+  local road_distance_sample = extra_utils.getClosestRoadDistance(veh_props.center_pos)
+  local road_distance = nil
+  local distance_valid = road_distance_sample ~= nil
+  if distance_valid then
+    road_distance = abs(road_distance_sample)
+    lane_state.last_road_distance = road_distance
+  else
+    road_distance = lane_state.last_road_distance
   end
-  lane_state.last_road_distance = road_distance
 
   local offroad_disable_threshold = max(offroad_min_distance, lane_width_hint * offroad_ratio)
   local offroad_enable_threshold = max(offroad_release_min, lane_width_hint * offroad_release_ratio)
@@ -1688,40 +1707,72 @@ local function update(dt, veh, system_params, enabled)
 
   local prev_offroad = lane_state.offroad and true or false
   local offroad = prev_offroad
+  local confirm_timer = lane_state.offroad_confirm_timer or 0
+  local release_timer = lane_state.offroad_release_timer or 0
+  local confirm_time = max(params.offroad_confirm_time or 0.35, 0)
+  local release_time = max(params.offroad_release_time or 0.5, 0)
+  local dt_value = dt or 0
 
-  if road_distance == nil then
-    offroad = true
-  elseif prev_offroad then
-    if road_distance <= offroad_enable_threshold then
-      offroad = false
+  if lane_model and (not distance_valid or (road_distance and road_distance < offroad_disable_threshold)) then
+    offroad = false
+    confirm_timer = 0
+    if prev_offroad then
+      release_timer = 0
     end
   else
-    if road_distance >= offroad_disable_threshold then
-      offroad = true
+    if distance_valid and road_distance then
+      if not prev_offroad then
+        if road_distance >= offroad_disable_threshold then
+          confirm_timer = confirm_timer + dt_value
+          if confirm_timer >= confirm_time then
+            offroad = true
+            release_timer = 0
+          end
+        else
+          confirm_timer = max(confirm_timer - dt_value, 0)
+        end
+      else
+        if road_distance <= offroad_enable_threshold then
+          release_timer = release_timer + dt_value
+          if release_timer >= release_time then
+            offroad = false
+            confirm_timer = 0
+          end
+        else
+          release_timer = max(release_timer - dt_value, 0)
+        end
+      end
+    else
+      confirm_timer = max(confirm_timer - dt_value, 0)
+      release_timer = max(release_timer - dt_value, 0)
     end
   end
 
   lane_state.offroad = offroad
+  lane_state.offroad_confirm_timer = confirm_timer
+  lane_state.offroad_release_timer = release_timer
   status.offRoad = offroad
 
-  if offroad then
+  if offroad and not prev_offroad then
     lane_state.prev_wps = nil
     lane_state.desired_offset = nil
     lane_state.prev_path_nodes = nil
+    lane_state.lane_width = nil
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
     ai_route_state.pending = false
     ai_route_state.pending_timer = 0
     ai_route_state.timer = 0
+  elseif not offroad and prev_offroad then
+    lane_state.offroad_confirm_timer = 0
+    lane_state.offroad_release_timer = 0
   end
 
-  local lane_model = nil
-  if not offroad then
-    lane_model = computeLaneModel(veh_props, params)
-    if lane_model then
-      status.available = true
-    end
+  if offroad then
+    lane_model = nil
+  elseif lane_model then
+    status.available = true
   end
 
   local lane_ready = lane_model ~= nil
