@@ -1193,6 +1193,7 @@ local function update(dt, veh, system_params, enabled)
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
   local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
   local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
+  local newly_active = assist_ready and not previously_active
 
   local override_value = driver_axis ~= nil and clamp(driver_axis, -1, 1) or driver_input
   if assist_ready and abs(override_value) > disable_threshold then
@@ -1246,6 +1247,10 @@ local function update(dt, veh, system_params, enabled)
     status.reason = nil
   else
     resetControllers()
+  end
+
+  if newly_active and activation_handler then
+    activation_handler(true, "speed_ready")
   end
 
   if lane_model then

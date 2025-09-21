@@ -97,7 +97,7 @@ M.lane_centering_params = {
     default_lane_width = 3.75,
     curvature_feedforward = 0.45,
     assist_weight_gain = 4.0,
-    min_active_speed = 30 / 3.6, -- 30 km/h expressed in m/s
+    min_active_speed = 40 / 3.6, -- 40 km/h expressed in m/s
     lane_offset_smooth = 0.2,
 }
 
