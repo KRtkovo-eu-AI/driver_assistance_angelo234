@@ -352,10 +352,10 @@ local lane_centering_ai_manual_enable_command = [[
       if laneCenteringPrevEnableElectrics == nil then
         laneCenteringPrevEnableElectrics = prevEnableElectrics
       end
+      ai.setState({mode='traffic', manoeuvre=false})
       if ai.setParameters then
         ai.setParameters({enableElectrics = false})
       end
-      ai.setState({mode='traffic', manoeuvre=false})
       ai.setSpeedMode('set')
       ai.driveInLane('on')
       ai.setAvoidCars('off')
@@ -399,10 +399,10 @@ local lane_centering_ai_speed_enable_template = [[
       if laneCenteringPrevEnableElectrics == nil then
         laneCenteringPrevEnableElectrics = prevEnableElectrics
       end
+      ai.setState({mode='traffic', manoeuvre=false})
       if ai.setParameters then
         ai.setParameters({enableElectrics = false})
       end
-      ai.setState({mode='traffic', manoeuvre=false})
       ai.setSpeedMode('set')
       ai.driveInLane('on')
       ai.setAvoidCars('off')
