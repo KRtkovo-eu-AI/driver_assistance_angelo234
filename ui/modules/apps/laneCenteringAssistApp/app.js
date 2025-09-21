@@ -390,19 +390,20 @@ angular.module('beamng.apps')
         ctx.fill()
       }
 
-      function plotPath(points, color, width, carX, carY, scale, startIndex, endIndex) {
+      function plotPath(points, color, width, carX, carY, scale, startIndex, endIndex, lateralShift) {
         if (!points || points.length < 2) return
         var start = startIndex == null ? 0 : Math.max(0, startIndex)
         var end = endIndex == null ? points.length : Math.min(points.length, endIndex)
         if (end - start < 2) return
+        var shift = (typeof lateralShift === 'number' && isFinite(lateralShift)) ? lateralShift : 0
         ctx.strokeStyle = color
         ctx.lineWidth = width
         ctx.beginPath()
         var p = points[start]
-        ctx.moveTo(carX + p.x * scale, carY - p.y * scale)
+        ctx.moveTo(carX + (p.x + shift) * scale, carY - p.y * scale)
         for (var i = start + 1; i < end; i++) {
           p = points[i]
-          ctx.lineTo(carX + p.x * scale, carY - p.y * scale)
+          ctx.lineTo(carX + (p.x + shift) * scale, carY - p.y * scale)
         }
         ctx.stroke()
       }
@@ -424,8 +425,9 @@ angular.module('beamng.apps')
         var pixelScale = Math.max(0.75, Math.min(width / 320, 1.6))
 
         var lane = data && data.lane
-        var path = lane && lane.path
-        var route = lane && (lane.route || (path && path.routePreview))
+        var lanePath = lane && lane.path
+        var route = lane && (lane.route || (lanePath && lanePath.routePreview))
+        var path = lanePath
         if (!path || !path.center || path.center.length < 2) {
           if (route && route.center && route.center.length >= 2) {
             path = {
@@ -440,7 +442,20 @@ angular.module('beamng.apps')
           }
         }
 
-        var laneHalfWidth = (lane && typeof lane.width === 'number' && isFinite(lane.width)) ? lane.width * 0.5 : null
+        var laneInfo = lane && lane.lanes
+        var laneOffsets = null
+        if (laneInfo && Array.isArray(laneInfo.offsets) && laneInfo.offsets.length) {
+          laneOffsets = laneInfo.offsets
+        }
+
+        var laneWidthValue = null
+        if (laneInfo && typeof laneInfo.width === 'number' && isFinite(laneInfo.width)) {
+          laneWidthValue = laneInfo.width
+        } else if (lane && typeof lane.width === 'number' && isFinite(lane.width)) {
+          laneWidthValue = lane.width
+        }
+
+        var laneHalfWidth = (typeof laneWidthValue === 'number' && isFinite(laneWidthValue)) ? laneWidthValue * 0.5 : null
         var laneOffset = (lane && lane.offset) || {}
         var targetOffset = (typeof laneOffset.target === 'number' && isFinite(laneOffset.target)) ? laneOffset.target : null
         var absoluteOffset = (typeof laneOffset.current === 'number' && isFinite(laneOffset.current)) ? laneOffset.current : null
@@ -460,6 +475,22 @@ angular.module('beamng.apps')
           absoluteOffset = laneTargetError + targetOffset
         }
 
+        var pathOffset = (lanePath && typeof lanePath.offset === 'number' && isFinite(lanePath.offset)) ? lanePath.offset : null
+        var baseLaneOffset = pathOffset
+        if (baseLaneOffset === null && laneInfo && typeof laneInfo.selectedOffset === 'number' && isFinite(laneInfo.selectedOffset)) {
+          baseLaneOffset = laneInfo.selectedOffset
+        }
+        if (baseLaneOffset === null && targetOffset !== null) {
+          baseLaneOffset = targetOffset
+        }
+        if (baseLaneOffset === null && legalOffset !== null) {
+          baseLaneOffset = legalOffset
+        }
+        if (baseLaneOffset === null) {
+          baseLaneOffset = 0
+        }
+        var baselineOffset = pathOffset !== null ? pathOffset : baseLaneOffset
+
         var displayLaneError = laneTargetError
         if (legalError !== null) {
           displayLaneError = legalError
@@ -468,12 +499,58 @@ angular.module('beamng.apps')
           displayLaneError = 0
         }
 
+        var laneGeometry = lanePath && lanePath.center && lanePath.center.length > 1 ? lanePath : null
+        var laneCenters = []
+        var laneBoundaries = []
+        var legalLaneShift = null
+        if (typeof legalOffset === 'number' && isFinite(legalOffset)) {
+          legalLaneShift = legalOffset - baselineOffset
+        } else if (laneInfo && typeof laneInfo.legalOffset === 'number' && isFinite(laneInfo.legalOffset)) {
+          legalLaneShift = laneInfo.legalOffset - baselineOffset
+        }
+        if (laneGeometry && laneOffsets && laneOffsets.length) {
+          var boundaryMap = Object.create(null)
+          var laneHalfSpacing = laneHalfWidth
+          if (!laneHalfSpacing && typeof laneWidthValue === 'number' && isFinite(laneWidthValue)) {
+            laneHalfSpacing = laneWidthValue * 0.5
+          }
+          for (var li = 0; li < laneOffsets.length; li++) {
+            var offsetVal = laneOffsets[li]
+            if (typeof offsetVal !== 'number' || !isFinite(offsetVal)) continue
+            var centerShift = offsetVal - baselineOffset
+            laneCenters.push({ shift: centerShift, offset: offsetVal })
+            if (laneHalfSpacing && isFinite(laneHalfSpacing) && laneHalfSpacing > 0) {
+              var leftVal = offsetVal - laneHalfSpacing
+              var rightVal = offsetVal + laneHalfSpacing
+              var leftKey = leftVal.toFixed(4)
+              var rightKey = rightVal.toFixed(4)
+              var leftEntry = boundaryMap[leftKey]
+              if (!leftEntry) {
+                leftEntry = { value: leftVal, count: 0 }
+                boundaryMap[leftKey] = leftEntry
+              }
+              leftEntry.count += 1
+              var rightEntry = boundaryMap[rightKey]
+              if (!rightEntry) {
+                rightEntry = { value: rightVal, count: 0 }
+                boundaryMap[rightKey] = rightEntry
+              }
+              rightEntry.count += 1
+            }
+          }
+          var boundaryKeys = Object.keys(boundaryMap)
+          for (var bk = 0; bk < boundaryKeys.length; bk++) {
+            laneBoundaries.push(boundaryMap[boundaryKeys[bk]])
+          }
+          laneBoundaries.sort(function (a, b) { return a.value - b.value })
+        }
+
         var routeCenter = route && route.center
         var routeLeft = route && route.left
         var routeRight = route && route.right
 
         var maxForward = 5
-        var maxLateral = laneHalfWidth ? laneHalfWidth : (lane && typeof lane.width === 'number' ? lane.width : 5)
+        var maxLateral = laneHalfWidth ? laneHalfWidth : (laneWidthValue && isFinite(laneWidthValue) ? laneWidthValue : 5)
         for (var i = 0; i < path.center.length; i++) {
           var pt = path.center[i]
           if (pt.y > maxForward) maxForward = pt.y
@@ -531,18 +608,48 @@ angular.module('beamng.apps')
             if (rrAbs > maxLateral) maxLateral = rrAbs
           }
         }
-        var offsetReach = Math.abs(displayLaneError) + (laneHalfWidth || 0)
+        if (laneCenters.length) {
+          var lateralMargin = laneHalfWidth || (laneWidthValue && isFinite(laneWidthValue) ? laneWidthValue * 0.5 : 0)
+          for (var lc = 0; lc < laneCenters.length; lc++) {
+            var centerEntry = laneCenters[lc]
+            if (!centerEntry) continue
+            var reach = Math.abs(centerEntry.shift)
+            if (lateralMargin) {
+              reach += lateralMargin
+            }
+            if (reach > maxLateral) {
+              maxLateral = reach
+            }
+          }
+        }
+        if (laneBoundaries.length) {
+          for (var lb = 0; lb < laneBoundaries.length; lb++) {
+            var boundaryEntry = laneBoundaries[lb]
+            if (!boundaryEntry) continue
+            var boundaryReach = Math.abs(boundaryEntry.value - baselineOffset)
+            if (boundaryReach > maxLateral) {
+              maxLateral = boundaryReach
+            }
+          }
+        }
+
+        var offsetReach = (absoluteOffset !== null ? Math.abs(absoluteOffset - baseLaneOffset) : Math.abs(displayLaneError)) + (laneHalfWidth || 0)
         if (offsetReach > maxLateral) maxLateral = offsetReach
         if (laneHalfWidth && laneHalfWidth * 1.2 > maxLateral) {
           maxLateral = laneHalfWidth * 1.2
         }
 
         var scaleY = (height * 0.65) / (maxForward + 5)
-        var scaleX = (width * 0.4) / (maxLateral + ((lane && lane.width) || 3))
+        var scaleX = (width * 0.4) / (maxLateral + (laneWidthValue || 3))
         var scale = Math.min(scaleX, scaleY)
         if (!isFinite(scale) || scale <= 0) scale = 6
 
-        var laneCenterX = carX - displayLaneError * scale
+        var laneCenterX = carX
+        if (absoluteOffset !== null && baseLaneOffset !== null) {
+          laneCenterX = carX - (absoluteOffset - baseLaneOffset) * scale
+        } else {
+          laneCenterX = carX - displayLaneError * scale
+        }
 
         if (laneHalfWidth && isFinite(laneHalfWidth)) {
           var laneDepth = height * 0.68
@@ -567,6 +674,40 @@ angular.module('beamng.apps')
           ctx.moveTo(laneRightBottom, carY)
           ctx.lineTo(laneRightTop, carY - laneDepth)
           ctx.stroke()
+        }
+
+        if (laneGeometry && laneCenters.length) {
+          var neighborWidth = Math.max(1.1, 1.5 * pixelScale)
+          for (var lc2 = 0; lc2 < laneCenters.length; lc2++) {
+            var laneEntry = laneCenters[lc2]
+            if (!laneEntry) continue
+            if (Math.abs(laneEntry.shift) < 1e-3) continue
+            var laneColor = 'rgba(150, 190, 255, 0.45)'
+            if (legalLaneShift !== null && Math.abs(laneEntry.shift - legalLaneShift) < 1e-3) {
+              laneColor = 'rgba(120, 220, 255, 0.6)'
+            }
+            plotPath(laneGeometry.center, laneColor, neighborWidth, carX, carY, scale, null, null, laneEntry.shift)
+          }
+        }
+
+        if (laneGeometry && laneBoundaries.length) {
+          var boundaryLineWidth = Math.max(1, 1.2 * pixelScale)
+          var dash = Math.max(3, 4 * pixelScale)
+          for (var lb2 = 0; lb2 < laneBoundaries.length; lb2++) {
+            var boundary = laneBoundaries[lb2]
+            if (!boundary) continue
+            var shiftValue = boundary.value - baselineOffset
+            ctx.save()
+            if (boundary.count > 1) {
+              ctx.setLineDash([dash, dash])
+            }
+            var boundaryColor = boundary.count > 1 ? 'rgba(210, 220, 255, 0.38)' : 'rgba(230, 240, 255, 0.55)'
+            plotPath((laneGeometry && laneGeometry.center) || path.center, boundaryColor, boundaryLineWidth, carX, carY, scale, null, null, shiftValue)
+            if (boundary.count > 1) {
+              ctx.setLineDash([])
+            }
+            ctx.restore()
+          }
         }
 
         var routeCount = routeCenter && routeCenter.length > 1 ? routeCenter.length : 0

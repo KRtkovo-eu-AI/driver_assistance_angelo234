@@ -67,7 +67,8 @@ local lane_state = {
   desired_offset = nil,
   lane_width = nil,
   prev_path_nodes = nil,
-  traffic_side = nil
+  traffic_side = nil,
+  travel_sign = nil
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -193,9 +194,12 @@ local function selectOffset(offsets, reference)
   return best
 end
 
-local function chooseLegalOffset(offsets, lane_width, traffic_side)
+local function chooseLegalOffset(offsets, lane_width, traffic_side, orientation_sign)
   if not offsets or #offsets == 0 or not traffic_side then return nil end
   local target_sign = traffic_side == 'left' and -1 or 1
+  if orientation_sign and orientation_sign < 0 then
+    target_sign = -target_sign
+  end
   local reference = nil
   if lane_width and lane_width > 0 then
     reference = target_sign * lane_width * 0.5
@@ -1357,11 +1361,28 @@ local function computeLaneModel(veh_props, params)
     return nil
   end
 
+  local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
+  local orientation_sign = nil
+  if vehicle_dir:length() >= 1e-6 then
+    local alignment = lane_dir:dot(vehicle_dir)
+    if alignment > 0.15 then
+      orientation_sign = 1
+    elseif alignment < -0.15 then
+      orientation_sign = -1
+    end
+  end
+  if orientation_sign and lane_state.travel_sign ~= orientation_sign then
+    lane_state.travel_sign = orientation_sign
+    lane_state.desired_offset = nil
+  elseif orientation_sign then
+    lane_state.travel_sign = orientation_sign
+  end
+
   local lane_right = vec3(lane_dir.y, -lane_dir.x, 0)
   local current_offset = (veh_xy - lane_point_xy):dot(lane_right)
 
   local desired_offset = selectOffset(offsets, lane_state.desired_offset or current_offset)
-  local legal_offset = chooseLegalOffset(offsets, lane_width, traffic_side)
+  local legal_offset = chooseLegalOffset(offsets, lane_width, traffic_side, orientation_sign)
   if not lane_state.desired_offset and legal_offset then
     desired_offset = legal_offset
   end
@@ -1387,8 +1408,12 @@ local function computeLaneModel(veh_props, params)
   if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
     lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
   end
-  local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
-  local heading_error = vehicle_dir:cross(lane_dir_norm).z
+  local heading_dir = vehicle_dir
+  if heading_dir:length() < 1e-6 then
+    heading_dir = extra_utils.toNormXYVec(veh_props.dir)
+    vehicle_dir = heading_dir
+  end
+  local heading_error = heading_dir:cross(lane_dir_norm).z
   local half_width = (path.lane_width or lane_width) * 0.5
   local target_offset = path.offset or desired_offset
   local lateral_error = current_offset - target_offset
@@ -1449,6 +1474,7 @@ local function computeLaneModel(veh_props, params)
       center = path.center,
       left = path.left,
       right = path.right,
+      offset = path.offset or desired_offset,
       length = path.length or 0,
       targetLength = path.target_length or 0,
       coveredLength = path.covered_length or path.length or 0,
@@ -1477,6 +1503,49 @@ local function computeLaneModel(veh_props, params)
 
   if future_dir then
     lane_model.heading.future = {x = future_dir.x, y = future_dir.y}
+  end
+
+  if offsets and #offsets > 0 then
+    local lane_offsets = {}
+    for i = 1, #offsets do
+      lane_offsets[i] = offsets[i]
+    end
+
+    local selected_offset = path.offset or desired_offset or current_offset or 0
+    local selected_index = nil
+    local legal_index = nil
+    local best_sel = huge
+    local best_legal = huge
+    for i = 1, #lane_offsets do
+      local offset_value = lane_offsets[i]
+      if offset_value then
+        local sel_dist = abs((selected_offset or 0) - offset_value)
+        if sel_dist < best_sel then
+          best_sel = sel_dist
+          selected_index = i
+        end
+        if legal_offset ~= nil then
+          local legal_dist = abs(legal_offset - offset_value)
+          if legal_dist < best_legal then
+            best_legal = legal_dist
+            legal_index = i
+          end
+        end
+      end
+    end
+
+    lane_model.lanes = {
+      width = path.lane_width or lane_width,
+      count = #lane_offsets,
+      offsets = lane_offsets,
+      selectedOffset = selected_offset,
+      legalOffset = legal_offset,
+      currentOffset = current_offset,
+      selectedIndex = selected_index,
+      legalIndex = legal_index,
+      trafficSide = traffic_side,
+      orientation = orientation_sign
+    }
   end
 
   return lane_model
