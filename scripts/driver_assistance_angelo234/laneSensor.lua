@@ -71,7 +71,8 @@ local function sense(veh)
     20,
     3,
     0.5,
-    veh_props.id
+    veh_props.id,
+    {includeDynamic = false}
   )
 
   local lidar_valid = #pts > 0

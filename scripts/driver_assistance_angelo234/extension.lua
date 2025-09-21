@@ -156,6 +156,55 @@ local function buildFrameBasis(forward, up)
   return dir, right, orthoUp
 end
 
+local function clampValue(value, minValue, maxValue)
+  if value < minValue then return minValue end
+  if value > maxValue then return maxValue end
+  return value
+end
+
+local VIRTUAL_LIDAR_PITCH_BLEND_START = math.rad(4)
+local VIRTUAL_LIDAR_PITCH_BLEND_FULL = math.rad(12)
+
+local function buildVirtualLidarFrame(forward, up)
+  if not forward or not up then return end
+  if forward:length() < 1e-6 then return end
+  if up:length() < 1e-6 then return end
+
+  local upNorm = up:normalized()
+  local forwardNorm = forward:normalized()
+  local planar = vec3(forward.x, forward.y, 0)
+  local planarLen = planar:length()
+
+  if planarLen > 1e-6 then
+    planar = planar / planarLen
+    local pitch = math.asin(clampValue(forwardNorm:dot(upNorm), -1, 1))
+    local absPitch = math.abs(pitch)
+    local blend = 0
+    if absPitch > VIRTUAL_LIDAR_PITCH_BLEND_START then
+      if absPitch >= VIRTUAL_LIDAR_PITCH_BLEND_FULL then
+        blend = 1
+      else
+        blend = (absPitch - VIRTUAL_LIDAR_PITCH_BLEND_START)
+          / (VIRTUAL_LIDAR_PITCH_BLEND_FULL - VIRTUAL_LIDAR_PITCH_BLEND_START)
+      end
+    end
+
+    local baseDir
+    if blend > 0 then
+      baseDir = planar * (1 - blend) + forwardNorm * blend
+    else
+      baseDir = planar
+    end
+
+    local dir, right, orthoUp = buildFrameBasis(baseDir, upNorm)
+    if dir and right and orthoUp then
+      return dir, right, orthoUp
+    end
+  end
+
+  return buildFrameBasis(forward, up)
+end
+
 local function stopVirtualLidarStreamServer()
   lidarPcdStream.stop()
   virtual_lidar_stream.running = false
@@ -171,13 +220,16 @@ local VEHICLE_POINT_MIN_SPACING = 0.3
 local VEHICLE_POINT_MAX_SPACING = 2.0
 local VEHICLE_POINT_MAX_STEPS = 20
 local VIRTUAL_LIDAR_H_FOV = math.rad(360)
-local VIRTUAL_LIDAR_V_FOV = math.rad(30)
+local VIRTUAL_LIDAR_V_FOV = math.rad(40)
 local VIRTUAL_LIDAR_H_RES = 60
 local VIRTUAL_LIDAR_V_RES = 15
 local VIRTUAL_LIDAR_MAX_RAYS = 80
 local FRONT_LIDAR_MAX_RAYS = 120
 local VIRTUAL_LIDAR_H_STEP = VIRTUAL_LIDAR_H_FOV / math.max(1, VIRTUAL_LIDAR_H_RES - 1)
 local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_RES - 1)
+local VIRTUAL_LIDAR_FRONT_EXTENSION = 120
+local VIRTUAL_LIDAR_SIDE_EXTENSION = 60
+local VIRTUAL_LIDAR_REAR_EXTENSION = 40
 local LIDAR_GROUND_THRESHOLD = -1.5
 local LIDAR_LOW_OBJECT_BAND = 1.0
 
@@ -855,14 +907,7 @@ local function frontLidarLoop()
         local pos = veh:getPosition()
         local forward = veh:getDirectionVector()
         local upVec = veh:getDirectionVectorUp()
-        local dir, right, up = nil, nil, nil
-        if forward and upVec then
-          local planarDir = vec3(forward.x, forward.y, 0)
-          dir, right, up = buildFrameBasis(planarDir, upVec)
-          if not dir then
-            dir, right, up = buildFrameBasis(forward, upVec)
-          end
-        end
+        local dir, right, up = buildVirtualLidarFrame(forward, upVec)
         if dir and right and up then
           local origin = vec3(pos.x, pos.y, pos.z + 1.8)
           front_lidar_frames_wip[front_lidar_phase + 1] = {
@@ -872,7 +917,7 @@ local function frontLidarLoop()
             up = up
           }
           local base_dist = aeb_params.sensor_max_distance
-          local front_dist = base_dist + 60
+          local front_dist = base_dist + VIRTUAL_LIDAR_FRONT_EXTENSION
           local hits = virtual_lidar.scan(
             origin,
             dir,
@@ -940,14 +985,7 @@ local function updateVirtualLidar(dt, veh)
     local pos = veh:getPosition()
     local forward = veh:getDirectionVector()
     local upVec = veh:getDirectionVectorUp()
-    local dir, right, up = nil, nil, nil
-    if forward and upVec then
-      local planarDir = vec3(forward.x, forward.y, 0)
-      dir, right, up = buildFrameBasis(planarDir, upVec)
-      if not dir then
-        dir, right, up = buildFrameBasis(forward, upVec)
-      end
-    end
+    local dir, right, up = buildVirtualLidarFrame(forward, upVec)
     if dir and right and up then
       local origin = vec3(pos.x, pos.y, pos.z + 1.8)
       -- In BeamNG's left-handed system, forward × up yields the vehicle's right
@@ -958,17 +996,18 @@ local function updateVirtualLidar(dt, veh)
         up = up
       }
       local base_dist = aeb_params.sensor_max_distance
-      -- boost forward reach by 60 m while keeping rear and side coverage at the base range
-      local front_dist = base_dist + 60
-      local rear_dist = base_dist
-      local side_dist = rear_dist
-      local ANG_FRONT = 85
-      local ANG_REAR = 112.5
+      -- extend coverage beyond the base sensor range to match LiDAR reach
+      local front_dist = base_dist + VIRTUAL_LIDAR_FRONT_EXTENSION
+      local rear_dist = base_dist + VIRTUAL_LIDAR_REAR_EXTENSION
+      local side_dist = base_dist + VIRTUAL_LIDAR_SIDE_EXTENSION
+      local scan_range = math.max(front_dist, rear_dist, side_dist)
+      local ANG_FRONT = 95
+      local ANG_REAR = 120
       local scan_hits = virtual_lidar.scan(
         origin,
         dir,
         up,
-        front_dist,
+        scan_range,
         VIRTUAL_LIDAR_H_FOV,
         VIRTUAL_LIDAR_V_FOV,
         VIRTUAL_LIDAR_H_RES,
@@ -978,7 +1017,8 @@ local function updateVirtualLidar(dt, veh)
         {
           hStart = virtual_lidar_phase,
           hStep = VIRTUAL_LIDAR_PHASES,
-          maxRays = VIRTUAL_LIDAR_MAX_RAYS
+          maxRays = VIRTUAL_LIDAR_MAX_RAYS,
+          includeDynamic = false
         }
       )
 
@@ -1343,11 +1383,7 @@ local function buildCurrentFrame(veh)
   local forward = veh:getDirectionVector()
   local upVec = veh:getDirectionVectorUp()
   if not pos or not forward or not upVec then return nil end
-  local planarDir = vec3(forward.x, forward.y, 0)
-  local dir, right, up = buildFrameBasis(planarDir, upVec)
-  if not dir then
-    dir, right, up = buildFrameBasis(forward, upVec)
-  end
+  local dir, right, up = buildVirtualLidarFrame(forward, upVec)
   if not dir or not right or not up then return nil end
   return {
     origin = vec3(pos.x, pos.y, pos.z + 1.8),

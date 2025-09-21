@@ -10,8 +10,9 @@ local sin, cos = math.sin, math.cos
 -- maxDist: max scan distance
 -- hFov, vFov: horizontal and vertical field of view in radians
 -- ignoreId: optional vehicle id to exclude from results
--- opts: optional table {hStart, hStep, vStart, vStep, maxRays, maxPoints}
---       to scan only a subset of rays or clamp the total number processed
+-- opts: optional table {hStart, hStep, vStart, vStep, maxRays, maxPoints,
+--       includeDynamic} to scan only a subset of rays, clamp totals, or skip
+--       dynamic objects entirely when includeDynamic is false
 local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, ignoreId, opts)
   local points = {}
   dir = dir:normalized()
@@ -32,6 +33,11 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
 
   local hStep = baseHStep
   local vStep = baseVStep
+  local includeDynamic = true
+
+  if opts.includeDynamic ~= nil then
+    includeDynamic = opts.includeDynamic and true or false
+  end
 
   if maxRays then
     local function count(stepH, stepV)
@@ -84,9 +90,17 @@ local function scan(origin, dir, up, maxDist, hFov, vFov, hRes, vRes, minDist, i
       local cv, sv = cos(vAng), sin(vAng)
       local rayDir = dir * (cv * ch) + right * (cv * sh) + up * sv
       processed = processed + 1
-      -- Perform both static and dynamic raycasts and keep the closest hit.
+      -- Perform both static and, when requested, dynamic raycasts and keep
+      -- the closest hit.
       local staticDist = castRayStatic(origin, rayDir, maxDist)
-      local dynHit = castRay(origin, origin + rayDir * maxDist, true, true)
+      local dynHit
+      local searchDist = maxDist
+      if staticDist and staticDist < searchDist then
+        searchDist = staticDist
+      end
+      if includeDynamic and searchDist > minDist then
+        dynHit = castRay(origin, origin + rayDir * searchDist, true, true)
+      end
 
       local dist, pt
       if staticDist and staticDist < maxDist then
