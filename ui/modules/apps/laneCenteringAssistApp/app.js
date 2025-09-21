@@ -85,6 +85,9 @@ angular.module('beamng.apps')
         offsetTarget: '—',
         offsetAbsolute: '—',
         offsetNormalized: '—',
+        offsetLegal: '—',
+        offsetLegalError: '—',
+        offsetLegalNormalized: '—',
         headingError: '—',
         curvature: '—',
         lookahead: '—',
@@ -105,6 +108,7 @@ angular.module('beamng.apps')
         routeNodes: '—',
         routeSpan: '—',
         routeUpdated: '—',
+        trafficSide: '—',
         warning: false
       }
 
@@ -163,6 +167,9 @@ angular.module('beamng.apps')
           var targetOffset = (typeof laneOffset.target === 'number' && isFinite(laneOffset.target)) ? laneOffset.target : null
           var absoluteOffset = (typeof laneOffset.current === 'number' && isFinite(laneOffset.current)) ? laneOffset.current : null
           var relativeOffset = (typeof laneOffset.error === 'number' && isFinite(laneOffset.error)) ? laneOffset.error : null
+          var legalOffset = (typeof laneOffset.legal === 'number' && isFinite(laneOffset.legal)) ? laneOffset.legal : null
+          var legalError = (typeof laneOffset.legalError === 'number' && isFinite(laneOffset.legalError)) ? laneOffset.legalError : null
+          var legalNormalized = (typeof laneOffset.legalNormalized === 'number' && isFinite(laneOffset.legalNormalized)) ? laneOffset.legalNormalized : null
 
           if (relativeOffset === null && absoluteOffset !== null && targetOffset !== null) {
             relativeOffset = absoluteOffset - targetOffset
@@ -172,10 +179,17 @@ angular.module('beamng.apps')
             absoluteOffset = relativeOffset + targetOffset
           }
 
+          if (legalError === null && legalOffset !== null && absoluteOffset !== null) {
+            legalError = absoluteOffset - legalOffset
+          }
+
           vm.offsetLane = formatNumber(relativeOffset, 2)
           vm.offsetTarget = formatNumber(targetOffset, 2)
           vm.offsetAbsolute = formatNumber(absoluteOffset, 2)
           vm.offsetNormalized = formatNumber(laneOffset.normalized, 2)
+          vm.offsetLegal = formatNumber(legalOffset, 2)
+          vm.offsetLegalError = formatNumber(legalError, 2)
+          vm.offsetLegalNormalized = formatNumber(legalNormalized, 2)
           vm.headingError = formatNumber((lane.heading.error || 0) * 180 / Math.PI, 1)
           vm.curvature = formatNumber(lane.curvature, 4)
           var path = lane.path
@@ -290,15 +304,32 @@ angular.module('beamng.apps')
           } else {
             vm.curvatureRadius = '—'
           }
+
+          var trafficSide = null
+          if (lane.roadRules) {
+            if (typeof lane.roadRules.trafficSide === 'string' && lane.roadRules.trafficSide.length) {
+              trafficSide = lane.roadRules.trafficSide
+            } else if (typeof lane.roadRules.rightHandDrive === 'boolean') {
+              trafficSide = lane.roadRules.rightHandDrive ? 'left' : 'right'
+            }
+          }
+          if (trafficSide) {
+            var label = trafficSide.charAt(0).toUpperCase() + trafficSide.slice(1) + '-hand traffic'
+            vm.trafficSide = label
+          } else {
+            vm.trafficSide = '—'
+          }
         } else {
           vm.laneWidth = vm.offsetLane = vm.offsetTarget = vm.offsetAbsolute = '—'
-          vm.offsetNormalized = vm.headingError = vm.curvature = vm.lookahead = vm.lookaheadTarget = '—'
+          vm.offsetNormalized = vm.offsetLegal = vm.offsetLegalError = vm.offsetLegalNormalized = '—'
+          vm.headingError = vm.curvature = vm.lookahead = vm.lookaheadTarget = '—'
           vm.pathCoverage = vm.pathSegments = vm.pathTruncated = vm.speed = '—'
           vm.pathPoints = '—'
           vm.curvatureRadius = '—'
           vm.branchCount = '—'
           vm.branchInfo = '—'
           vm.routeLength = vm.routeNodes = vm.routeSpan = vm.routeUpdated = '—'
+          vm.trafficSide = '—'
         }
 
         if (assist && assist.steering) {
@@ -413,18 +444,28 @@ angular.module('beamng.apps')
         var laneOffset = (lane && lane.offset) || {}
         var targetOffset = (typeof laneOffset.target === 'number' && isFinite(laneOffset.target)) ? laneOffset.target : null
         var absoluteOffset = (typeof laneOffset.current === 'number' && isFinite(laneOffset.current)) ? laneOffset.current : null
-        var laneCenterOffset = (typeof laneOffset.error === 'number' && isFinite(laneOffset.error)) ? laneOffset.error : null
+        var laneTargetError = (typeof laneOffset.error === 'number' && isFinite(laneOffset.error)) ? laneOffset.error : null
+        var legalOffset = (typeof laneOffset.legal === 'number' && isFinite(laneOffset.legal)) ? laneOffset.legal : null
+        var legalError = (typeof laneOffset.legalError === 'number' && isFinite(laneOffset.legalError)) ? laneOffset.legalError : null
 
-        if (laneCenterOffset === null && absoluteOffset !== null && targetOffset !== null) {
-          laneCenterOffset = absoluteOffset - targetOffset
+        if (laneTargetError === null && absoluteOffset !== null && targetOffset !== null) {
+          laneTargetError = absoluteOffset - targetOffset
         }
 
-        if (absoluteOffset === null && laneCenterOffset !== null && targetOffset !== null) {
-          absoluteOffset = laneCenterOffset + targetOffset
+        if (legalError === null && legalOffset !== null && absoluteOffset !== null) {
+          legalError = absoluteOffset - legalOffset
         }
 
-        if (laneCenterOffset === null) {
-          laneCenterOffset = 0
+        if (absoluteOffset === null && laneTargetError !== null && targetOffset !== null) {
+          absoluteOffset = laneTargetError + targetOffset
+        }
+
+        var displayLaneError = laneTargetError
+        if (legalError !== null) {
+          displayLaneError = legalError
+        }
+        if (displayLaneError === null) {
+          displayLaneError = 0
         }
 
         var routeCenter = route && route.center
@@ -490,7 +531,7 @@ angular.module('beamng.apps')
             if (rrAbs > maxLateral) maxLateral = rrAbs
           }
         }
-        var offsetReach = Math.abs(laneCenterOffset) + (laneHalfWidth || 0)
+        var offsetReach = Math.abs(displayLaneError) + (laneHalfWidth || 0)
         if (offsetReach > maxLateral) maxLateral = offsetReach
         if (laneHalfWidth && laneHalfWidth * 1.2 > maxLateral) {
           maxLateral = laneHalfWidth * 1.2
@@ -501,7 +542,7 @@ angular.module('beamng.apps')
         var scale = Math.min(scaleX, scaleY)
         if (!isFinite(scale) || scale <= 0) scale = 6
 
-        var laneCenterX = carX - laneCenterOffset * scale
+        var laneCenterX = carX - displayLaneError * scale
 
         if (laneHalfWidth && isFinite(laneHalfWidth)) {
           var laneDepth = height * 0.68
@@ -625,14 +666,21 @@ angular.module('beamng.apps')
 
         var assist = data && data.assist && data.assist.steering
         var hasLaneOffset = false
-        if (laneOffset && typeof laneOffset.error === 'number' && isFinite(laneOffset.error)) {
+        if ((laneOffset && typeof laneOffset.error === 'number' && isFinite(laneOffset.error)) || legalError !== null) {
           hasLaneOffset = true
         } else if (absoluteOffset !== null && targetOffset !== null) {
           hasLaneOffset = true
         }
 
         if (hasLaneOffset) {
-          var targetX = -laneCenterOffset * scale
+          var indicatorError = laneTargetError
+          if (indicatorError === null && absoluteOffset !== null && targetOffset !== null) {
+            indicatorError = absoluteOffset - targetOffset
+          }
+          if (indicatorError === null) {
+            indicatorError = displayLaneError
+          }
+          var targetX = -indicatorError * scale
           ctx.strokeStyle = 'rgba(255, 90, 90, 0.9)'
           ctx.lineWidth = Math.max(1.6, 2 * pixelScale)
           ctx.beginPath()
@@ -642,7 +690,7 @@ angular.module('beamng.apps')
 
           ctx.fillStyle = 'rgba(120, 160, 255, 0.9)'
           ctx.beginPath()
-          ctx.arc(carX - laneCenterOffset * scale, carY, Math.max(3, 4 * pixelScale), 0, Math.PI * 2)
+          ctx.arc(carX - indicatorError * scale, carY, Math.max(3, 4 * pixelScale), 0, Math.PI * 2)
           ctx.fill()
 
           if (targetOffset !== null) {

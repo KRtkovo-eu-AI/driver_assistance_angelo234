@@ -66,7 +66,8 @@ local lane_state = {
   prev_wps = nil,
   desired_offset = nil,
   lane_width = nil,
-  prev_path_nodes = nil
+  prev_path_nodes = nil,
+  traffic_side = nil
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -190,6 +191,37 @@ local function selectOffset(offsets, reference)
     end
   end
   return best
+end
+
+local function chooseLegalOffset(offsets, lane_width, traffic_side)
+  if not offsets or #offsets == 0 or not traffic_side then return nil end
+  local target_sign = traffic_side == 'left' and -1 or 1
+  local reference = nil
+  if lane_width and lane_width > 0 then
+    reference = target_sign * lane_width * 0.5
+  end
+
+  local best = nil
+  local best_dist = huge
+  for _, offset in ipairs(offsets) do
+    if (target_sign < 0 and offset < 0) or (target_sign > 0 and offset > 0) then
+      local dist = reference and abs(offset - reference) or abs(offset)
+      if dist < best_dist then
+        best = offset
+        best_dist = dist
+      end
+    end
+  end
+
+  if best then
+    return best
+  end
+
+  if reference then
+    return selectOffset(offsets, reference)
+  end
+
+  return selectOffset(offsets, 0)
 end
 
 local function makeEdgeKey(a, b)
@@ -1284,6 +1316,23 @@ local function computeLaneModel(veh_props, params)
     return nil
   end
 
+  local road_rules = extra_utils.getRoadRules and extra_utils.getRoadRules() or nil
+  local right_hand_drive = nil
+  local traffic_side = nil
+  if road_rules and road_rules.rightHandDrive ~= nil then
+    right_hand_drive = road_rules.rightHandDrive and true or false
+    traffic_side = right_hand_drive and 'left' or 'right'
+  end
+  if not traffic_side and extra_utils.getTrafficSide then
+    traffic_side = extra_utils.getTrafficSide()
+  end
+  if traffic_side and lane_state.traffic_side ~= traffic_side then
+    lane_state.traffic_side = traffic_side
+    lane_state.desired_offset = nil
+  elseif traffic_side == nil and lane_state.traffic_side ~= traffic_side then
+    lane_state.traffic_side = traffic_side
+  end
+
   local offsets = buildLaneOffsets(lane_width, wps.num_of_lanes or 1)
   if #offsets == 0 then
     lane_state.desired_offset = nil
@@ -1312,6 +1361,10 @@ local function computeLaneModel(veh_props, params)
   local current_offset = (veh_xy - lane_point_xy):dot(lane_right)
 
   local desired_offset = selectOffset(offsets, lane_state.desired_offset or current_offset)
+  local legal_offset = chooseLegalOffset(offsets, lane_width, traffic_side)
+  if not lane_state.desired_offset and legal_offset then
+    desired_offset = legal_offset
+  end
 
   local offset_smooth = clamp(params.lane_offset_smooth or 0.0, 0, 1)
   if lane_state.desired_offset then
@@ -1344,6 +1397,15 @@ local function computeLaneModel(veh_props, params)
     normalized_error = clamp(lateral_error / half_width, -5, 5)
   end
 
+  local legal_error = nil
+  local legal_normalized = nil
+  if legal_offset then
+    legal_error = current_offset - legal_offset
+    if half_width > 1e-3 then
+      legal_normalized = clamp(legal_error / half_width, -5, 5)
+    end
+  end
+
   local future_dir = path.future_dir
   local curvature = path.curvature or 0
 
@@ -1372,7 +1434,10 @@ local function computeLaneModel(veh_props, params)
       current = current_offset,
       target = target_offset,
       error = lateral_error,
-      normalized = normalized_error
+      normalized = normalized_error,
+      legal = legal_offset,
+      legalError = legal_error,
+      legalNormalized = legal_normalized
     },
     heading = {
       vehicle = {x = vehicle_dir.x, y = vehicle_dir.y},
@@ -1402,6 +1467,13 @@ local function computeLaneModel(veh_props, params)
     xnorm = xnorm,
     route = route_info
   }
+
+  if right_hand_drive ~= nil or traffic_side then
+    lane_model.roadRules = {
+      rightHandDrive = right_hand_drive,
+      trafficSide = traffic_side
+    }
+  end
 
   if future_dir then
     lane_model.heading.future = {x = future_dir.x, y = future_dir.y}

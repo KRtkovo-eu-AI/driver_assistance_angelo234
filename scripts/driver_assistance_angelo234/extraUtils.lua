@@ -44,6 +44,27 @@ local findClosestRoad = map.findClosestRoad
 
 refreshGraphData()
 
+local function getRoadRules()
+  if mapmgr and mapmgr.rules then
+    return mapmgr.rules
+  end
+  if map and type(map.getRoadRules) == "function" then
+    local ok, rules = pcall(map.getRoadRules)
+    if ok and type(rules) == "table" then
+      return rules
+    end
+  end
+  return nil
+end
+
+local function getTrafficSide()
+  local rules = getRoadRules()
+  if rules and rules.rightHandDrive ~= nil then
+    return rules.rightHandDrive and "left" or "right"
+  end
+  return nil
+end
+
 local function getPart(partName)
   local vehData = core_vehicle_manager.getPlayerVehicleData()
   if not vehData then return nil end
@@ -767,5 +788,7 @@ M.getCircularDistance = getCircularDistance
 M.getStraightDistance = getStraightDistance
 M.onClientPostStartMission = onClientPostStartMission
 M.isVehicleGhost = isVehicleGhost
+M.getRoadRules = getRoadRules
+M.getTrafficSide = getTrafficSide
 
 return M
