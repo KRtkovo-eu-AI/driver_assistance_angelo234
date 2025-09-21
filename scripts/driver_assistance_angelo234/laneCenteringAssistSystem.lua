@@ -35,6 +35,33 @@ local activation_grace_timer = 0
 local activation_handler = nil
 local last_assist_delta = 0
 
+local DOUBLE_CHIME_SOUND = 'art/sound/proximity_tone_50ms_moderate.wav'
+local DOUBLE_CHIME_GAP = 0.15
+local double_chime_pending = 0
+local double_chime_timer = 0
+
+local function queueDoubleChime()
+  if double_chime_pending <= 0 then
+    double_chime_timer = 0
+  end
+  double_chime_pending = double_chime_pending + 2
+end
+
+local function updateDoubleChime(dt)
+  if double_chime_pending <= 0 then return end
+  double_chime_timer = double_chime_timer - (dt or 0)
+  if double_chime_timer > 0 then return end
+
+  Engine.Audio.playOnce('AudioGui', DOUBLE_CHIME_SOUND)
+  double_chime_pending = double_chime_pending - 1
+
+  if double_chime_pending > 0 then
+    double_chime_timer = DOUBLE_CHIME_GAP
+  else
+    double_chime_timer = 0
+  end
+end
+
 local lane_state = {
   prev_wps = nil,
   desired_offset = nil,
@@ -1089,6 +1116,7 @@ end
 
 local function update(dt, veh, system_params, enabled)
   activation_grace_timer = max(activation_grace_timer - (dt or 0), 0)
+  updateDoubleChime(dt)
 
   local params = (system_params and system_params.lane_centering_params) or {}
   local steer_limit = params.steer_limit or 0.15
@@ -1154,8 +1182,8 @@ local function update(dt, veh, system_params, enabled)
     assist_low_speed_shutdown = true
     status.reason = "low_speed"
     warning_played = false
+    queueDoubleChime()
     if activation_handler then
-      Engine.Audio.playOnce('AudioGui', 'art/sound/proximity_tone_50ms_moderate.wav')
       activation_handler(false, "low_speed")
     end
     status.enabled = false
@@ -1208,6 +1236,7 @@ local function update(dt, veh, system_params, enabled)
     warning_played = false
     lane_state.prev_path_nodes = nil
     resetControllers()
+    queueDoubleChime()
     if activation_handler then
       activation_handler(false, "driver_override")
     end
@@ -1254,8 +1283,11 @@ local function update(dt, veh, system_params, enabled)
     activation_grace_timer = 0
   end
 
-  if newly_active and activation_handler then
-    activation_handler(true, "speed_ready")
+  if newly_active then
+    queueDoubleChime()
+    if activation_handler then
+      activation_handler(true, "speed_ready")
+    end
   end
 
   if lane_model then
@@ -1303,8 +1335,18 @@ local function setActivationCallback(cb)
   activation_handler = cb
 end
 
+local function playActivationChime()
+  queueDoubleChime()
+end
+
+local function playDeactivationChime()
+  queueDoubleChime()
+end
+
 M.update = update
 M.getLaneData = getLaneData
 M.setActivationCallback = setActivationCallback
+M.playActivationChime = playActivationChime
+M.playDeactivationChime = playDeactivationChime
 
 return M
