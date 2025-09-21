@@ -3,6 +3,7 @@
 local M = {}
 
 local extra_utils = require('scripts/driver_assistance_angelo234/extraUtils')
+local lane_sensor = require('scripts/driver_assistance_angelo234/laneSensor')
 local _ = require("controlSystems")
 
 local abs = math.abs
@@ -15,6 +16,47 @@ local clamp = function(value, low, high)
   if value < low then return low end
   if value > high then return high end
   return value
+end
+
+local function toUnitVec2(vec)
+  if not vec then return nil end
+  local x, y
+  if type(vec) == "table" then
+    x = vec.x or vec[1]
+    y = vec.y or vec[2]
+  end
+  if type(x) ~= "number" or type(y) ~= "number" then return nil end
+  local len = sqrt(x * x + y * y)
+  if len < 1e-6 then return nil end
+  return vec3(x / len, y / len, 0)
+end
+
+local function blendDirection(base, target, weight)
+  if not target or weight <= 0 then return base end
+  local target_norm = toUnitVec2(target)
+  if not target_norm then return base end
+
+  if not base then
+    return target_norm
+  end
+
+  local base_norm = toUnitVec2(base)
+  if not base_norm then
+    return target_norm
+  end
+
+  local fused = vec3(
+    base_norm.x * (1 - weight) + target_norm.x * weight,
+    base_norm.y * (1 - weight) + target_norm.y * weight,
+    0
+  )
+
+  local fused_len = fused:length()
+  if fused_len < 1e-6 then
+    return base_norm
+  end
+
+  return vec3(fused.x / fused_len, fused.y / fused_len, 0)
 end
 
 local computeAverageCurvature
@@ -1994,7 +2036,7 @@ local function gatherPath(veh_props, initial_wps, desired_offset, params)
   return gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
 end
 
-local function computeLaneModel(veh_props, params)
+local function computeLaneModel(veh_props, params, sensor_data)
   if not veh_props then return nil end
 
   local wps = extra_utils.getWaypointStartEndAdvanced(veh_props, veh_props, veh_props.front_pos, lane_state.prev_wps)
@@ -2128,6 +2170,74 @@ local function computeLaneModel(veh_props, params)
     lane_state.road_edges = nil
   end
 
+  local lane_dir_norm = path.dir
+  if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
+    lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
+  end
+
+  local future_dir = path.future_dir
+  local curvature = path.curvature or 0
+
+  if sensor_data then
+    local base_blend = clamp(params.lane_sensor_blend or 0.3, 0, 1)
+    local offset_blend = clamp(params.lane_sensor_offset_blend or base_blend, 0, 1)
+    local width_blend = clamp(params.lane_sensor_width_blend or (base_blend * 0.75), 0, 1)
+    local heading_blend = clamp(params.lane_sensor_heading_blend or (base_blend * 0.6), 0, 1)
+    local future_blend = clamp(params.lane_sensor_future_blend or heading_blend, 0, 1)
+    local curvature_blend = clamp(params.lane_sensor_curvature_blend or (base_blend * 0.5), 0, 1)
+    local offset_limit = params.lane_sensor_offset_limit or 0.75
+    local width_limit = params.lane_sensor_width_limit or 1.0
+    local curvature_limit = params.lane_sensor_curvature_limit or 0.1
+
+    if width_blend > 0 then
+      local sensor_width = sensor_data.lane_width
+      if type(sensor_width) == "number" and sensor_width > 0 then
+        local current_width = path.lane_width or lane_width
+        if current_width and current_width > 0 then
+          local diff = sensor_width - current_width
+          if width_limit and width_limit > 0 then
+            diff = clamp(diff, -width_limit, width_limit)
+          end
+          path.lane_width = current_width + diff * width_blend
+        else
+          path.lane_width = sensor_width
+        end
+      end
+    end
+
+    if offset_blend > 0 then
+      local sensor_offset = sensor_data.lateral_offset
+      if type(sensor_offset) == "number" then
+        local diff = sensor_offset - current_offset
+        if offset_limit and offset_limit > 0 then
+          diff = clamp(diff, -offset_limit, offset_limit)
+        end
+        current_offset = current_offset + diff * offset_blend
+      end
+    end
+
+    if heading_blend > 0 then
+      lane_dir_norm = blendDirection(lane_dir_norm, sensor_data.road_dir, heading_blend) or lane_dir_norm
+    end
+
+    if future_blend > 0 then
+      future_dir = blendDirection(future_dir, sensor_data.future_dir, future_blend) or future_dir
+    end
+
+    if curvature_blend > 0 then
+      local sensor_curvature = sensor_data.curvature
+      if type(sensor_curvature) == "number" then
+        local diff = sensor_curvature - curvature
+        if curvature_limit and curvature_limit > 0 then
+          diff = clamp(diff, -curvature_limit, curvature_limit)
+        end
+        curvature = curvature + diff * curvature_blend
+      end
+    end
+
+    lane_state.lane_width = path.lane_width or lane_width
+  end
+
   local half_width = (path.lane_width or lane_width) * 0.5
   local target_offset = path.offset or desired_offset
   local lateral_error = current_offset - target_offset
@@ -2145,18 +2255,12 @@ local function computeLaneModel(veh_props, params)
     end
   end
 
-  local lane_dir_norm = path.dir
-  if not lane_dir_norm or lane_dir_norm:length() < 1e-6 then
-    lane_dir_norm = extra_utils.toNormXYVec(wps.end_wp_pos - wps.start_wp_pos)
-  end
   local heading_dir = vehicle_dir
   if heading_dir:length() < 1e-6 then
     heading_dir = extra_utils.toNormXYVec(veh_props.dir)
     vehicle_dir = heading_dir
   end
   local heading_error = heading_dir:cross(lane_dir_norm).z
-  local future_dir = path.future_dir
-  local curvature = path.curvature or 0
 
   local route_info = nil
   if route_preview then
@@ -2429,7 +2533,12 @@ local function update(dt, veh, system_params, enabled)
   end
   if override_release < 0 then override_release = 0 end
 
-  local lane_model_raw = computeLaneModel(veh_props, params)
+  local sensor_data = nil
+  if extra_utils.getPart and extra_utils.getPart("lidar_angelo234") then
+    sensor_data = lane_sensor.sense(veh)
+  end
+
+  local lane_model_raw = computeLaneModel(veh_props, params, sensor_data)
   if signal_override_active and lane_model_raw then
     local turn_value, turn_mag = getLaneTurnState(lane_model_raw)
     local block_turn = false
