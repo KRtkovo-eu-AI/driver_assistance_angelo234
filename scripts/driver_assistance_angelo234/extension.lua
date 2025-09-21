@@ -162,6 +162,9 @@ local function clampValue(value, minValue, maxValue)
   return value
 end
 
+local VIRTUAL_LIDAR_PITCH_BLEND_START = math.rad(4)
+local VIRTUAL_LIDAR_PITCH_BLEND_FULL = math.rad(12)
+
 local function buildVirtualLidarFrame(forward, up)
   if not forward or not up then return end
   if forward:length() < 1e-6 then return end
@@ -227,8 +230,6 @@ local VIRTUAL_LIDAR_V_STEP = VIRTUAL_LIDAR_V_FOV / math.max(1, VIRTUAL_LIDAR_V_R
 local VIRTUAL_LIDAR_FRONT_EXTENSION = 120
 local VIRTUAL_LIDAR_SIDE_EXTENSION = 60
 local VIRTUAL_LIDAR_REAR_EXTENSION = 40
-local VIRTUAL_LIDAR_PITCH_BLEND_START = math.rad(4)
-local VIRTUAL_LIDAR_PITCH_BLEND_FULL = math.rad(12)
 local LIDAR_GROUND_THRESHOLD = -1.5
 local LIDAR_LOW_OBJECT_BAND = 1.0
 
