@@ -145,12 +145,7 @@ Toggle with **"Toggle Auto Headlight Dimming"** key. After enabling, switch to h
 Toggle the assist via its Vehicle control binding. Once the sensor suite is installed it continuously watches for static obstacles, sounding escalating warnings, flashing hazards, cutting throttle and braking when impact is imminent.
 
 ### 12-phase LFO LiDAR & Virtual LiDAR output
-Equip the LiDAR sensor pack, then enable export or streaming via the in-game console:
-```
-extensions.driver_assistance_angelo234.setVirtualLidarPcdExportEnabled(true)
-extensions.driver_assistance_angelo234.setVirtualLidarPcdStreamEnabled(true)
-```
-Set a custom output path or TCP port as needed. Disable by passing `false`.
+Please follow the information on our [Github pages][(https://github.com/KRtkovo-eu-AI/driver_assistance_angelo234) README section and also check the [virtual-lidar-pcd.md](https://github.com/KRtkovo-eu-AI/driver_assistance_angelo234/blob/main/virtual-lidar-pcd.md) documentation.
 
 ### Lane Centering Assist
 Requires the dedicated lane sensor hardware. Toggle the assist via its Vehicle control binding—once armed it engages automatically when lane data and speed criteria are met, and it disengages if you steer past the lane edge, leave the road, signal a maneuver or remove the hardware.
