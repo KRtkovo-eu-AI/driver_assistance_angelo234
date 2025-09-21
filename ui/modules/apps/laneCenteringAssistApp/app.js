@@ -109,7 +109,9 @@ angular.module('beamng.apps')
         routeSpan: '—',
         routeUpdated: '—',
         trafficSide: '—',
-        warning: false
+        warning: false,
+        signalOverride: false,
+        signalOverrideBlocked: false
       }
 
       function formatNumber(value, digits) {
@@ -154,6 +156,10 @@ angular.module('beamng.apps')
           statusText = 'Standby'
           statusClass = 'lca-status-idle'
           statusDetail = 'Waiting for speed'
+        } else if (status.reason === 'signal_override') {
+          statusText = 'Standby'
+          statusClass = 'lca-status-warning'
+          statusDetail = status.signalOverrideBlocked ? 'Blocking AI turn' : 'Holding straight path'
         } else if (!status.available) {
           statusText = 'Standby'
           statusClass = 'lca-status-idle'
@@ -163,10 +169,21 @@ angular.module('beamng.apps')
           statusClass = 'lca-status-ready'
         }
 
+        if (status.signalOverride) {
+          if (statusClass === 'lca-status-ready') {
+            statusClass = 'lca-status-warning'
+            statusDetail = status.signalOverrideBlocked ? 'Blocking AI turn' : 'Holding straight path'
+          } else if (statusClass === 'lca-status-active') {
+            statusDetail = status.signalOverrideBlocked ? 'Blocking AI turn' : (statusDetail || 'Holding straight path')
+          }
+        }
+
         vm.statusText = statusText
         vm.statusClass = statusClass
         vm.statusDetail = statusDetail
         vm.warning = !!(assist && assist.warning)
+        vm.signalOverride = !!status.signalOverride
+        vm.signalOverrideBlocked = !!status.signalOverrideBlocked
 
         if (lane) {
           vm.laneWidth = formatNumber(lane.width, 2)

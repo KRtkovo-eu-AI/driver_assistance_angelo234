@@ -79,7 +79,13 @@ local lane_state = {
   ai_conflict_confirm_timer = 0,
   ai_conflict_release_timer = 0,
   lane_offsets = nil,
-  road_edges = nil
+  road_edges = nil,
+  signal_override_active = false,
+  signal_override_timer = 0,
+  signal_override_direction = 0,
+  signal_suppression_cooldown = 0,
+  signal_override_blocked = false,
+  held_path_progress = 0
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -367,6 +373,35 @@ local function convertSamplesToLocal(samples, normals, veh_props, half_width)
   return center_local, left_local, right_local
 end
 
+local function buildWorldBoundaries(samples, normals, half_width)
+  local left_world = {}
+  local right_world = {}
+  if not samples or #samples == 0 then return left_world, right_world end
+
+  half_width = half_width or 0
+  for i = 1, #samples do
+    local sample = samples[i]
+    if sample then
+      local normal = normals and normals[i] or nil
+      local nx, ny, nz = 0, 1, 0
+      if normal then
+        nx, ny, nz = normal.x or 0, normal.y or 0, normal.z or 0
+        local nlen = sqrt(nx * nx + ny * ny + nz * nz)
+        if nlen > 1e-6 then
+          nx, ny, nz = nx / nlen, ny / nlen, nz / nlen
+        else
+          nx, ny, nz = 0, 1, 0
+        end
+      end
+
+      left_world[#left_world + 1] = vec3(sample.x - nx * half_width, sample.y - ny * half_width, sample.z - nz * half_width)
+      right_world[#right_world + 1] = vec3(sample.x + nx * half_width, sample.y + ny * half_width, sample.z + nz * half_width)
+    end
+  end
+
+  return left_world, right_world
+end
+
 local function findNearestSampleIndex(samples)
   if not samples then return nil end
   local best_idx = nil
@@ -510,6 +545,366 @@ local function computeRoadDistanceFromModel(lane_model)
   else
     return 0
   end
+end
+
+local function getLaneTurnState(lane_model)
+  if not lane_model then return 0, 0, 0 end
+  local heading = lane_model.heading or {}
+  local lane_heading = heading.lane or heading.vehicle
+  local future_heading = heading.future or lane_heading
+  local turn_value = 0
+  if lane_heading and future_heading then
+    local hx = lane_heading.x or 0
+    local hy = lane_heading.y or 0
+    local fx = future_heading.x or 0
+    local fy = future_heading.y or 0
+    turn_value = hx * fy - hy * fx
+  end
+  local curvature = lane_model.curvature or 0
+  local turn_mag = max(abs(turn_value), abs(curvature))
+  return turn_value, turn_mag, curvature
+end
+
+local function getTurnSignalState()
+  if not electrics_values_angelo234 then return false, false, false end
+  local values = electrics_values_angelo234
+
+  local turn_val = values["turnsignal"]
+  local left = false
+  local right = false
+  if type(turn_val) == "number" then
+    if turn_val < -0.2 then left = true end
+    if turn_val > 0.2 then right = true end
+  end
+
+  local left_input = values["signal_left_input"]
+  if left_input == nil then left_input = values["signal_L"] end
+  if left_input ~= nil then
+    if type(left_input) == "number" then
+      if left_input ~= 0 then left = true end
+    elseif left_input then
+      left = true
+    end
+  end
+
+  local right_input = values["signal_right_input"]
+  if right_input == nil then right_input = values["signal_R"] end
+  if right_input ~= nil then
+    if type(right_input) == "number" then
+      if right_input ~= 0 then right = true end
+    elseif right_input then
+      right = true
+    end
+  end
+
+  local hazard = values["hazard"] or values["signal_warn"]
+  if hazard and hazard ~= 0 then
+    return false, false, false
+  end
+
+  if left and right then
+    if type(turn_val) ~= "number" or abs(turn_val) < 0.2 then
+      return false, false, false
+    end
+  end
+
+  return left, right, left or right
+end
+
+local function suppressTurnSignals(veh)
+  if not veh then return end
+  veh:queueLuaCommand(
+    "electrics.set_left_signal(false);electrics.set_right_signal(false);electrics.stop_turn_signal();electrics.set_warn_signal(false)"
+  )
+end
+
+local function updateSignalOverride(dt, veh, params, enabled)
+  dt = dt or 0
+  if not enabled then
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    return
+  end
+
+  local left, right, active = getTurnSignalState()
+  local direction = 0
+  if left and not right then
+    direction = -1
+  elseif right and not left then
+    direction = 1
+  elseif type(electrics_values_angelo234 and electrics_values_angelo234["turnsignal"]) == "number" then
+    local turn_val = electrics_values_angelo234["turnsignal"]
+    if turn_val < -0.2 then
+      direction = -1
+      active = true
+    elseif turn_val > 0.2 then
+      direction = 1
+      active = true
+    end
+  end
+
+  local detected = active and direction ~= 0
+  if detected then
+    local duration = params.signal_override_duration or 2.5
+    if duration < 0 then duration = 0 end
+    local changed = not lane_state.signal_override_active or lane_state.signal_override_direction ~= direction
+    lane_state.signal_override_active = true
+    lane_state.signal_override_timer = duration
+    lane_state.signal_override_direction = direction
+    if changed then
+      lane_state.prev_path_nodes = nil
+      lane_state.desired_offset = nil
+    end
+
+    local cooldown = params.signal_suppression_cooldown or 0.35
+    if lane_state.signal_suppression_cooldown <= 0 then
+      suppressTurnSignals(veh)
+      lane_state.signal_suppression_cooldown = max(cooldown, 0)
+    end
+  else
+    lane_state.signal_override_timer = max((lane_state.signal_override_timer or 0) - dt, 0)
+    if lane_state.signal_override_timer <= 0 then
+      lane_state.signal_override_active = false
+      lane_state.signal_override_direction = 0
+    end
+  end
+
+  lane_state.signal_suppression_cooldown = max((lane_state.signal_suppression_cooldown or 0) - dt, 0)
+end
+
+local function maintainLaneModel(last_model, veh_props, params, dt, hold_time)
+  if not last_model or not veh_props or not params then return nil end
+  local path = last_model.path
+  if not path then return nil end
+
+  local center_world = path.centerWorld
+  if not center_world or #center_world < 2 then return nil end
+
+  local hold_max = params.lane_data_hold_max or 0
+  if hold_max > 0 and hold_time and hold_time > hold_max then
+    return nil
+  end
+
+  local lane_width = last_model.width or path.lane_width or params.default_lane_width or 3.5
+  if not lane_width or lane_width <= 0 then
+    lane_width = params.default_lane_width or 3.5
+  end
+  local half_width = lane_width * 0.5
+
+  local normals = path.normalsWorld
+  if not normals or #normals ~= #center_world then
+    normals = computeNormals(center_world)
+    path.normalsWorld = normals
+  end
+
+  local veh_pos = veh_props.center_pos
+  if not veh_pos then return nil end
+
+  local best_index = nil
+  local best_t = 0
+  local best_proj = nil
+  local best_dir = nil
+  local best_right = nil
+  local best_dist = huge
+  local total_length = 0
+  local progress_distance = 0
+
+  for i = 1, #center_world - 1 do
+    local p1 = center_world[i]
+    local p2 = center_world[i + 1]
+    local seg = p2 - p1
+    local seg_len = seg:length()
+    if seg_len > 1e-6 then
+      local inv_len = 1 / seg_len
+      local dir = vec3(seg.x * inv_len, seg.y * inv_len, 0)
+      local seg_len_sq = seg_len * seg_len
+      local t = clamp(((veh_pos - p1):dot(seg)) / seg_len_sq, 0, 1)
+      local proj = vec3(p1.x + seg.x * t, p1.y + seg.y * t, p1.z + seg.z * t)
+      local dist_sq = (veh_pos - proj):squaredLength()
+      if dist_sq < best_dist then
+        best_dist = dist_sq
+        best_index = i
+        best_t = t
+        best_proj = proj
+        best_dir = dir
+        best_right = vec3(dir.y, -dir.x, 0)
+        progress_distance = total_length + seg_len * t
+      end
+      total_length = total_length + seg_len
+    end
+  end
+
+  if not best_index or not best_dir or not best_right then
+    return nil
+  end
+
+  local sample_spacing = path.sampleSpacing or path.sample_spacing
+  if not sample_spacing or sample_spacing <= 0 then
+    if #center_world > 1 then
+      sample_spacing = total_length / (#center_world - 1)
+    end
+    if not sample_spacing or sample_spacing <= 0 then
+      sample_spacing = params.segment_length_hint or 5
+    end
+    path.sampleSpacing = sample_spacing
+  end
+
+  local remaining = total_length - progress_distance
+  local extend_trigger = params.lane_hold_extend_trigger or 15
+  local extend_distance = params.lane_hold_extend_distance or 45
+  if extend_distance < extend_trigger then
+    extend_distance = extend_trigger
+  end
+  if extend_distance > 0 and remaining < extend_trigger then
+    local needed = extend_distance - remaining
+    if needed > 0 then
+      local last_point = center_world[#center_world]
+      local prev_point = center_world[#center_world - 1] or last_point
+      local extend_dir = extra_utils.toNormXYVec(last_point - prev_point)
+      if extend_dir:length() < 1e-6 then
+        extend_dir = best_dir
+      end
+      local step = sample_spacing
+      if not step or step <= 0 then step = params.segment_length_hint or 5 end
+      if step < 1 then step = 1 end
+      local count = ceil(needed / step)
+      for i = 1, count do
+        local new_point = vec3(
+          last_point.x + extend_dir.x * step * i,
+          last_point.y + extend_dir.y * step * i,
+          last_point.z + extend_dir.z * step * i
+        )
+        center_world[#center_world + 1] = new_point
+        normals[#normals + 1] = vec3(extend_dir.y, -extend_dir.x, 0)
+      end
+      total_length = total_length + step * count
+      remaining = remaining + step * count
+    end
+  end
+
+  path.centerWorld = center_world
+  path.normalsWorld = normals
+  local left_world, right_world = buildWorldBoundaries(center_world, normals, half_width)
+  path.leftWorld = left_world
+  path.rightWorld = right_world
+
+  local center_local, left_local, right_local = convertSamplesToLocal(center_world, normals, veh_props, half_width)
+  path.center = center_local
+  path.left = left_local
+  path.right = right_local
+
+  path.length = computePathLength(center_world)
+  if path.length <= 0 then
+    path.length = total_length
+  end
+  path.coveredLength = path.length
+  if #center_local > 1 then
+    path.sampleSpacing = path.length / (#center_local - 1)
+    path.sample_spacing = path.sampleSpacing
+  else
+    path.sample_spacing = path.sampleSpacing
+  end
+
+  local target_offset = 0
+  if last_model.offset and last_model.offset.target ~= nil then
+    target_offset = last_model.offset.target
+  elseif path.offset ~= nil then
+    target_offset = path.offset
+  elseif lane_state.desired_offset then
+    target_offset = lane_state.desired_offset
+  end
+
+  local delta = (veh_pos - best_proj):dot(best_right)
+  local current_offset = target_offset + delta
+  local normalized_error = 0
+  if half_width > 1e-3 then
+    normalized_error = clamp(delta / half_width, -5, 5)
+  end
+
+  last_model.width = lane_width
+  last_model.offset = last_model.offset or {}
+  last_model.offset.current = current_offset
+  last_model.offset.target = target_offset
+  last_model.offset.error = delta
+  last_model.offset.normalized = normalized_error
+
+  if last_model.offset.legal ~= nil then
+    local legal_error = current_offset - last_model.offset.legal
+    last_model.offset.legalError = legal_error
+    if half_width > 1e-3 then
+      last_model.offset.legalNormalized = clamp(legal_error / half_width, -5, 5)
+    else
+      last_model.offset.legalNormalized = 0
+    end
+  end
+
+  local vehicle_dir = extra_utils.toNormXYVec(veh_props.dir)
+  if vehicle_dir:length() < 1e-6 then
+    vehicle_dir = vec3(best_dir.x, best_dir.y, best_dir.z or 0)
+  end
+
+  last_model.heading = last_model.heading or {}
+  last_model.heading.vehicle = {x = vehicle_dir.x, y = vehicle_dir.y}
+  last_model.heading.lane = {x = best_dir.x, y = best_dir.y}
+  last_model.heading.error = vehicle_dir:cross(best_dir).z
+
+  local future_distance = params.future_dir_distance or 18
+  local future_dir = best_dir
+  if future_distance > 0 and #center_world > 1 then
+    local remaining_distance = future_distance
+    local idx = best_index
+    local t = best_t
+    local ref_point = best_proj
+    while remaining_distance > 0 and idx <= #center_world - 1 do
+      local p1 = center_world[idx]
+      local p2 = center_world[idx + 1]
+      local seg = p2 - p1
+      local seg_len = seg:length()
+      if seg_len > 1e-6 then
+        local leftover = seg_len * (1 - t)
+        if leftover >= remaining_distance then
+          local target_point = p1 + seg * (t + remaining_distance / seg_len)
+          local dir = extra_utils.toNormXYVec(target_point - ref_point)
+          if dir:length() >= 1e-6 then
+            future_dir = dir
+          else
+            future_dir = extra_utils.toNormXYVec(seg)
+          end
+          break
+        else
+          remaining_distance = remaining_distance - leftover
+          idx = idx + 1
+          t = 0
+          ref_point = p2
+          future_dir = extra_utils.toNormXYVec(seg)
+        end
+      else
+        break
+      end
+    end
+  end
+  last_model.heading.future = {x = future_dir.x, y = future_dir.y}
+
+  last_model.curvature = computeAverageCurvature(center_local, params.curvature_samples or 8)
+  last_model.speed = veh_props.speed
+  last_model.holdActive = true
+  last_model.fresh = false
+
+  if last_model.lanes then
+    last_model.lanes.currentOffset = current_offset
+  end
+
+  path.offset = target_offset
+  if path.targetLength and path.targetLength > 0 then
+    path.truncated = (path.length + 1e-6) < path.targetLength
+  else
+    path.truncated = false
+  end
+
+  lane_state.held_path_progress = progress_distance
+  return last_model
 end
 
 local function requestAiRouteData(veh)
@@ -693,6 +1088,20 @@ local function selectNextSegment(veh_props, current_wps, params, _preferred_offs
   local best_wp = nil
   local best_score = -huge
 
+  local override_active = lane_state.signal_override_active and true or false
+  local override_dir = lane_state.signal_override_direction or 0
+  local override_threshold = params.signal_override_turn_threshold or 0.2
+  if override_threshold < 0 then override_threshold = 0 end
+  local override_penalty = params.signal_override_turn_penalty or 2.8
+  if override_penalty < 0 then override_penalty = 0 end
+  local override_block_penalty = params.signal_override_block_penalty or (override_penalty * 2)
+  if override_block_penalty < 0 then override_block_penalty = 0 end
+  local override_bonus = params.signal_override_bonus or 0
+
+  if not override_active then
+    override_dir = 0
+  end
+
   local function evaluateCandidate(next_wp, link)
     if next_wp == current_wps.start_wp then return end
     local key = makeEdgeKey(current_node, next_wp)
@@ -726,13 +1135,36 @@ local function selectNextSegment(veh_props, current_wps, params, _preferred_offs
 
     local turn_weight = params.segment_turn_penalty or 0.4
     if turn_weight < 0 then turn_weight = 0 end
-    local turn_mag = abs(current_dir.x * seg_dir.y - current_dir.y * seg_dir.x)
+    local turn_value = current_dir.x * seg_dir.y - current_dir.y * seg_dir.x
+    local turn_mag = abs(turn_value)
 
     local score =
       forward_score * align_weight + heading_score * heading_weight + drivability * drivability_weight - penalty
 
     if turn_weight > 0 then
       score = score - turn_mag * turn_weight
+    end
+
+    if override_active then
+      local blocked = false
+      if override_dir < 0 and turn_value > override_threshold then
+        blocked = true
+      elseif override_dir > 0 and turn_value < -override_threshold then
+        blocked = true
+      end
+
+      if blocked then
+        score = score - override_block_penalty - turn_mag * override_block_penalty
+      else
+        if turn_mag > override_threshold then
+          score = score - turn_mag * override_penalty
+        elseif override_bonus > 0 and override_threshold > 1e-6 then
+          local factor = 1 - (turn_mag / override_threshold)
+          if factor > 0 then
+            score = score + override_bonus * factor
+          end
+        end
+      end
     end
 
     if score > best_score then
@@ -1220,6 +1652,7 @@ local function buildPathGeometryFromSegments(veh_props, segments_list, desired_o
   end
 
   local normals = computeNormals(smoothed)
+  local left_world, right_world = buildWorldBoundaries(smoothed, normals, half_width)
   local center_local, left_local, right_local = convertSamplesToLocal(smoothed, normals, veh_props, half_width)
 
   local lane_dir_norm = nil
@@ -1248,6 +1681,10 @@ local function buildPathGeometryFromSegments(veh_props, segments_list, desired_o
     offset = preferred_offset or 0,
     lane_width = lane_width,
     sample_spacing = sample_spacing,
+    centerWorld = smoothed,
+    leftWorld = left_world,
+    rightWorld = right_world,
+    normalsWorld = normals,
     segments_used = segments_used,
     covered_length = total_length,
     last_wps = last_wps,
@@ -1427,6 +1864,7 @@ local function gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
     half_width = lane_width_est * 0.5
   end
 
+  local left_world, right_world = buildWorldBoundaries(smoothed, normals, half_width)
   local center_local, left_local, right_local = convertSamplesToLocal(smoothed, normals, veh_props, half_width)
   local lane_dir_norm = nil
   if #smoothed >= 2 then
@@ -1453,6 +1891,10 @@ local function gatherPathLegacy(veh_props, initial_wps, desired_offset, params)
     last_wps = current_wps,
     lane_width = half_width * 2,
     sample_spacing = (#center_local > 1) and (path_length / (#center_local - 1)) or 0,
+    centerWorld = smoothed,
+    leftWorld = left_world,
+    rightWorld = right_world,
+    normalsWorld = normals,
     target_length = target_length,
     segment_count = segments,
     segment_limit = max_segments,
@@ -1753,12 +2195,16 @@ local function computeLaneModel(veh_props, params)
       center = path.center,
       left = path.left,
       right = path.right,
+      centerWorld = path.centerWorld,
+      leftWorld = path.leftWorld,
+      rightWorld = path.rightWorld,
+      normalsWorld = path.normalsWorld,
       offset = path.offset or desired_offset,
       length = path.length or 0,
       targetLength = path.target_length or 0,
       coveredLength = path.covered_length or path.length or 0,
       segments = path.segment_count or 0,
-      sampleSpacing = path.sample_spacing or 0,
+      sampleSpacing = path.sample_spacing or path.sampleSpacing or 0,
       truncated = path.truncated or false,
       segmentLimit = path.segment_limit or 0,
       segmentGoal = path.segment_goal or 0,
@@ -1893,7 +2339,8 @@ local function update(dt, veh, system_params, enabled)
     laneDataHold = false,
     laneDataFresh = false,
     laneDataGrace = 0,
-    aiRouteConflict = false
+    aiRouteConflict = false,
+    signalOverride = false
   }
 
   if not installed then
@@ -1912,6 +2359,12 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict_release_timer = 0
     lane_state.lane_offsets = nil
     lane_state.road_edges = nil
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    lane_state.signal_override_blocked = false
+    lane_state.held_path_progress = 0
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -1932,6 +2385,12 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict_release_timer = 0
     lane_state.lane_offsets = nil
     lane_state.road_edges = nil
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    lane_state.signal_override_blocked = false
+    lane_state.held_path_progress = 0
     latest_data = {status = status}
     return
   end
@@ -1945,24 +2404,89 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict_release_timer = 0
     lane_state.lane_offsets = nil
     lane_state.road_edges = nil
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    lane_state.signal_override_blocked = false
+    lane_state.held_path_progress = 0
     latest_data = {status = status}
     return
   end
 
+  updateSignalOverride(dt_value, veh, params, enabled)
+
+  local signal_override_active = lane_state.signal_override_active and true or false
+  local signal_override_dir = lane_state.signal_override_direction or 0
+  local override_threshold = params.signal_override_turn_threshold or 0.2
+  if override_threshold < 0 then override_threshold = 0 end
+  local override_release = params.signal_override_release_threshold
+  if override_release == nil then
+    override_release = override_threshold * 0.5
+  end
+  if override_release < 0 then override_release = 0 end
+
   local lane_model_raw = computeLaneModel(veh_props, params)
+  if signal_override_active and lane_model_raw then
+    local turn_value, turn_mag = getLaneTurnState(lane_model_raw)
+    local block_turn = false
+    if signal_override_dir < 0 then
+      if turn_value > override_threshold then
+        block_turn = true
+      end
+    elseif signal_override_dir > 0 then
+      if turn_value < -override_threshold then
+        block_turn = true
+      end
+    else
+      if turn_mag > override_threshold then
+        block_turn = true
+      end
+    end
+    if block_turn then
+      lane_state.signal_override_blocked = true
+      lane_state.prev_path_nodes = nil
+      lane_state.desired_offset = nil
+      lane_model_raw = nil
+    elseif lane_state.signal_override_blocked and turn_mag <= override_release then
+      lane_state.signal_override_blocked = false
+    end
+  elseif not signal_override_active then
+    lane_state.signal_override_blocked = false
+  end
   local lane_data_grace = params.lane_data_grace or 0.9
   if lane_data_grace < 0 then lane_data_grace = 0 end
   local lane_loss_timer = lane_state.lane_loss_timer or 0
+  local hold_recovery_rate = params.lane_hold_recovery_rate or 0
+  if hold_recovery_rate < 0 then hold_recovery_rate = 0 end
   local lane_model = lane_model_raw
+  local hold_recovery_active = false
+  local hold_recovery_scale = 1
   if lane_model_raw then
     lane_state.last_lane_model = lane_model_raw
     lane_loss_timer = 0
   else
     lane_loss_timer = lane_loss_timer + dt_value
-    if lane_state.last_lane_model and lane_loss_timer <= lane_data_grace then
+    local held_model = nil
+    if lane_state.last_lane_model then
+      held_model = maintainLaneModel(lane_state.last_lane_model, veh_props, params, dt_value, lane_loss_timer)
+    end
+    if held_model then
+      lane_model = held_model
+      hold_recovery_active = true
+      hold_recovery_scale = 1
+    elseif lane_state.last_lane_model and lane_loss_timer <= lane_data_grace then
       lane_model = lane_state.last_lane_model
+      hold_recovery_active = true
+      hold_recovery_scale = 0.5
     else
       lane_model = nil
+    end
+    if hold_recovery_active and hold_recovery_rate > 0 then
+      lane_loss_timer = max(lane_loss_timer - dt_value * hold_recovery_rate * hold_recovery_scale, 0)
+    end
+    if lane_loss_timer > lane_data_grace then
+      lane_state.prev_path_nodes = nil
     end
   end
   lane_state.lane_loss_timer = lane_loss_timer
@@ -2027,21 +2551,28 @@ local function update(dt, veh, system_params, enabled)
   local lane_data_hold_extend = params.lane_data_hold_extend or 0
   if lane_data_hold_extend < 0 then lane_data_hold_extend = 0 end
   local lane_data_hold_limit = lane_data_grace + lane_data_hold_extend
+  local lane_hold_max = params.lane_data_hold_max or lane_data_hold_limit
+  if lane_hold_max < lane_data_hold_limit then
+    lane_hold_max = lane_data_hold_limit
+  end
   if not lane_model_valid and lane_state.last_lane_model then
-    if lane_loss_timer <= lane_data_hold_limit then
-      if not lane_model then
-        local can_hold = (not distance_valid) or (road_distance and road_distance < offroad_disable_threshold)
-        if can_hold then
-          lane_model = lane_state.last_lane_model
-        end
+    if lane_model then
+      if lane_loss_timer > lane_hold_max then
+        lane_state.last_lane_model = nil
+        lane_model = nil
       end
-    elseif lane_loss_timer > lane_data_hold_limit then
+    elseif lane_loss_timer <= lane_data_hold_limit then
+      local can_hold = (not distance_valid) or (road_distance and road_distance < offroad_disable_threshold)
+      if can_hold then
+        lane_model = lane_state.last_lane_model
+      end
+    else
       lane_state.last_lane_model = nil
       if not lane_model_valid then
         lane_model = nil
       end
     end
-  elseif lane_state.last_lane_model and lane_loss_timer > lane_data_hold_limit then
+  elseif lane_state.last_lane_model and lane_loss_timer > lane_hold_max then
     lane_state.last_lane_model = nil
   end
 
@@ -2051,6 +2582,13 @@ local function update(dt, veh, system_params, enabled)
     lane_model.fresh = lane_model_valid or nil
   end
   status.laneDataGrace = lane_data_hold_limit
+  lane_state.lane_loss_timer = lane_loss_timer
+
+  if lane_state.signal_override_active then
+    lane_state.signal_override_blocked = lane_state.signal_override_blocked or (lane_model == nil)
+  else
+    lane_state.signal_override_blocked = false
+  end
 
   local prev_offroad = lane_state.offroad and true or false
   local offroad = prev_offroad
@@ -2122,6 +2660,8 @@ local function update(dt, veh, system_params, enabled)
   status.offRoad = offroad
   status.laneDataHold = lane_hold_active
   status.laneDataFresh = lane_model_valid
+  status.signalOverride = lane_state.signal_override_active and true or false
+  status.signalOverrideBlocked = signal_override_blocked
 
   if offroad and not prev_offroad then
     lane_state.prev_wps = nil
@@ -2134,6 +2674,12 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict_release_timer = 0
     lane_state.lane_offsets = nil
     lane_state.road_edges = nil
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    lane_state.signal_override_blocked = false
+    lane_state.held_path_progress = 0
     ai_route_state.nodes = nil
     ai_route_state.total_nodes = 0
     ai_route_state.truncated = false
@@ -2148,6 +2694,12 @@ local function update(dt, veh, system_params, enabled)
     lane_state.ai_conflict_release_timer = 0
     lane_state.lane_offsets = nil
     lane_state.road_edges = nil
+    lane_state.signal_override_active = false
+    lane_state.signal_override_timer = 0
+    lane_state.signal_override_direction = 0
+    lane_state.signal_suppression_cooldown = 0
+    lane_state.signal_override_blocked = false
+    lane_state.held_path_progress = 0
   end
 
   if offroad then
@@ -2203,9 +2755,13 @@ local function update(dt, veh, system_params, enabled)
   local lane_ready = lane_model ~= nil
   local lane_available = lane_model ~= nil and not ai_conflict_active
   status.available = lane_available
+  local signal_override_active = lane_state.signal_override_active and true or false
+  local signal_override_blocked = lane_state.signal_override_blocked and true or false
   if not lane_ready then
     if offroad then
       status.reason = "off_road"
+    elseif signal_override_active then
+      status.reason = "signal_override"
     else
       status.reason = "no_lane_data"
     end
@@ -2287,6 +2843,8 @@ local function update(dt, veh, system_params, enabled)
       -- keep off-road reason
     elseif status.reason == "ai_route_conflict" then
       -- keep conflict reason
+    elseif status.reason == "signal_override" then
+      -- keep override reason
     elseif not assist_low_speed_shutdown and not offroad_shutdown then
       status.reason = "user_disabled"
     end
@@ -2301,7 +2859,9 @@ local function update(dt, veh, system_params, enabled)
   elseif lane_model and forward_speed <= min_active_speed then
     status.reason = "low_speed"
   elseif not lane_model then
-    status.reason = status.reason or "no_lane_data"
+    if status.reason == nil and not signal_override_active then
+      status.reason = "no_lane_data"
+    end
   end
 
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
@@ -2327,6 +2887,11 @@ local function update(dt, veh, system_params, enabled)
     ai_route_state.timer = ai_route_state.timer + (dt or 0)
     local need_request = newly_active or ai_route_state.timer >= interval
     if not ai_route_state.nodes or (lane_model and not lane_model.route) then
+      need_request = true
+    end
+    if not lane_model_valid then
+      need_request = true
+    elseif lane_state.lane_loss_timer and lane_state.lane_loss_timer > (lane_data_grace * 0.7) then
       need_request = true
     end
     if need_request then
