@@ -74,7 +74,7 @@ M.lane_centering_params = {
     warning_ratio = 0.8,
     steer_limit = 0.15,
     override_threshold = 0.2,
-    override_cooldown = 10,
+    activation_override_grace = 1.0,
     offset_deadzone = 0.002,
     lookahead_base = 22,
     lookahead_min = 120,
@@ -97,7 +97,7 @@ M.lane_centering_params = {
     default_lane_width = 3.75,
     curvature_feedforward = 0.45,
     assist_weight_gain = 4.0,
-    min_active_speed = 1.0,
+    min_active_speed = 40 / 3.6, -- 40 km/h expressed in m/s
     lane_offset_smooth = 0.2,
 }
 

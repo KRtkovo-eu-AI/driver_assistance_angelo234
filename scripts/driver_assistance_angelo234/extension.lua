@@ -302,6 +302,9 @@ local function formatLaneCenteringReason(reason)
   if reason == "driver_override" then
     return "Driver steering input"
   end
+  if reason == "low_speed" then
+    return "Speed below 40 km/h"
+  end
   if reason and reason ~= "" and reason ~= "user_toggle" then
     return tostring(reason)
   end
@@ -579,7 +582,12 @@ local function setLaneCenteringAssistActive(active, reason)
 
   if lane_centering_assist_on == active then
     if active then
-      applyLaneCenteringAiState(true, reason)
+      if reason ~= "user_toggle" then
+        if reason == "speed_ready" and not lane_centering_ai_active then
+          ui_message("Lane Centering Assist engaged")
+        end
+        applyLaneCenteringAiState(true, reason)
+      end
     else
       applyLaneCenteringAiState(false, reason)
       local detail = formatLaneCenteringReason(reason)
@@ -593,8 +601,12 @@ local function setLaneCenteringAssistActive(active, reason)
   lane_centering_assist_on = active
 
   if active then
-    applyLaneCenteringAiState(true, reason)
-    ui_message("Lane Centering Assist engaged")
+    if reason == "user_toggle" then
+      ui_message("Lane Centering Assist armed")
+    else
+      applyLaneCenteringAiState(true, reason)
+      ui_message("Lane Centering Assist engaged")
+    end
   else
     applyLaneCenteringAiState(false, reason)
     local detail = formatLaneCenteringReason(reason)
@@ -1245,7 +1257,11 @@ local function onUpdate(dt)
             lane_centering_assist_on
           )
 
-          if lane_centering_assist_on then
+          local lane_centering_state = lane_centering_system.getLaneData()
+          local lane_centering_status = lane_centering_state and lane_centering_state.status or nil
+          local assist_active = lane_centering_status and lane_centering_status.active
+
+          if lane_centering_assist_on and assist_active then
             if not lane_centering_ai_active then
               applyLaneCenteringAiState(true, 'refresh')
             end

@@ -31,9 +31,36 @@ local warning_played = false
 local steering_pid = nil
 local steering_smoother = nil
 local controller_signature = nil
-local override_timer = 0
+local activation_grace_timer = 0
 local activation_handler = nil
 local last_assist_delta = 0
+
+local DOUBLE_CHIME_SOUND = 'art/sound/proximity_tone_50ms_moderate.wav'
+local DOUBLE_CHIME_GAP = 0.15
+local double_chime_pending = 0
+local double_chime_timer = 0
+
+local function queueDoubleChime()
+  if double_chime_pending <= 0 then
+    double_chime_timer = 0
+  end
+  double_chime_pending = double_chime_pending + 2
+end
+
+local function updateDoubleChime(dt)
+  if double_chime_pending <= 0 then return end
+  double_chime_timer = double_chime_timer - (dt or 0)
+  if double_chime_timer > 0 then return end
+
+  Engine.Audio.playOnce('AudioGui', DOUBLE_CHIME_SOUND)
+  double_chime_pending = double_chime_pending - 1
+
+  if double_chime_pending > 0 then
+    double_chime_timer = DOUBLE_CHIME_GAP
+  else
+    double_chime_timer = 0
+  end
+end
 
 local lane_state = {
   prev_wps = nil,
@@ -1088,13 +1115,19 @@ local function buildAssistInfo(params, lane_model)
 end
 
 local function update(dt, veh, system_params, enabled)
-  override_timer = max(override_timer - (dt or 0), 0)
+  activation_grace_timer = max(activation_grace_timer - (dt or 0), 0)
+  updateDoubleChime(dt)
 
   local params = (system_params and system_params.lane_centering_params) or {}
   local steer_limit = params.steer_limit or 0.15
   local disable_threshold = params.override_threshold or 0.2
   local assist_weight_gain = params.assist_weight_gain or 4.0
   local min_active_speed = params.min_active_speed or 1.0
+  local activation_grace_period = max(params.activation_override_grace or 1.0, 0)
+
+  local prev_status = latest_data and latest_data.status or nil
+  local previously_active = prev_status and prev_status.active
+  local previously_enabled = prev_status and prev_status.enabled
 
   local installed = extra_utils.getPart("lane_centering_assist_system_angelo234")
     or extra_utils.getPart("lane_centering_assist_angelo234")
@@ -1143,6 +1176,20 @@ local function update(dt, veh, system_params, enabled)
   local assist_info = buildAssistInfo(params, lane_model)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
+  local assist_low_speed_shutdown = false
+
+  if previously_active and previously_enabled and enabled and forward_speed <= min_active_speed then
+    assist_low_speed_shutdown = true
+    status.reason = "low_speed"
+    warning_played = false
+    queueDoubleChime()
+    if activation_handler then
+      activation_handler(false, "low_speed")
+    end
+    status.enabled = false
+    user_enabled = false
+    resetControllers()
+  end
 
   local driver_axis = rawget(_G, "input_steering_driver_angelo234")
   local driver_input = driver_axis or rawget(_G, "input_steering_angelo234")
@@ -1161,9 +1208,9 @@ local function update(dt, veh, system_params, enabled)
   end
 
   if not user_enabled then
-    status.reason = "user_disabled"
-  elseif override_timer > 0 then
-    status.reason = "cooldown"
+    if not assist_low_speed_shutdown then
+      status.reason = "user_disabled"
+    end
   elseif lane_model and forward_speed <= min_active_speed then
     status.reason = "low_speed"
   elseif not lane_model then
@@ -1172,17 +1219,24 @@ local function update(dt, veh, system_params, enabled)
 
   local ai_mode_active = rawget(_G, "lane_centering_ai_mode_active_angelo234") and true or false
   local ai_speed_control_active = rawget(_G, "lane_centering_ai_speed_control_active_angelo234") and true or false
-  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed and override_timer <= 0
+  local assist_ready = user_enabled and lane_model ~= nil and forward_speed > min_active_speed
+  local newly_active = assist_ready and not previously_active
+
+  if newly_active then
+    activation_grace_timer = activation_grace_period
+  end
+
+  local ignoring_driver_override = activation_grace_timer > 0
 
   local override_value = driver_axis ~= nil and clamp(driver_axis, -1, 1) or driver_input
-  if assist_ready and abs(override_value) > disable_threshold then
+  if assist_ready and not ignoring_driver_override and abs(override_value) > disable_threshold then
     status.driverOverride = true
     status.reason = "driver_override"
     assist_ready = false
-    override_timer = params.override_cooldown or 5
     warning_played = false
     lane_state.prev_path_nodes = nil
     resetControllers()
+    queueDoubleChime()
     if activation_handler then
       activation_handler(false, "driver_override")
     end
@@ -1226,6 +1280,14 @@ local function update(dt, veh, system_params, enabled)
     status.reason = nil
   else
     resetControllers()
+    activation_grace_timer = 0
+  end
+
+  if newly_active then
+    queueDoubleChime()
+    if activation_handler then
+      activation_handler(true, "speed_ready")
+    end
   end
 
   if lane_model then
@@ -1273,8 +1335,18 @@ local function setActivationCallback(cb)
   activation_handler = cb
 end
 
+local function playActivationChime()
+  queueDoubleChime()
+end
+
+local function playDeactivationChime()
+  queueDoubleChime()
+end
+
 M.update = update
 M.getLaneData = getLaneData
 M.setActivationCallback = setActivationCallback
+M.playActivationChime = playActivationChime
+M.playDeactivationChime = playDeactivationChime
 
 return M

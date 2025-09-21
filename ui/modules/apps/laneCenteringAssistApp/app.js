@@ -134,10 +134,6 @@ angular.module('beamng.apps')
           statusText = 'Standby'
           statusClass = 'lca-status-warning'
           statusDetail = 'Driver override'
-        } else if (status.reason === 'cooldown') {
-          statusText = 'Standby'
-          statusClass = 'lca-status-warning'
-          statusDetail = 'Cooldown'
         } else if (status.reason === 'low_speed') {
           statusText = 'Standby'
           statusClass = 'lca-status-idle'
