@@ -106,6 +106,10 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     local ground_fit_margin = aeb_params.lidar_ground_fit_margin or 0.15
     local min_points_per_bin = aeb_params.lidar_min_points_per_bin or 1
     local max_fit_slope = math.tan(math.rad(aeb_params.lidar_max_fit_slope_deg or 18))
+    local occupancy_ratio_threshold = aeb_params.lidar_block_ratio_threshold or 0.45
+    local tall_ratio_threshold = aeb_params.lidar_tall_ratio_threshold or 0.2
+    local sustained_bins_required = math.max(1, aeb_params.lidar_sustained_bins or 2)
+    local block_min_points = aeb_params.lidar_block_min_points or 2
 
     local bins = {}
     local bin_order = {}
@@ -205,6 +209,11 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
     if slope < -max_fit_slope then slope = -max_fit_slope end
 
     local added_points = {}
+    local log_clearance
+    local log_ratio
+    local log_tall_ratio
+    local log_reason
+    local consecutive_block_bins = 0
     for _, bin_idx in ipairs(bin_order) do
       local bin = bins[bin_idx]
       if bin and bin.count >= min_points_per_bin then
@@ -214,16 +223,61 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
           ground_est = bin.minHeight
         end
         local clearance = bin.maxHeight - ground_est
-        if clearance >= min_clearance then
-          best = best and math.min(best, bin.minForward) or bin.minForward
-          lidar_best = lidar_best and math.min(lidar_best, bin.minForward) or bin.minForward
+        local above_allow_count = 0
+        local tall_count = 0
+        for _, point_idx in ipairs(bin.indices) do
+          local point = scan[point_idx]
+          if point then
+            local rel = point - origin
+            local height = rel:dot(up)
+            if height >= ground_est + height_allowance then
+              above_allow_count = above_allow_count + 1
+              if height >= ground_est + min_clearance then
+                tall_count = tall_count + 1
+              end
+            end
+          end
+        end
+
+        local ratio = above_allow_count / bin.count
+        local tall_ratio = tall_count / bin.count
+        local qualifies_height = clearance >= min_clearance or tall_ratio >= tall_ratio_threshold
+        local qualifies_block = ratio >= occupancy_ratio_threshold and bin.count >= block_min_points
+        local qualifies_bin = false
+
+        if qualifies_height then
+          consecutive_block_bins = sustained_bins_required
+          qualifies_bin = true
+        elseif qualifies_block then
+          consecutive_block_bins = consecutive_block_bins + 1
+          if consecutive_block_bins >= sustained_bins_required then
+            qualifies_bin = true
+          end
+        else
+          consecutive_block_bins = 0
+        end
+
+        if qualifies_bin then
+          local forward_hit = bin.minForward
+          if not lidar_best or forward_hit < lidar_best then
+            log_clearance = clearance
+            log_ratio = ratio
+            log_tall_ratio = tall_ratio
+            log_reason = qualifies_height and "height" or "profile"
+          end
+          best = best and math.min(best, forward_hit) or forward_hit
+          lidar_best = lidar_best and math.min(lidar_best, forward_hit) or forward_hit
+          local point_height_threshold = ground_est + height_allowance
+          if qualifies_height and point_height_threshold > ground_est + min_clearance * 0.5 then
+            point_height_threshold = ground_est + min_clearance * 0.5
+          end
           for _, point_idx in ipairs(bin.indices) do
             if not added_points[point_idx] then
               local point = scan[point_idx]
               if point then
                 local rel = point - origin
                 local height = rel:dot(up)
-                if height >= ground_est + min_clearance * 0.5 then
+                if height >= point_height_threshold then
                   latest_point_cloud[#latest_point_cloud + 1] = point
                   added_points[point_idx] = true
                 end
@@ -273,7 +327,22 @@ local function frontObstacleDistance(veh, veh_props, aeb_params, speed, front_se
   end
 
   if use_lidar and lidar_best then
-    logger.log('I', 'lidar', string.format('LiDAR detected obstacle at %.1f', lidar_best))
+    if log_clearance and log_ratio and log_tall_ratio and log_reason then
+      logger.log(
+        'I',
+        'lidar',
+        string.format(
+          'LiDAR detected obstacle at %.1f m (%s clr=%.2f occ=%.2f tall=%.2f)',
+          lidar_best,
+          log_reason,
+          log_clearance,
+          log_ratio,
+          log_tall_ratio
+        )
+      )
+    else
+      logger.log('I', 'lidar', string.format('LiDAR detected obstacle at %.1f', lidar_best))
+    end
   end
 
   return best, side_best
