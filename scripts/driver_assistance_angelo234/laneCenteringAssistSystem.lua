@@ -68,7 +68,9 @@ local lane_state = {
   lane_width = nil,
   prev_path_nodes = nil,
   traffic_side = nil,
-  travel_sign = nil
+  travel_sign = nil,
+  offroad = false,
+  last_road_distance = nil
 }
 
 local AI_ROUTE_REQUEST_INTERVAL = 0.8
@@ -653,6 +655,16 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
   local params_table = params or {}
   local min_align = params_table.prefer_straight_min_align or 0
   local gate_penalty = params_table.prefer_straight_gate_penalty or 0
+  local fallback_align = params_table.prefer_straight_fallback_align
+  if fallback_align == nil then
+    fallback_align = min_align
+    if fallback_align > 0 then
+      fallback_align = fallback_align * 0.5
+    end
+  end
+  fallback_align = clamp(fallback_align, -1, 1)
+  local score_margin = params_table.prefer_straight_score_margin or 0.15
+  if score_margin < 0 then score_margin = 0 end
 
   if min_align > 1 then min_align = 1 end
   if min_align < -1 then min_align = -1 end
@@ -683,6 +695,7 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
   local best_neighbor = nil
   local best_align = nil
   local best_score = -huge
+  local second_score = nil
 
   for neighbor, link in pairs(neighbors) do
     if neighbor ~= start_node then
@@ -709,9 +722,14 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
               end
 
               if score > best_score then
+                if best_neighbor ~= nil then
+                  second_score = best_score
+                end
                 best_score = score
                 best_neighbor = neighbor
                 best_align = align
+              elseif second_score == nil or score > second_score then
+                second_score = score
               end
             end
           end
@@ -721,8 +739,16 @@ local function selectStraightThroughNeighbor(initial_wps, veh_props, params)
     ::continue::
   end
 
-  if best_neighbor and best_align and best_align >= min_align then
-    return best_neighbor, best_align
+  if best_neighbor and best_align then
+    if best_align >= min_align then
+      return best_neighbor, best_align
+    end
+
+    if best_align > 0 and best_align >= fallback_align then
+      if not second_score or best_score >= (second_score + score_margin) then
+        return best_neighbor, best_align
+      end
+    end
   end
 
   return nil
@@ -1599,7 +1625,11 @@ local function update(dt, veh, system_params, enabled)
     available = false,
     reason = nil,
     driverOverride = false,
-    aiTrafficControlsSpeed = false
+    aiTrafficControlsSpeed = false,
+    offRoad = false,
+    roadDistance = nil,
+    offRoadThreshold = nil,
+    onRoadThreshold = nil
   }
 
   if not installed then
@@ -1630,23 +1660,91 @@ local function update(dt, veh, system_params, enabled)
     return
   end
 
-  local lane_model = computeLaneModel(veh_props, params)
-  if not lane_model then
-    status.reason = "no_lane_data"
-    warning_played = false
-    resetControllers()
+  local lane_width_hint = lane_state.lane_width or params.default_lane_width or 3.75
+  local offroad_ratio = clamp(params.offroad_distance_ratio or 0.65, 0, 2)
+  local offroad_release_ratio = clamp(params.offroad_distance_release_ratio or 0.5, 0, offroad_ratio)
+  local offroad_min_distance = params.offroad_distance_min or 1.5
+  local offroad_release_min = params.offroad_distance_release_min or (offroad_min_distance * 0.5)
+  if offroad_release_min > offroad_min_distance then
+    offroad_release_min = offroad_min_distance * 0.8
+  end
+
+  local road_distance = extra_utils.getClosestRoadDistance(veh_props.center_pos)
+  if road_distance ~= nil then
+    road_distance = abs(road_distance)
+  end
+  lane_state.last_road_distance = road_distance
+
+  local offroad_disable_threshold = max(offroad_min_distance, lane_width_hint * offroad_ratio)
+  local offroad_enable_threshold = max(offroad_release_min, lane_width_hint * offroad_release_ratio)
+  if offroad_enable_threshold > offroad_disable_threshold then
+    offroad_enable_threshold = offroad_disable_threshold * 0.8
+  end
+  if offroad_enable_threshold < 0 then offroad_enable_threshold = 0 end
+
+  status.roadDistance = road_distance
+  status.offRoadThreshold = offroad_disable_threshold
+  status.onRoadThreshold = offroad_enable_threshold
+
+  local prev_offroad = lane_state.offroad and true or false
+  local offroad = prev_offroad
+
+  if road_distance == nil then
+    offroad = true
+  elseif prev_offroad then
+    if road_distance <= offroad_enable_threshold then
+      offroad = false
+    end
   else
-    status.available = true
+    if road_distance >= offroad_disable_threshold then
+      offroad = true
+    end
+  end
+
+  lane_state.offroad = offroad
+  status.offRoad = offroad
+
+  if offroad then
+    lane_state.prev_wps = nil
+    lane_state.desired_offset = nil
+    lane_state.prev_path_nodes = nil
+    ai_route_state.nodes = nil
+    ai_route_state.total_nodes = 0
+    ai_route_state.truncated = false
+    ai_route_state.pending = false
+    ai_route_state.pending_timer = 0
+    ai_route_state.timer = 0
+  end
+
+  local lane_model = nil
+  if not offroad then
+    lane_model = computeLaneModel(veh_props, params)
+    if lane_model then
+      status.available = true
+    end
+  end
+
+  local lane_ready = lane_model ~= nil
+  if not lane_ready then
+    if offroad then
+      status.reason = "off_road"
+    else
+      status.reason = "no_lane_data"
+    end
+    warning_played = false
   end
 
   local assist_info = buildAssistInfo(params, lane_model)
   local forward_speed = veh_props.velocity:dot(veh_props.dir)
   local user_enabled = status.enabled
   local assist_low_speed_shutdown = false
+  local offroad_shutdown = false
 
   if previously_active and previously_enabled and enabled and forward_speed <= min_active_speed then
     assist_low_speed_shutdown = true
-    status.reason = "low_speed"
+    if not offroad then
+      status.reason = "low_speed"
+    end
     warning_played = false
     queueDoubleChime()
     if activation_handler then
@@ -1654,6 +1752,22 @@ local function update(dt, veh, system_params, enabled)
     end
     status.enabled = false
     user_enabled = false
+    resetControllers()
+  end
+
+  if offroad then
+    if user_enabled then
+      offroad_shutdown = true
+      status.reason = "off_road"
+      queueDoubleChime()
+      if activation_handler then
+        activation_handler(false, "off_road")
+      end
+    end
+    status.enabled = false
+    user_enabled = false
+    resetControllers()
+  elseif not lane_ready then
     resetControllers()
   end
 
@@ -1674,8 +1788,15 @@ local function update(dt, veh, system_params, enabled)
   end
 
   if not user_enabled then
-    if not assist_low_speed_shutdown then
+    if status.reason == "off_road" then
+      -- keep off-road reason
+    elseif not assist_low_speed_shutdown and not offroad_shutdown then
       status.reason = "user_disabled"
+    end
+  elseif offroad then
+    status.reason = "off_road"
+    if not assist_low_speed_shutdown then
+      warning_played = false
     end
   elseif lane_model and forward_speed <= min_active_speed then
     status.reason = "low_speed"
@@ -1692,7 +1813,7 @@ local function update(dt, veh, system_params, enabled)
     activation_grace_timer = activation_grace_period
   end
 
-  if ai_mode_active and veh then
+  if ai_mode_active and veh and not offroad then
     local interval = params.ai_route_refresh_interval or AI_ROUTE_REQUEST_INTERVAL
     if ai_route_state.pending then
       ai_route_state.pending_timer = ai_route_state.pending_timer + (dt or 0)
@@ -1836,11 +1957,21 @@ local function playDeactivationChime()
   queueDoubleChime()
 end
 
+local function isVehicleOnRoad()
+  return lane_state.offroad ~= true
+end
+
+local function getRoadDistance()
+  return lane_state.last_road_distance
+end
+
 M.update = update
 M.getLaneData = getLaneData
 M.setActivationCallback = setActivationCallback
 M.playActivationChime = playActivationChime
 M.playDeactivationChime = playDeactivationChime
 M.updateAiRouteData = updateAiRouteData
+M.isVehicleOnRoad = isVehicleOnRoad
+M.getRoadDistance = getRoadDistance
 
 return M
