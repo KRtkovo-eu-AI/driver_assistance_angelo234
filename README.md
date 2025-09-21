@@ -1,16 +1,15 @@
-# Advanced Driver Assistance Systems (ADAS) for BeamNG
+# Advanced Driver Assistance Systems Plus (ADAS+) for BeamNG
 
-**Version:** 1.35  
-**Author:** angelo234  
+**Version:** 2.00 
+**Author:** KRtekTM, angelo234  
 **First Release:** March 31, 2021  
-**Last Update:** April 8, 2025  
-**Downloads:** Over 440,000  
+**Last Update:** September 22, 2025  
 
 ---
 
 ## Description
 
-This mod adds advanced driver assistance systems (ADAS) commonly found in modern vehicles. It allows these systems to be installed on *any* vehicle in BeamNG (vanilla or modded).  
+This mod adds advanced driver assistance systems (ADAS) commonly found in modern vehicles. It allows these systems to be installed on *any* vehicle in BeamNG (vanilla or modded).  It is an extended version of [ADAS mod from Angelo234](https://www.beamng.com/resources/advanced-driver-assistance-systems.17384/), so it is recommended to have only one of the modes installed and allowed simultaneously.
 
 ---
 
@@ -42,6 +41,9 @@ The current functionality includes:
 - **Obstacle Collision Automatic Emergency Braking**  
   Uses the front radar array together with a virtual LiDAR sweep to recognise static hazards, sound escalating warnings, flash the hazards and apply maximum braking when a collision is imminent.
 
+- **12-phase LFO LiDAR**  
+  Virtual LiDAR performing 12-phase surrounding scanning, capturing also traffic and player vehicles. When equipped, it is used for increasing precision of the Obstacle Collision System and Lane Centering Assist. Also allows PCD export & streaming.
+
 - **Virtual LiDAR – PCD export & streaming**  
   Captures the environment as a point cloud that can be exported to disk or streamed over TCP with intensity tags for easy filtering in external tooling.
 
@@ -70,7 +72,7 @@ Pass `false` to either function to turn the feature off. Enabling the export (or
 
 ### Default file location
 
-If you do not override the path, the module writes `latest.pcd` into `settings/krtektm_lidar` inside your BeamNG user profile (for example `C:\Users\ok\AppData\Local\BeamNG.drive\current\settings\krtektm_lidar\latest.pcd`).
+If you do not override the path, the module writes `latest.pcd` into `settings/krtektm_lidar` inside your BeamNG user profile (for example `C:\Users\{user}\AppData\Local\BeamNG.drive\current\settings\krtektm_lidar\latest.pcd`).
 
 ### Options (path, port, intensity)
 
@@ -110,7 +112,7 @@ Autopilot piggybacks on BeamNG’s navigation AI: once the hardware slot is inst
    - Or install manually:
      1. Open the *Vehicle Customization UI*.  
      2. Click on the *License Plate Design* slot.  
-     3. Select the part called *“angelo234’s Driver Assistance System”*.  
+     3. Select the part called *“Driver Assistance System Plus”*.  
      4. By default, all systems are added. To adjust, you can toggle individual systems via their slots (add or remove parts).  
 
 2. **Using / activating systems:**
@@ -177,21 +179,23 @@ Autopilot piggybacks on BeamNG’s navigation AI: once the hardware slot is inst
   **A:** Not currently; due to engine limitations (cannot have multiple cameras in scene for that purpose).  
 
 - **Q:** Will there be lane centering assist or similar features?  
-  **A:** No plans at the moment.  
+  **A:** Yes, it's already implemented.
 
 ---
 
 ## Version History
 
-- **v1.35** — April 8, 2025 (latest)  
+- **angelo234's ADAS mod v1.35** — April 8, 2025 (the base code)  
 - Earlier versions include fixes, optimizations and updates to adapt to BeamNG updates.  
+- **KRtekTM's ADAS+ mode v2.00** - September 22, 2025 (latest)
+- Introduced Self-driving system: LiDAR, Obstacle Collision System, Lane Centering Assist, Autopilot
 
 ---
 
 ## License & Credits
 
-- Mod created by **angelo234**.  
-- Thanks to community members who helped in beta testing: nick12345, ShaunJunior2006112, atomcrash07, crashitall.  
+- Mod created by **KRtekTM**, extended version based on original code of **angelo234**.  
+- Beta testers of the original mod: nick12345, ShaunJunior2006112, atomcrash07, crashitall.  
 - If you use or modify this mod, please retain credit to the original author.  
 
 ---
