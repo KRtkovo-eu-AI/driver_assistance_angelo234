@@ -243,13 +243,14 @@ local LIDAR_GROUND_THRESHOLD = -1.5
 local LIDAR_LOW_OBJECT_BAND = 1.0
 
 local AERIAL_LIDAR_PART_NAME = 'lidar_aerial_angelo234'
-local AERIAL_LIDAR_SCAN_RANGE = 320
+local AERIAL_LIDAR_SCAN_RANGE = 420
 local AERIAL_LIDAR_MIN_RANGE = 0.4
 local AERIAL_LIDAR_H_FOV = math.rad(360)
-local AERIAL_LIDAR_V_FOV = math.rad(150)
-local AERIAL_LIDAR_H_RES = 96
-local AERIAL_LIDAR_V_RES = 40
-local AERIAL_LIDAR_MAX_RAYS = 160
+local AERIAL_LIDAR_V_FOV = math.rad(160)
+local AERIAL_LIDAR_H_RES = 128
+local AERIAL_LIDAR_V_RES = 64
+local AERIAL_LIDAR_MAX_RAYS = 240
+local AERIAL_LIDAR_UPDATE_INTERVAL = 1.0 / 10.0
 local AERIAL_LIDAR_MOUNT_OFFSET = 0.8
 local AERIAL_LIDAR_SELF_MARGIN = 0.35
 local AERIAL_LIDAR_GROUND_ALIGNMENT = 0.7
@@ -1208,18 +1209,29 @@ front_lidar_thread = coroutine.create(frontLidarLoop)
 --local p = LuaProfiler("my profiler")
 
 local function updateAirborneVirtualLidar(dt, veh)
-  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+  local interval = AERIAL_LIDAR_UPDATE_INTERVAL or (1.0 / 20.0)
+  local function clearAerialFrame(index)
+    if not index then return end
+    virtual_lidar_frames[index] = nil
+    virtual_lidar_point_cloud[index] = {}
+    virtual_lidar_ground_point_cloud[index] = {}
+    virtual_lidar_overhead_point_cloud[index] = {}
+    vehicle_lidar_point_cloud = {}
+    vehicle_lidar_frame = nil
+  end
+  if virtual_lidar_update_timer >= interval then
     local pos = veh and veh.getPosition and veh:getPosition()
     local forward = veh and veh.getDirectionVector and veh:getDirectionVector()
     local upVec = veh and veh.getDirectionVectorUp and veh:getDirectionVectorUp()
     if pos and forward and upVec then
       local dir, right, up = buildVirtualLidarFrame(forward, upVec)
+      local frameIndex = virtual_lidar_phase + 1
       if dir and right and up then
         local upLen = upVec:length()
         if upLen >= 1e-6 then
           local upNorm = upVec * (1 / upLen)
           local origin = vec3(pos.x, pos.y, pos.z) - upNorm * AERIAL_LIDAR_MOUNT_OFFSET
-          virtual_lidar_frames[virtual_lidar_phase + 1] = {
+          virtual_lidar_frames[frameIndex] = {
             origin = origin,
             dir = dir,
             right = right,
@@ -1297,18 +1309,22 @@ local function updateAirborneVirtualLidar(dt, veh)
             end
           end
 
-          virtual_lidar_point_cloud[virtual_lidar_phase + 1] = main_cloud
-          virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
-          virtual_lidar_overhead_point_cloud[virtual_lidar_phase + 1] = overhead_cloud
-          vehicle_lidar_point_cloud = {}
-          vehicle_lidar_frame = nil
+          virtual_lidar_point_cloud[frameIndex] = main_cloud
+          virtual_lidar_ground_point_cloud[frameIndex] = ground_cloud
+          virtual_lidar_overhead_point_cloud[frameIndex] = overhead_cloud
 
           virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
           if virtual_lidar_phase == 0 then
             maybePublishVirtualLidarPcd(veh)
           end
+        else
+          clearAerialFrame(frameIndex)
         end
+      else
+        clearAerialFrame(frameIndex)
       end
+    else
+      clearAerialFrame(virtual_lidar_phase + 1)
     end
     virtual_lidar_update_timer = 0
   else
@@ -1761,8 +1777,26 @@ local function buildCurrentFrame(veh)
   if not pos or not forward or not upVec then return nil end
   local dir, right, up = buildVirtualLidarFrame(forward, upVec)
   if not dir or not right or not up then return nil end
+  local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+  local variant = last_virtual_lidar_variant
+  if not variant then
+    if extra_utils.getPart and extra_utils.getPart(AERIAL_LIDAR_PART_NAME) then
+      variant = 'aerial'
+    else
+      variant = 'ground'
+    end
+  end
+  if variant == 'aerial' then
+    local upLen = upVec:length()
+    if upLen >= 1e-6 then
+      local upNorm = upVec * (1 / upLen)
+      origin = vec3(pos.x, pos.y, pos.z) - upNorm * AERIAL_LIDAR_MOUNT_OFFSET
+    else
+      origin = vec3(pos.x, pos.y, pos.z - AERIAL_LIDAR_MOUNT_OFFSET)
+    end
+  end
   return {
-    origin = vec3(pos.x, pos.y, pos.z + 1.8),
+    origin = origin,
     dir = dir,
     right = right,
     up = up
