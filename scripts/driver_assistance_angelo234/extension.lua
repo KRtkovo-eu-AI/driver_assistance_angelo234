@@ -91,6 +91,7 @@ local aerial_lidar_frame_times = {}
 local aerial_lidar_clock = 0
 local aerial_reference_frame = nil
 local aerial_reference_time = nil
+local computeAerialReferenceFrame
 
 local function computeDefaultVirtualLidarPath()
   if FS and FS.getUserPath then
@@ -1926,7 +1927,7 @@ local function blendFrames(a, b, alpha)
   }
 end
 
-local function computeAerialReferenceFrame()
+function computeAerialReferenceFrame()
   local entries = {}
   for i = 1, #virtual_lidar_frames do
     local frame = virtual_lidar_frames[i]
