@@ -87,6 +87,10 @@ local front_lidar_ground_point_cloud_wip = {}
 local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
+local aerial_lidar_frame_times = {}
+local aerial_lidar_clock = 0
+local aerial_reference_frame = nil
+local aerial_reference_time = nil
 
 local function computeDefaultVirtualLidarPath()
   if FS and FS.getUserPath then
@@ -259,6 +263,13 @@ local AERIAL_LIDAR_MAIN_ALIGNMENT = 0.12
 local AERIAL_LIDAR_MIN_DOWN_ALIGNMENT = -0.05
 local AERIAL_LIDAR_ABOVE_SENSOR_LIMIT = 0.75
 
+local function resetAerialDeskewState()
+  aerial_lidar_frame_times = {}
+  aerial_lidar_clock = 0
+  aerial_reference_frame = nil
+  aerial_reference_time = nil
+end
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_ground_point_cloud = {}
@@ -272,6 +283,7 @@ local function resetVirtualLidarPointCloud()
   front_lidar_frames_wip = {}
   vehicle_lidar_point_cloud = {}
   vehicle_lidar_frame = nil
+  resetAerialDeskewState()
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
     virtual_lidar_ground_point_cloud[i] = {}
@@ -1212,6 +1224,7 @@ front_lidar_thread = coroutine.create(frontLidarLoop)
 --local p = LuaProfiler("my profiler")
 
 local function updateAirborneVirtualLidar(dt, veh)
+  aerial_lidar_clock = aerial_lidar_clock + dt
   local interval = AERIAL_LIDAR_UPDATE_INTERVAL or (1.0 / 20.0)
   local function clearAerialFrame(index)
     if not index then return end
@@ -1219,8 +1232,10 @@ local function updateAirborneVirtualLidar(dt, veh)
     virtual_lidar_point_cloud[index] = {}
     virtual_lidar_ground_point_cloud[index] = {}
     virtual_lidar_overhead_point_cloud[index] = {}
+    aerial_lidar_frame_times[index] = nil
     vehicle_lidar_point_cloud = {}
     vehicle_lidar_frame = nil
+    computeAerialReferenceFrame()
   end
   if virtual_lidar_update_timer >= interval then
     local pos = veh and veh.getPosition and veh:getPosition()
@@ -1240,6 +1255,7 @@ local function updateAirborneVirtualLidar(dt, veh)
             right = right,
             up = up
           }
+          aerial_lidar_frame_times[frameIndex] = aerial_lidar_clock
           local hits = virtual_lidar.scan(
             origin,
             -upNorm,
@@ -1321,8 +1337,10 @@ local function updateAirborneVirtualLidar(dt, veh)
           virtual_lidar_ground_point_cloud[frameIndex] = ground_cloud
           virtual_lidar_overhead_point_cloud[frameIndex] = overhead_cloud
 
+          computeAerialReferenceFrame()
           virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
           if virtual_lidar_phase == 0 then
+            computeAerialReferenceFrame()
             maybePublishVirtualLidarPcd(veh)
           end
         else
@@ -1811,6 +1829,157 @@ local function buildCurrentFrame(veh)
   }
 end
 
+local function copyVec3(value)
+  if not value then return nil end
+  return vec3(value.x, value.y, value.z)
+end
+
+local function lerpVec3(a, b, alpha)
+  if not a or not b then return nil end
+  local t = math.max(0, math.min(1, alpha or 0))
+  return vec3(
+    a.x + (b.x - a.x) * t,
+    a.y + (b.y - a.y) * t,
+    a.z + (b.z - a.z) * t
+  )
+end
+
+local function safeNormalize(v, fallback)
+  if v then
+    local len = v:length()
+    if len >= 1e-9 then
+      return v * (1 / len)
+    end
+  end
+  if fallback then
+    local copy = copyVec3(fallback)
+    if copy then
+      local len = copy:length()
+      if len >= 1e-9 then
+        return copy * (1 / len)
+      end
+    end
+  end
+  return nil
+end
+
+local function copyFrame(frame)
+  if not frame then return nil end
+  return {
+    origin = frame.origin and copyVec3(frame.origin) or nil,
+    dir = frame.dir and copyVec3(frame.dir) or nil,
+    right = frame.right and copyVec3(frame.right) or nil,
+    up = frame.up and copyVec3(frame.up) or nil
+  }
+end
+
+local function blendFrames(a, b, alpha)
+  if not a then return copyFrame(b) end
+  if not b then return copyFrame(a) end
+  local t = math.max(0, math.min(1, alpha or 0))
+  local origin = lerpVec3(a.origin, b.origin, t) or copyVec3(a.origin) or copyVec3(b.origin)
+  local dirBlend = lerpVec3(a.dir, b.dir, t)
+  local upBlend = lerpVec3(a.up, b.up, t)
+  local dir = safeNormalize(dirBlend, a.dir or b.dir)
+  local upCandidate = safeNormalize(upBlend, a.up or b.up)
+  local right = nil
+  if dir and upCandidate then
+    right = safeNormalize(dir:cross(upCandidate), a.right or b.right)
+  end
+  if not right then
+    local rightBlend = lerpVec3(a.right, b.right, t)
+    right = safeNormalize(rightBlend, a.right or b.right)
+  end
+  if not right and dir then
+    local fallback = dir:cross(vec3(0, 0, 1))
+    right = safeNormalize(fallback, nil)
+    if not right then
+      fallback = dir:cross(vec3(0, 1, 0))
+      right = safeNormalize(fallback, nil)
+    end
+  end
+  local up = nil
+  if right and dir then
+    up = safeNormalize(right:cross(dir), upCandidate or a.up or b.up)
+  else
+    up = upCandidate and copyVec3(upCandidate) or copyVec3(a.up) or copyVec3(b.up)
+    up = safeNormalize(up, a.up or b.up)
+  end
+  if dir and right then
+    dir = safeNormalize(dir, a.dir or b.dir)
+    right = safeNormalize(right, a.right or b.right)
+  end
+  if not dir then
+    dir = safeNormalize(copyVec3(a.dir) or copyVec3(b.dir), vec3(0, 1, 0)) or vec3(0, 1, 0)
+  end
+  if not right then
+    right = safeNormalize(copyVec3(a.right) or copyVec3(b.right), vec3(1, 0, 0)) or vec3(1, 0, 0)
+  end
+  if not up then
+    up = safeNormalize(copyVec3(a.up) or copyVec3(b.up), vec3(0, 0, 1)) or vec3(0, 0, 1)
+  end
+  return {
+    origin = origin,
+    dir = dir,
+    right = right,
+    up = up
+  }
+end
+
+local function computeAerialReferenceFrame()
+  local entries = {}
+  for i = 1, #virtual_lidar_frames do
+    local frame = virtual_lidar_frames[i]
+    local ts = aerial_lidar_frame_times[i]
+    if frame and ts then
+      entries[#entries + 1] = {time = ts, frame = frame}
+    end
+  end
+  if #entries == 0 then
+    aerial_reference_frame = nil
+    aerial_reference_time = nil
+    return
+  end
+  table.sort(entries, function(lhs, rhs)
+    return lhs.time < rhs.time
+  end)
+  local refTime
+  if #entries == 1 then
+    refTime = entries[1].time
+  else
+    refTime = (entries[1].time + entries[#entries].time) * 0.5
+  end
+  local refFrame = nil
+  if #entries == 1 then
+    refFrame = copyFrame(entries[1].frame)
+  else
+    for i = 1, #entries - 1 do
+      local curr = entries[i]
+      local next = entries[i + 1]
+      if refTime >= curr.time and refTime <= next.time then
+        local span = next.time - curr.time
+        local alpha = span > 1e-9 and (refTime - curr.time) / span or 0
+        refFrame = blendFrames(curr.frame, next.frame, alpha)
+        break
+      end
+    end
+    if not refFrame then
+      if refTime <= entries[1].time then
+        refFrame = copyFrame(entries[1].frame)
+      else
+        refFrame = copyFrame(entries[#entries].frame)
+      end
+    end
+  end
+  if refFrame then
+    aerial_reference_frame = refFrame
+    aerial_reference_time = refTime
+  else
+    aerial_reference_frame = nil
+    aerial_reference_time = nil
+  end
+end
+
 local function accumulateTransformedPoints(buffers, frames, curr, combined)
   for i = 1, #buffers do
     local frame = frames[i]
@@ -1825,6 +1994,9 @@ end
 
 local function resolveCurrentFrame(curr, veh)
   if curr then return curr end
+  if last_virtual_lidar_variant == 'aerial' and aerial_reference_frame then
+    return aerial_reference_frame
+  end
   return buildCurrentFrame(veh or be:getPlayerVehicle(0))
 end
 
@@ -1984,7 +2156,7 @@ function maybePublishVirtualLidarPcd(veh)
     streamReady = ok and true or false
   end
 
-  local frame = buildCurrentFrame(veh)
+  local frame = resolveCurrentFrame(nil, veh)
   if not frame then
     if exportActive then
       lidarPcdPublisher.setEnabled(false)
