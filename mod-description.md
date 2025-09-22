@@ -4,11 +4,7 @@
 
 This mod adds advanced driver assistance systems you would typically find in today's modern vehicles. These systems can be added to any vehicle (vanilla and modded) and now include the expanded ADAS+ suite maintained by KRtekTM and angelo234.
 
-Before I begin, I want to thank BeamNG for the existing game files/code, @nick12345, ShaunJunior2006112, @atomcrash07, and @crashitall for beta testing the mod, and the community for your ideas/feedback, which all have made this mod possible!
-
-Also check out [Giani Beil's updated YouTube Player mod](https://www.beamng.com/resources/youtube-player.14769/).
-
-**If you really enjoy what I make and want to show your support, you can donate [here](https://www.paypal.com/donate?business=WV4H4Q6KHXGPL&currency_code=USD).**
+ADAS+ 2.00 expands the suite with obstacle-collision automatic braking, a 12-phase LiDAR pack with point-cloud export/streaming, lane-centering steering support, and full autopilot on top of the existing assists.
 
 ---
 
