@@ -242,6 +242,19 @@ local VIRTUAL_LIDAR_REAR_EXTENSION = 40
 local LIDAR_GROUND_THRESHOLD = -1.5
 local LIDAR_LOW_OBJECT_BAND = 1.0
 
+local AERIAL_LIDAR_PART_NAME = 'lidar_aerial_angelo234'
+local AERIAL_LIDAR_SCAN_RANGE = 320
+local AERIAL_LIDAR_MIN_RANGE = 0.4
+local AERIAL_LIDAR_H_FOV = math.rad(360)
+local AERIAL_LIDAR_V_FOV = math.rad(150)
+local AERIAL_LIDAR_H_RES = 96
+local AERIAL_LIDAR_V_RES = 40
+local AERIAL_LIDAR_MAX_RAYS = 160
+local AERIAL_LIDAR_MOUNT_OFFSET = 0.8
+local AERIAL_LIDAR_SELF_MARGIN = 0.35
+local AERIAL_LIDAR_GROUND_ALIGNMENT = 0.7
+local AERIAL_LIDAR_GROUND_MIN_DEPTH = 0.8
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_ground_point_cloud = {}
@@ -276,6 +289,7 @@ local virtual_lidar_phase = 0
 local front_lidar_phase = 0
 local front_lidar_update_timer = 0
 local front_lidar_thread = nil
+local last_virtual_lidar_variant = nil
 
 M.curr_camera_mode = "orbit"
 M.prev_camera_mode = "orbit"
@@ -1193,11 +1207,153 @@ front_lidar_thread = coroutine.create(frontLidarLoop)
 
 --local p = LuaProfiler("my profiler")
 
+local function updateAirborneVirtualLidar(dt, veh)
+  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+    local pos = veh and veh.getPosition and veh:getPosition()
+    local forward = veh and veh.getDirectionVector and veh:getDirectionVector()
+    local upVec = veh and veh.getDirectionVectorUp and veh:getDirectionVectorUp()
+    if pos and forward and upVec then
+      local dir, right, up = buildVirtualLidarFrame(forward, upVec)
+      if dir and right and up then
+        local upLen = upVec:length()
+        if upLen >= 1e-6 then
+          local upNorm = upVec * (1 / upLen)
+          local origin = vec3(pos.x, pos.y, pos.z) - upNorm * AERIAL_LIDAR_MOUNT_OFFSET
+          virtual_lidar_frames[virtual_lidar_phase + 1] = {
+            origin = origin,
+            dir = dir,
+            right = right,
+            up = up
+          }
+          local hits = virtual_lidar.scan(
+            origin,
+            -upNorm,
+            dir,
+            AERIAL_LIDAR_SCAN_RANGE,
+            AERIAL_LIDAR_H_FOV,
+            AERIAL_LIDAR_V_FOV,
+            AERIAL_LIDAR_H_RES,
+            AERIAL_LIDAR_V_RES,
+            AERIAL_LIDAR_MIN_RANGE,
+            veh:getID(),
+            {
+              hStart = virtual_lidar_phase,
+              hStep = VIRTUAL_LIDAR_PHASES,
+              maxRays = AERIAL_LIDAR_MAX_RAYS,
+              includeDynamic = true
+            }
+          ) or {}
+
+          local veh_props = extra_utils.getVehicleProperties(veh)
+          local self_bb = veh_props and veh_props.bb or nil
+          local self_center = self_bb and self_bb:getCenter() or nil
+          local self_half = self_bb and self_bb:getHalfExtents() or nil
+          local self_axes
+          if self_bb then
+            self_axes = {
+              vec3(self_bb:getAxis(0)),
+              vec3(self_bb:getAxis(1)),
+              vec3(self_bb:getAxis(2))
+            }
+          end
+
+          local function insideSelf(pt)
+            if not self_bb or not self_axes then return false end
+            local rel = pt - self_center
+            return math.abs(rel:dot(self_axes[1])) <= self_half.x + AERIAL_LIDAR_SELF_MARGIN
+              and math.abs(rel:dot(self_axes[2])) <= self_half.y + AERIAL_LIDAR_SELF_MARGIN
+              and math.abs(rel:dot(self_axes[3])) <= self_half.z + AERIAL_LIDAR_SELF_MARGIN
+          end
+
+          local main_cloud = {}
+          local ground_cloud = {}
+          local overhead_cloud = {}
+
+          for i = 1, #hits do
+            local worldPoint = hits[i]
+            if worldPoint then
+              local rel = worldPoint - origin
+              local point = {
+                x = rel:dot(right),
+                y = rel:dot(dir),
+                z = rel:dot(up)
+              }
+              if insideSelf(worldPoint) then
+                overhead_cloud[#overhead_cloud + 1] = point
+              else
+                local relLen = rel:length()
+                if relLen > 1e-6 then
+                  local relNorm = rel * (1 / relLen)
+                  local downAlignment = -(relNorm:dot(up))
+                  if downAlignment >= AERIAL_LIDAR_GROUND_ALIGNMENT and point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH then
+                    ground_cloud[#ground_cloud + 1] = point
+                  else
+                    main_cloud[#main_cloud + 1] = point
+                  end
+                else
+                  main_cloud[#main_cloud + 1] = point
+                end
+              end
+            end
+          end
+
+          virtual_lidar_point_cloud[virtual_lidar_phase + 1] = main_cloud
+          virtual_lidar_ground_point_cloud[virtual_lidar_phase + 1] = ground_cloud
+          virtual_lidar_overhead_point_cloud[virtual_lidar_phase + 1] = overhead_cloud
+          vehicle_lidar_point_cloud = {}
+          vehicle_lidar_frame = nil
+
+          virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
+          if virtual_lidar_phase == 0 then
+            maybePublishVirtualLidarPcd(veh)
+          end
+        end
+      end
+    end
+    virtual_lidar_update_timer = 0
+  else
+    virtual_lidar_update_timer = virtual_lidar_update_timer + dt
+  end
+end
+
 local function updateVirtualLidar(dt, veh)
-  if not extra_utils.getPart("lidar_angelo234") then
-    resetVirtualLidarPointCloud()
+  local groundPart = extra_utils.getPart("lidar_angelo234")
+  local aerialPart = extra_utils.getPart(AERIAL_LIDAR_PART_NAME)
+
+  if aerialPart and not groundPart then
+    if last_virtual_lidar_variant ~= 'aerial' then
+      resetVirtualLidarPointCloud()
+      vehicle_lidar_point_cloud = {}
+      vehicle_lidar_frame = nil
+      virtual_lidar_phase = 0
+      virtual_lidar_update_timer = 0
+    end
+    last_virtual_lidar_variant = 'aerial'
+    updateAirborneVirtualLidar(dt, veh)
     return
   end
+
+  if not groundPart then
+    if last_virtual_lidar_variant ~= nil then
+      resetVirtualLidarPointCloud()
+      vehicle_lidar_point_cloud = {}
+      vehicle_lidar_frame = nil
+      virtual_lidar_phase = 0
+      virtual_lidar_update_timer = 0
+      last_virtual_lidar_variant = nil
+    end
+    return
+  end
+
+  if last_virtual_lidar_variant ~= 'ground' then
+    resetVirtualLidarPointCloud()
+    vehicle_lidar_point_cloud = {}
+    vehicle_lidar_frame = nil
+    virtual_lidar_phase = 0
+    virtual_lidar_update_timer = 0
+    last_virtual_lidar_variant = 'ground'
+  end
+
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
   if virtual_lidar_update_timer >= 1.0 / 20.0 then

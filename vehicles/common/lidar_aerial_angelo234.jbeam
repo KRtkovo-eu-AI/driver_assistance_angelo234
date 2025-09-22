@@ -1,0 +1,10 @@
+{
+    "lidar_aerial_angelo234": {
+        "information":{
+            "authors":"KRtekTM",
+            "name":"Airborne Survey LiDAR",
+            "value":400,
+        },
+        "slotType" : "lidar_angelo234",
+    },
+}
