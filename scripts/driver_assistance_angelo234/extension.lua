@@ -63,16 +63,22 @@ local autopilot_ai_active = false
 local autopilot_current_target = nil
 local lane_centering_autopilot_block_notified = false
 
-local autopilotDisengage
-local refreshAutopilotState = function() end
+local autopilot_state = {
+  disengage = nil,
+  refresh = function() end
+}
 
-local front_sensor_data = nil
-local rear_sensor_data = nil
+local sensor_state = {
+  front = nil,
+  rear = nil
+}
 
-local other_systems_timer = 0
-local hsa_system_update_timer = 0
-local auto_headlight_system_update_timer = 0
-local virtual_lidar_update_timer = 0
+local timers = {
+  other_systems = 0,
+  hsa_system = 0,
+  auto_headlight = 0,
+  virtual_lidar = 0
+}
 local VIRTUAL_LIDAR_PHASES = 8
 local FRONT_LIDAR_PHASES = 4
 local virtual_lidar_point_cloud = {}
@@ -354,8 +360,8 @@ local function onExtensionLoaded()
 end
 
 local function onVehicleSwitched(_oid, _nid, player)
-  if autopilotDisengage then
-    autopilotDisengage()
+  if autopilot_state.disengage then
+    autopilot_state.disengage()
   end
   init(player)
 end
@@ -883,7 +889,7 @@ local function autopilotEngage(target, announce)
   return true
 end
 
-autopilotDisengage = function(message)
+autopilot_state.disengage = function(message)
   if autopilot_ai_active then
     local veh = be:getPlayerVehicle(0)
     if veh then
@@ -900,23 +906,23 @@ autopilotDisengage = function(message)
   end
 end
 
-refreshAutopilotState = function(dt, veh)
+autopilot_state.refresh = function(dt, veh)
   if not autopilot_system_on then return end
   if not hasAutopilotSystem() then
-    autopilotDisengage("Autopilot disengaged: system removed")
+    autopilot_state.disengage("Autopilot disengaged: system removed")
     return
   end
   if not veh then
-    autopilotDisengage()
+    autopilot_state.disengage()
     return
   end
   if not autopilotHasNavigationTarget() then
-    autopilotDisengage("Autopilot disengaged: destination cleared")
+    autopilot_state.disengage("Autopilot disengaged: destination cleared")
     return
   end
   local target = getAutopilotRouteTarget()
   if not target then
-    autopilotDisengage("Autopilot disengaged: unable to resolve route")
+    autopilot_state.disengage("Autopilot disengaged: unable to resolve route")
     return
   end
   if target ~= autopilot_current_target then
@@ -927,7 +933,7 @@ end
 
 local function toggleAutopilotSystem()
   if autopilot_system_on then
-    autopilotDisengage("Autopilot disengaged")
+    autopilot_state.disengage("Autopilot disengaged")
     return
   end
 
@@ -1242,7 +1248,7 @@ local function updateAirborneVirtualLidar(dt, veh)
     vehicle_lidar_frame = nil
     computeAerialReferenceFrame()
   end
-  if virtual_lidar_update_timer >= interval then
+  if timers.virtual_lidar >= interval then
     local pos = veh and veh.getPosition and veh:getPosition()
     local forward = veh and veh.getDirectionVector and veh:getDirectionVector()
     local upVec = veh and veh.getDirectionVectorUp and veh:getDirectionVectorUp()
@@ -1357,9 +1363,9 @@ local function updateAirborneVirtualLidar(dt, veh)
     else
       clearAerialFrame(virtual_lidar_phase + 1)
     end
-    virtual_lidar_update_timer = 0
+    timers.virtual_lidar = 0
   else
-    virtual_lidar_update_timer = virtual_lidar_update_timer + dt
+    timers.virtual_lidar = timers.virtual_lidar + dt
   end
 end
 
@@ -1373,7 +1379,7 @@ local function updateVirtualLidar(dt, veh)
       vehicle_lidar_point_cloud = {}
       vehicle_lidar_frame = nil
       virtual_lidar_phase = 0
-      virtual_lidar_update_timer = 0
+      timers.virtual_lidar = 0
     end
     last_virtual_lidar_variant = 'aerial'
     updateAirborneVirtualLidar(dt, veh)
@@ -1386,7 +1392,7 @@ local function updateVirtualLidar(dt, veh)
       vehicle_lidar_point_cloud = {}
       vehicle_lidar_frame = nil
       virtual_lidar_phase = 0
-      virtual_lidar_update_timer = 0
+      timers.virtual_lidar = 0
       last_virtual_lidar_variant = nil
     end
     return
@@ -1397,13 +1403,13 @@ local function updateVirtualLidar(dt, veh)
     vehicle_lidar_point_cloud = {}
     vehicle_lidar_frame = nil
     virtual_lidar_phase = 0
-    virtual_lidar_update_timer = 0
+    timers.virtual_lidar = 0
     last_virtual_lidar_variant = 'ground'
   end
 
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
-  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+  if timers.virtual_lidar >= 1.0 / 20.0 then
     local pos = veh:getPosition()
     local forward = veh:getDirectionVector()
     local upVec = veh:getDirectionVectorUp()
@@ -1538,16 +1544,16 @@ local function updateVirtualLidar(dt, veh)
         end
       end
 
-      if front_sensor_data and front_sensor_data[2] then
-        for _, data in ipairs(front_sensor_data[2]) do
+      if sensor_state.front and sensor_state.front[2] then
+        for _, data in ipairs(sensor_state.front[2]) do
           if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
             addVehicle(data.other_veh, data.other_veh_props)
           end
         end
       end
 
-      if rear_sensor_data and rear_sensor_data[1] then
-        local vehRear = rear_sensor_data[1]
+      if sensor_state.rear and sensor_state.rear[1] then
+        local vehRear = sensor_state.rear[1]
         if vehRear then
           local propsRear = extra_utils.getVehicleProperties(vehRear)
           if not extra_utils.isVehicleGhost(vehRear, propsRear) then
@@ -1624,9 +1630,9 @@ local function updateVirtualLidar(dt, veh)
         maybePublishVirtualLidarPcd(veh)
       end
     end
-    virtual_lidar_update_timer = 0
+    timers.virtual_lidar = 0
   else
-    virtual_lidar_update_timer = virtual_lidar_update_timer + dt
+    timers.virtual_lidar = timers.virtual_lidar + dt
   end
 end
 
@@ -1672,14 +1678,14 @@ local function onUpdate(dt)
 
   if need_front_sensors or need_rear_sensors then
     --Update at 120 Hz
-    if other_systems_timer >= 1.0 / 120.0 then
+    if timers.other_systems >= 1.0 / 120.0 then
       if phase == 0 then
         --Get sensor data
         if need_front_sensors then
-          front_sensor_data = sensor_system.pollFrontSensors(other_systems_timer * 2, veh_props, system_params, aeb_params)
+          sensor_state.front = sensor_system.pollFrontSensors(timers.other_systems * 2, veh_props, system_params, aeb_params)
         end
         if need_rear_sensors then
-          rear_sensor_data = sensor_system.pollRearSensors(other_systems_timer * 2, veh_props, system_params, rev_aeb_params)
+          sensor_state.rear = sensor_system.pollRearSensors(timers.other_systems * 2, veh_props, system_params, rev_aeb_params)
         end
 
         phase = 1
@@ -1687,18 +1693,18 @@ local function onUpdate(dt)
       elseif phase == 1 then
         --Update Adaptive Cruise Control
         if extra_utils.getPart("acc_angelo234") and acc_system_on then
-          acc_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
+          acc_system.update(timers.other_systems * 2, my_veh, system_params, aeb_params, sensor_state.front)
         end
 
           --Update Forward Collision Mitigation System
           if extra_utils.getPart("forward_collision_mitigation_angelo234") and fcm_system_on then
             fcm_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               aeb_params,
               beeper_params,
-              front_sensor_data
+              sensor_state.front
             )
           end
 
@@ -1707,32 +1713,32 @@ local function onUpdate(dt)
             and extra_utils.getPart("obstacle_aeb_angelo234")
             and obstacle_aeb_system_on then
             obstacle_aeb_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               aeb_params,
               beeper_params,
-              front_sensor_data,
-              rear_sensor_data
+              sensor_state.front,
+              sensor_state.rear
             )
           end
 
           --Update Reverse Collision Mitigation System
           if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
             rcm_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               parking_lines_params,
               rev_aeb_params,
               beeper_params,
-              rear_sensor_data
+              sensor_state.rear
             )
           end
 
           --Update Lane Centering Assist System
           lane_centering_system.update(
-            other_systems_timer * 2,
+            timers.other_systems * 2,
             my_veh,
             system_params,
             lane_centering_assist_on
@@ -1746,7 +1752,7 @@ local function onUpdate(dt)
             if not lane_centering_ai_active then
               applyLaneCenteringAiState(true, 'refresh')
             end
-            refreshLaneCenteringAiState(other_systems_timer * 2, my_veh)
+            refreshLaneCenteringAiState(timers.other_systems * 2, my_veh)
           elseif lane_centering_ai_active then
             applyLaneCenteringAiState(false, 'sync')
           end
@@ -1754,34 +1760,34 @@ local function onUpdate(dt)
         phase = 0
       end
 
-      other_systems_timer = 0
+      timers.other_systems = 0
     end
   end
 
   --Update at 10 Hz
-  if hsa_system_update_timer >= 0.1 then
+  if timers.hsa_system >= 0.1 then
     --Update Hill Start Assist System
     if extra_utils.getPart("hill_start_assist_angelo234") then
-      hsa_system.update(hsa_system_update_timer, my_veh)
+      hsa_system.update(timers.hsa_system, my_veh)
     end
 
-    hsa_system_update_timer = 0
+    timers.hsa_system = 0
 
     --p:add("hsa update")
   end
 
   --Update Auto Headlight System at 4 Hz
-  if auto_headlight_system_update_timer >= 0.25 then
+  if timers.auto_headlight >= 0.25 then
     if extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on then
-      if front_sensor_data ~= nil then
+      if sensor_state.front ~= nil then
         if prev_auto_headlight_system_on ~= auto_headlight_system_on then
           auto_headlight_system.systemSwitchedOn()
         end
 
-        auto_headlight_system.update(auto_headlight_system_update_timer, my_veh, front_sensor_data[2])
+        auto_headlight_system.update(timers.auto_headlight, my_veh, sensor_state.front[2])
       end
 
-      auto_headlight_system_update_timer = 0
+      timers.auto_headlight = 0
     end
 
     prev_auto_headlight_system_on = auto_headlight_system_on
@@ -1790,11 +1796,11 @@ local function onUpdate(dt)
   end
 
   --Update timers for updating systems
-  other_systems_timer = other_systems_timer + dt
-  hsa_system_update_timer = hsa_system_update_timer + dt
-  auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
+  timers.other_systems = timers.other_systems + dt
+  timers.hsa_system = timers.hsa_system + dt
+  timers.auto_headlight = timers.auto_headlight + dt
 
-  refreshAutopilotState(dt, my_veh)
+  autopilot_state.refresh(dt, my_veh)
   updateVirtualLidar(dt, my_veh)
 
   --p:finish(true)
@@ -2419,8 +2425,8 @@ local function onInit()
 end
 
 local function onExtensionUnloaded()
-  if autopilotDisengage then
-    autopilotDisengage()
+  if autopilot_state.disengage then
+    autopilot_state.disengage()
   end
   stopVirtualLidarStreamServer()
 end
