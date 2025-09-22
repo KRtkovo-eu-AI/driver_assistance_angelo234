@@ -263,6 +263,10 @@ local AERIAL_LIDAR_GROUND_MIN_DEPTH = 1.0
 local AERIAL_LIDAR_MAIN_ALIGNMENT = 0.12
 local AERIAL_LIDAR_MIN_DOWN_ALIGNMENT = -0.05
 local AERIAL_LIDAR_ABOVE_SENSOR_LIMIT = 0.75
+local AERIAL_LIDAR_FRAME_MAX_AGE = 0.65
+local AERIAL_LIDAR_MAX_FRAME_TRANSLATION = 15.0
+local AERIAL_LIDAR_MAX_FRAME_TILT = math.rad(24)
+local AERIAL_LIDAR_GHOST_BIN_SIZE = 0.12
 
 local function resetAerialDeskewState()
   aerial_lidar_frame_times = {}
@@ -1981,13 +1985,47 @@ function computeAerialReferenceFrame()
   end
 end
 
-local function accumulateTransformedPoints(buffers, frames, curr, combined)
+local function shouldSkipAerialFrame(frame, curr, ts)
+  if last_virtual_lidar_variant ~= 'aerial' then return false end
+  if not frame or not curr then return false end
+
+  if aerial_reference_time and ts then
+    if math.abs(aerial_reference_time - ts) > AERIAL_LIDAR_FRAME_MAX_AGE then
+      return true
+    end
+  end
+
+  if frame.origin and curr.origin then
+    local delta = frame.origin - curr.origin
+    if delta:length() > AERIAL_LIDAR_MAX_FRAME_TRANSLATION then
+      return true
+    end
+  end
+
+  local function frameAngle(a, b)
+    if not a or not b then return 0 end
+    local dot = clampValue(a:dot(b), -1, 1)
+    return math.acos(dot)
+  end
+
+  local tilt = math.max(frameAngle(frame.up, curr.up), frameAngle(frame.dir, curr.dir))
+  if tilt > AERIAL_LIDAR_MAX_FRAME_TILT then
+    return true
+  end
+
+  return false
+end
+
+local function accumulateTransformedPoints(buffers, frames, curr, combined, times)
   for i = 1, #buffers do
     local frame = frames[i]
     if frame then
-      local bucket = buffers[i]
-      for j = 1, #bucket do
-        combined[#combined + 1] = drift_proximity.apply(bucket[j], frame, curr)
+      local skip = times and shouldSkipAerialFrame(frame, curr, times[i])
+      if not skip then
+        local bucket = buffers[i]
+        for j = 1, #bucket do
+          combined[#combined + 1] = drift_proximity.apply(bucket[j], frame, curr)
+        end
       end
     end
   end
@@ -2005,7 +2043,8 @@ local function getVirtualLidarPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_point_cloud, virtual_lidar_frames, frame, combined, times)
   accumulateTransformedPoints(front_lidar_point_cloud, front_lidar_frames, frame, combined)
   if vehicle_lidar_frame then
     for i = 1, #vehicle_lidar_point_cloud do
@@ -2019,7 +2058,8 @@ local function getVirtualLidarGroundPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_ground_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_ground_point_cloud, virtual_lidar_frames, frame, combined, times)
   accumulateTransformedPoints(front_lidar_ground_point_cloud, front_lidar_frames, frame, combined)
   return combined
 end
@@ -2028,7 +2068,8 @@ local function getVirtualLidarOverheadPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_overhead_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_overhead_point_cloud, virtual_lidar_frames, frame, combined, times)
   return combined
 end
 
@@ -2066,6 +2107,48 @@ local function convertPointsToWorld(points, frame, skipMap)
     end
   end
   return worldPoints
+end
+
+local function filterAerialWorldPoints(points, frame)
+  if last_virtual_lidar_variant ~= 'aerial' then return points end
+  if not points or #points == 0 then return points end
+  if not frame or not frame.origin then return points end
+  local bin = AERIAL_LIDAR_GHOST_BIN_SIZE or 0
+  if bin <= 0 then return points end
+  local inv = 1 / bin
+  local buckets = {}
+  local order = {}
+  local origin = frame.origin
+  for i = 1, #points do
+    local pt = points[i]
+    if pt then
+      local x = pt.x or 0
+      local y = pt.y or 0
+      local z = pt.z or 0
+      local key = string.format('%d:%d:%d', math.floor(x * inv + 0.5), math.floor(y * inv + 0.5), math.floor(z * inv + 0.5))
+      local dx = x - origin.x
+      local dy = y - origin.y
+      local dz = z - origin.z
+      local distSq = dx * dx + dy * dy + dz * dz
+      local bucket = buckets[key]
+      if not bucket then
+        buckets[key] = {point = pt, dist = distSq}
+        order[#order + 1] = key
+      elseif distSq < bucket.dist then
+        bucket.point = pt
+        bucket.dist = distSq
+      end
+    end
+  end
+  if #order == 0 then return points end
+  local filtered = {}
+  for i = 1, #order do
+    local bucket = buckets[order[i]]
+    if bucket and bucket.point then
+      filtered[#filtered + 1] = bucket.point
+    end
+  end
+  return filtered
 end
 
 local function gatherVehicleWorldPoints(frame)
@@ -2169,6 +2252,12 @@ function maybePublishVirtualLidarPcd(veh)
   local mainPoints = convertPointsToWorld(getVirtualLidarPointCloud(frame, veh), frame, vehicleKeyMap)
   local groundPoints = convertPointsToWorld(getVirtualLidarGroundPointCloud(frame, veh), frame)
   local overheadPoints = convertPointsToWorld(getVirtualLidarOverheadPointCloud(frame, veh), frame)
+
+  if last_virtual_lidar_variant == 'aerial' then
+    mainPoints = filterAerialWorldPoints(mainPoints, frame)
+    groundPoints = filterAerialWorldPoints(groundPoints, frame)
+    overheadPoints = filterAerialWorldPoints(overheadPoints, frame)
+  end
 
   local payload = lidarPcdPublisher.publish(frame, {
     main = mainPoints,
