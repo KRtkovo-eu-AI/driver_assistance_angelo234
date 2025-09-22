@@ -244,17 +244,20 @@ local LIDAR_LOW_OBJECT_BAND = 1.0
 
 local AERIAL_LIDAR_PART_NAME = 'lidar_aerial_angelo234'
 local AERIAL_LIDAR_SCAN_RANGE = 420
-local AERIAL_LIDAR_MIN_RANGE = 0.4
+local AERIAL_LIDAR_MIN_RANGE = 0.45
 local AERIAL_LIDAR_H_FOV = math.rad(360)
 local AERIAL_LIDAR_V_FOV = math.rad(160)
-local AERIAL_LIDAR_H_RES = 128
-local AERIAL_LIDAR_V_RES = 64
-local AERIAL_LIDAR_MAX_RAYS = 240
-local AERIAL_LIDAR_UPDATE_INTERVAL = 1.0 / 10.0
+local AERIAL_LIDAR_H_RES = 144
+local AERIAL_LIDAR_V_RES = 72
+local AERIAL_LIDAR_MAX_RAYS = 720
+local AERIAL_LIDAR_UPDATE_INTERVAL = 1.0 / 8.0
 local AERIAL_LIDAR_MOUNT_OFFSET = 0.8
-local AERIAL_LIDAR_SELF_MARGIN = 0.35
-local AERIAL_LIDAR_GROUND_ALIGNMENT = 0.7
-local AERIAL_LIDAR_GROUND_MIN_DEPTH = 0.8
+local AERIAL_LIDAR_SELF_MARGIN = 0.55
+local AERIAL_LIDAR_GROUND_ALIGNMENT = 0.72
+local AERIAL_LIDAR_GROUND_MIN_DEPTH = 1.0
+local AERIAL_LIDAR_MAIN_ALIGNMENT = 0.12
+local AERIAL_LIDAR_MIN_DOWN_ALIGNMENT = -0.05
+local AERIAL_LIDAR_ABOVE_SENSOR_LIMIT = 0.75
 
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
@@ -1252,7 +1255,7 @@ local function updateAirborneVirtualLidar(dt, veh)
               hStart = virtual_lidar_phase,
               hStep = VIRTUAL_LIDAR_PHASES,
               maxRays = AERIAL_LIDAR_MAX_RAYS,
-              includeDynamic = true
+              includeDynamic = false
             }
           ) or {}
 
@@ -1297,12 +1300,17 @@ local function updateAirborneVirtualLidar(dt, veh)
                 if relLen > 1e-6 then
                   local relNorm = rel * (1 / relLen)
                   local downAlignment = -(relNorm:dot(up))
-                  if downAlignment >= AERIAL_LIDAR_GROUND_ALIGNMENT and point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH then
-                    ground_cloud[#ground_cloud + 1] = point
-                  else
-                    main_cloud[#main_cloud + 1] = point
+                  local aboveSensor = point.z > AERIAL_LIDAR_ABOVE_SENSOR_LIMIT
+                  local upward = downAlignment <= AERIAL_LIDAR_MIN_DOWN_ALIGNMENT
+                  local tooClose = relLen <= (AERIAL_LIDAR_MIN_RANGE + 1e-3)
+                  if not (aboveSensor or upward or tooClose) then
+                    if downAlignment >= AERIAL_LIDAR_GROUND_ALIGNMENT and point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH then
+                      ground_cloud[#ground_cloud + 1] = point
+                    elseif downAlignment >= AERIAL_LIDAR_MAIN_ALIGNMENT or point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH * 0.5 then
+                      main_cloud[#main_cloud + 1] = point
+                    end
                   end
-                else
+                elseif point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH * 0.5 then
                   main_cloud[#main_cloud + 1] = point
                 end
               end
