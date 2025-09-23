@@ -1659,7 +1659,9 @@ local function onUpdate(dt)
   --p:start()
 
   lidarPcdStream.update(dt)
-  extra_utils.beginFrame(dt)
+  if extra_utils.beginFrame then
+    extra_utils.beginFrame(dt)
+  end
 
   if first_update then
     if sensor_system.init then sensor_system.init() end
