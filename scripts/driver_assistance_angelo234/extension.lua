@@ -2,10 +2,13 @@
 -- If a copy of the bCDDL was not distributed with this
 -- file, You can obtain one at http://beamng.com/bCDDL-1.1.txt
 
---global table of all vehicles acceleration vectors
---veh_accs_angelo234[id][1] = lateral (-x = right, +x = left)
---veh_accs_angelo234[id][2] = longitudinal (-x = accelerating, +x = braking)
---veh_accs_angelo234[id][3] = up/down direction (-x = down, +x = up)
+-- Global table of all vehicles acceleration vectors expressed in vehicle space.
+-- Populated from velocity changes on the game engine side to avoid per-frame
+-- Vehicle Lua queries.  The legacy axis conventions are preserved for
+-- compatibility with existing modules:
+-- veh_accs_angelo234[id][1] = lateral (-x = right, +x = left)
+-- veh_accs_angelo234[id][2] = longitudinal (-x = accelerating, +x = braking)
+-- veh_accs_angelo234[id][3] = up/down direction (-x = down, +x = up)
 veh_accs_angelo234 = {}
 
 local M = {}
@@ -326,6 +329,12 @@ local function init(player)
 
   if not veh then return end
 
+  if extra_utils.resetAllMotionStates then
+    extra_utils.resetAllMotionStates()
+  end
+
+  veh_accs_angelo234 = {}
+
   local veh_name = veh:getJBeamFilename()
 
   local default_param_file_dir = 'vehicles/common/parameters'
@@ -363,7 +372,23 @@ local function onVehicleSwitched(_oid, _nid, player)
   if autopilot_state.disengage then
     autopilot_state.disengage()
   end
+  if _oid and veh_accs_angelo234 then
+    veh_accs_angelo234[_oid] = nil
+  end
+  if extra_utils.resetVehicleMotionState then
+    if _oid then extra_utils.resetVehicleMotionState(_oid) end
+    if _nid then extra_utils.resetVehicleMotionState(_nid) end
+  end
   init(player)
+end
+
+local function onVehicleDestroyed(veh_id)
+  if veh_id and veh_accs_angelo234 then
+    veh_accs_angelo234[veh_id] = nil
+  end
+  if extra_utils.resetVehicleMotionState then
+    extra_utils.resetVehicleMotionState(veh_id)
+  end
 end
 
 local function onHeadlightsOff()
@@ -1059,15 +1084,7 @@ local function onCameraModeChanged(new_camera_mode)
 end
 
 local function getAllVehiclesPropertiesFromVELua(my_veh)
-  for i = 0, be:getObjectCount() - 1 do
-    local this_veh = be:getObject(i)
-    local id = this_veh:getID()
-
-    local acc_cmd =
-      'obj:queueGameEngineLua("veh_accs_angelo234[' .. id .. '] = {" .. sensors.gx2 .. ",' ..
-      '" .. sensors.gy2 .. "," .. sensors.gz2 .. "}")'
-    this_veh:queueLuaCommand(acc_cmd)
-  end
+  if not my_veh then return false end
 
   --Get properties of my vehicle
   local throttle_cmd =
@@ -1135,7 +1152,7 @@ local function getAllVehiclesPropertiesFromVELua(my_veh)
     return false
   end
 
-  return veh_accs_angelo234 ~= nil
+  return electrics_values_angelo234 ~= nil
     and #electrics_values_angelo234 ~= 0
     and angular_speed_angelo234 ~= nil
     and input_throttle_angelo234 ~= nil
@@ -1642,6 +1659,7 @@ local function onUpdate(dt)
   --p:start()
 
   lidarPcdStream.update(dt)
+  extra_utils.beginFrame(dt)
 
   if first_update then
     if sensor_system.init then sensor_system.init() end
@@ -2429,6 +2447,10 @@ local function onExtensionUnloaded()
     autopilot_state.disengage()
   end
   stopVirtualLidarStreamServer()
+  if extra_utils.resetAllMotionStates then
+    extra_utils.resetAllMotionStates()
+  end
+  veh_accs_angelo234 = {}
 end
 
 if lane_centering_system and lane_centering_system.setActivationCallback then
@@ -2437,6 +2459,7 @@ end
 
 M.onExtensionLoaded = onExtensionLoaded
 M.onVehicleSwitched = onVehicleSwitched
+M.onVehicleDestroyed = onVehicleDestroyed
 M.onHeadlightsOff = onHeadlightsOff
 M.onHeadlightsOn = onHeadlightsOn
 M.toggleFCMSystem = toggleFCMSystem
