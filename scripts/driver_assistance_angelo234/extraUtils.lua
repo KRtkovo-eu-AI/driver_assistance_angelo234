@@ -72,6 +72,68 @@ local function getPart(partName)
 end
 
 local vehs_props_reusing = {}
+local motion_state = {}
+local current_time = 0
+local frame_counter = 0
+local MIN_TIME_DELTA = 1e-6
+
+local function beginFrame(dt)
+  frame_counter = frame_counter + 1
+  if type(dt) ~= 'number' or dt ~= dt then
+    dt = 0
+  end
+  if dt < 0 then
+    dt = 0
+  end
+  current_time = current_time + dt
+end
+
+local function updateVehicleMotionState(id, velocity)
+  if not id or not velocity then return nil end
+  local state = motion_state[id]
+  if not state then
+    state = {
+      last_velocity = vec3(velocity.x, velocity.y, velocity.z),
+      world_acceleration = vec3(0, 0, 0),
+      timestamp = current_time,
+      frame = frame_counter
+    }
+    motion_state[id] = state
+    return state.world_acceleration
+  end
+
+  if state.frame == frame_counter then
+    return state.world_acceleration
+  end
+
+  local dt = current_time - (state.timestamp or current_time)
+  local last_velocity = state.last_velocity
+  if dt < MIN_TIME_DELTA or dt > 1 then
+    state.world_acceleration:set(0, 0, 0)
+  else
+    state.world_acceleration:set(
+      (velocity.x - last_velocity.x) / dt,
+      (velocity.y - last_velocity.y) / dt,
+      (velocity.z - last_velocity.z) / dt
+    )
+  end
+  last_velocity:set(velocity)
+  state.timestamp = current_time
+  state.frame = frame_counter
+
+  return state.world_acceleration
+end
+
+local function resetVehicleMotionState(id)
+  if not id then return end
+  motion_state[id] = nil
+end
+
+local function resetAllMotionStates()
+  motion_state = {}
+  current_time = 0
+  frame_counter = 0
+end
 
 local function safeCallMethod(obj, name)
   if not obj then return nil end
@@ -266,12 +328,36 @@ local function getVehicleProperties(veh)
   props.velocity:set(veh:getVelocity())
   props.speed = props.velocity:length()
 
-  local acceleration = veh_accs_angelo234[veh:getID()]
+  local world_acc = updateVehicleMotionState(props.id, props.velocity)
+  local lateral = 0
+  local longitudinal = 0
+  local vertical = 0
 
-  if acceleration == nil then
-    props.acceleration:set(0,0,0)
-  else
-    props.acceleration:set(acceleration[1], acceleration[2], 9.81 - acceleration[3])
+  if world_acc then
+    local right = props.dir_right
+    local forward = props.dir
+    local up = props.dir_up
+
+    if right and forward and up then
+      lateral = -(world_acc:dot(right))
+      longitudinal = -(world_acc:dot(forward))
+      vertical = world_acc:dot(up)
+    end
+  end
+
+  props.acceleration:set(lateral, longitudinal, vertical)
+
+  if veh_accs_angelo234 then
+    local entry = veh_accs_angelo234[props.id]
+    local sensor_vertical = 9.81 - vertical
+    if not entry then
+      entry = {lateral, longitudinal, sensor_vertical}
+      veh_accs_angelo234[props.id] = entry
+    else
+      entry[1] = lateral
+      entry[2] = longitudinal
+      entry[3] = sensor_vertical
+    end
   end
 
   return props
@@ -927,5 +1013,8 @@ M.onClientPostStartMission = onClientPostStartMission
 M.isVehicleGhost = isVehicleGhost
 M.getRoadRules = getRoadRules
 M.getTrafficSide = getTrafficSide
+M.beginFrame = beginFrame
+M.resetVehicleMotionState = resetVehicleMotionState
+M.resetAllMotionStates = resetAllMotionStates
 
 return M
