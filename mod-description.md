@@ -64,6 +64,10 @@ This module fuses the forward radar array with the virtual LiDAR sweep to recogn
 
 Equip the dedicated sensor pack to add a 12-phase virtual LiDAR that continuously scans the surroundings, improving object recognition for the Obstacle Collision system and Lane Centering Assist. The scan also powers point-cloud capture for external tools.
 
+## Airborne Survey LiDAR
+
+Swap the LiDAR slot for the aerial scanner when flying. The pod mounts beneath the vehicle and sweeps a wide cone downward to capture rooftops, terrain and other overhead details that ground rigs cannot see. The Virtual LiDAR viewer and PCD exporter automatically display the active LiDAR variant, so you can review road-going and aerial captures without changing any debug settings.
+
 ## Virtual LiDAR – PCD export & streaming
 
 Capture the environment as a point cloud that you can either write to disk or stream over TCP. The export throttles itself to roughly four frames per second to reduce drive wear, and each point includes an intensity tag for easier filtering in external applications.

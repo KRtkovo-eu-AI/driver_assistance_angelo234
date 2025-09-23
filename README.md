@@ -41,10 +41,13 @@ The current functionality includes:
 - **Obstacle Collision Automatic Emergency Braking**  
   Uses the front radar array together with a virtual LiDAR sweep to recognise static hazards, sound escalating warnings, flash the hazards and apply maximum braking when a collision is imminent.
 
-- **12-phase LFO LiDAR**  
+- **12-phase LFO LiDAR**
   Virtual LiDAR performing 12-phase surrounding scanning, capturing also traffic and player vehicles. When equipped, it is used for increasing precision of the Obstacle Collision System and Lane Centering Assist. Also allows PCD export & streaming.
 
-- **Virtual LiDAR – PCD export & streaming**  
+- **Airborne Survey LiDAR**
+  Downward-facing LiDAR pod tailored for aerial mapping from helicopters and other aircraft. It sweeps detailed multi-phase passes over terrain and rooftops while sharing the same drift-stabilized coordinates as the road-going sensor so both point clouds align.
+
+- **Virtual LiDAR – PCD export & streaming**
   Captures the environment as a point cloud that can be exported to disk or streamed over TCP with intensity tags for easy filtering in external tooling.
 
 - **Lane Centering Assist**  
@@ -82,7 +85,7 @@ If you do not override the path, the module writes `latest.pcd` into `settings/k
 
 ### Update frequency
 
-The virtual LiDAR refreshes internally at 20 Hz, but exporting/streaming is throttled to at most one PCD frame every 0.25 s (≈4 Hz) to limit I/O overhead.
+The virtual LiDAR refreshes internally at 20 Hz, but exporting/streaming is throttled to at most one PCD frame every 0.25 s (≈4 Hz) to limit I/O overhead. The exporter automatically follows whichever LiDAR variant is installed—ground or airborne—so mixed captures from both sensors remain aligned when you swap hardware between sorties.
 
 You can find full workflows and ready-to-run client examples in [virtual-lidar-pcd.md](virtual-lidar-pcd.md).
 
@@ -144,6 +147,7 @@ Autopilot piggybacks on BeamNG’s navigation AI: once the hardware slot is inst
      - Requires a navigation target on the world map and the Autopilot hardware slot. Activate it with the Vehicle control binding; the system relinquishes control automatically if the destination is cleared or Lane Centering Assist is active.
 
    - Virtual LiDAR:
+     - Install either the 12-phase LFO LiDAR or the Airborne Survey LiDAR in the Driver Assistance System Plus slot—only one pod can be active at a time, and the debug viewer/exporter automatically follows the installed hardware.
      - Enable export or streaming from the in-game console using the commands listed in the section below. Configure the output path or TCP port as needed for external tools.
 
 ---

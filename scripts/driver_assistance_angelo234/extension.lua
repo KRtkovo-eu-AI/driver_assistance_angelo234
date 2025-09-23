@@ -63,16 +63,22 @@ local autopilot_ai_active = false
 local autopilot_current_target = nil
 local lane_centering_autopilot_block_notified = false
 
-local autopilotDisengage
-local refreshAutopilotState = function() end
+local autopilot_state = {
+  disengage = nil,
+  refresh = function() end
+}
 
-local front_sensor_data = nil
-local rear_sensor_data = nil
+local sensor_state = {
+  front = nil,
+  rear = nil
+}
 
-local other_systems_timer = 0
-local hsa_system_update_timer = 0
-local auto_headlight_system_update_timer = 0
-local virtual_lidar_update_timer = 0
+local timers = {
+  other_systems = 0,
+  hsa_system = 0,
+  auto_headlight = 0,
+  virtual_lidar = 0
+}
 local VIRTUAL_LIDAR_PHASES = 8
 local FRONT_LIDAR_PHASES = 4
 local virtual_lidar_point_cloud = {}
@@ -87,6 +93,11 @@ local front_lidar_ground_point_cloud_wip = {}
 local front_lidar_frames_wip = {}
 local vehicle_lidar_point_cloud = {}
 local vehicle_lidar_frame = nil
+local aerial_lidar_frame_times = {}
+local aerial_lidar_clock = 0
+local aerial_reference_frame = nil
+local aerial_reference_time = nil
+local computeAerialReferenceFrame
 
 local function computeDefaultVirtualLidarPath()
   if FS and FS.getUserPath then
@@ -242,6 +253,34 @@ local VIRTUAL_LIDAR_REAR_EXTENSION = 40
 local LIDAR_GROUND_THRESHOLD = -1.5
 local LIDAR_LOW_OBJECT_BAND = 1.0
 
+local AERIAL_LIDAR_PART_NAME = 'lidar_aerial_angelo234'
+local AERIAL_LIDAR_SCAN_RANGE = 420
+local AERIAL_LIDAR_MIN_RANGE = 0.45
+local AERIAL_LIDAR_H_FOV = math.rad(360)
+local AERIAL_LIDAR_V_FOV = math.rad(160)
+local AERIAL_LIDAR_H_RES = 144
+local AERIAL_LIDAR_V_RES = 72
+local AERIAL_LIDAR_MAX_RAYS = 720
+local AERIAL_LIDAR_UPDATE_INTERVAL = 1.0 / 8.0
+local AERIAL_LIDAR_MOUNT_OFFSET = 0.8
+local AERIAL_LIDAR_SELF_MARGIN = 0.55
+local AERIAL_LIDAR_GROUND_ALIGNMENT = 0.72
+local AERIAL_LIDAR_GROUND_MIN_DEPTH = 1.0
+local AERIAL_LIDAR_MAIN_ALIGNMENT = 0.12
+local AERIAL_LIDAR_MIN_DOWN_ALIGNMENT = -0.05
+local AERIAL_LIDAR_ABOVE_SENSOR_LIMIT = 0.75
+local AERIAL_LIDAR_FRAME_MAX_AGE = 0.65
+local AERIAL_LIDAR_MAX_FRAME_TRANSLATION = 15.0
+local AERIAL_LIDAR_MAX_FRAME_TILT = math.rad(24)
+local AERIAL_LIDAR_GHOST_BIN_SIZE = 0.12
+
+local function resetAerialDeskewState()
+  aerial_lidar_frame_times = {}
+  aerial_lidar_clock = 0
+  aerial_reference_frame = nil
+  aerial_reference_time = nil
+end
+
 local function resetVirtualLidarPointCloud()
   virtual_lidar_point_cloud = {}
   virtual_lidar_ground_point_cloud = {}
@@ -255,6 +294,7 @@ local function resetVirtualLidarPointCloud()
   front_lidar_frames_wip = {}
   vehicle_lidar_point_cloud = {}
   vehicle_lidar_frame = nil
+  resetAerialDeskewState()
   for i = 1, VIRTUAL_LIDAR_PHASES do
     virtual_lidar_point_cloud[i] = {}
     virtual_lidar_ground_point_cloud[i] = {}
@@ -276,6 +316,7 @@ local virtual_lidar_phase = 0
 local front_lidar_phase = 0
 local front_lidar_update_timer = 0
 local front_lidar_thread = nil
+local last_virtual_lidar_variant = nil
 
 M.curr_camera_mode = "orbit"
 M.prev_camera_mode = "orbit"
@@ -319,8 +360,8 @@ local function onExtensionLoaded()
 end
 
 local function onVehicleSwitched(_oid, _nid, player)
-  if autopilotDisengage then
-    autopilotDisengage()
+  if autopilot_state.disengage then
+    autopilot_state.disengage()
   end
   init(player)
 end
@@ -848,7 +889,7 @@ local function autopilotEngage(target, announce)
   return true
 end
 
-autopilotDisengage = function(message)
+autopilot_state.disengage = function(message)
   if autopilot_ai_active then
     local veh = be:getPlayerVehicle(0)
     if veh then
@@ -865,23 +906,23 @@ autopilotDisengage = function(message)
   end
 end
 
-refreshAutopilotState = function(dt, veh)
+autopilot_state.refresh = function(dt, veh)
   if not autopilot_system_on then return end
   if not hasAutopilotSystem() then
-    autopilotDisengage("Autopilot disengaged: system removed")
+    autopilot_state.disengage("Autopilot disengaged: system removed")
     return
   end
   if not veh then
-    autopilotDisengage()
+    autopilot_state.disengage()
     return
   end
   if not autopilotHasNavigationTarget() then
-    autopilotDisengage("Autopilot disengaged: destination cleared")
+    autopilot_state.disengage("Autopilot disengaged: destination cleared")
     return
   end
   local target = getAutopilotRouteTarget()
   if not target then
-    autopilotDisengage("Autopilot disengaged: unable to resolve route")
+    autopilot_state.disengage("Autopilot disengaged: unable to resolve route")
     return
   end
   if target ~= autopilot_current_target then
@@ -892,7 +933,7 @@ end
 
 local function toggleAutopilotSystem()
   if autopilot_system_on then
-    autopilotDisengage("Autopilot disengaged")
+    autopilot_state.disengage("Autopilot disengaged")
     return
   end
 
@@ -1193,14 +1234,182 @@ front_lidar_thread = coroutine.create(frontLidarLoop)
 
 --local p = LuaProfiler("my profiler")
 
+local function updateAirborneVirtualLidar(dt, veh)
+  aerial_lidar_clock = aerial_lidar_clock + dt
+  local interval = AERIAL_LIDAR_UPDATE_INTERVAL or (1.0 / 20.0)
+  local function clearAerialFrame(index)
+    if not index then return end
+    virtual_lidar_frames[index] = nil
+    virtual_lidar_point_cloud[index] = {}
+    virtual_lidar_ground_point_cloud[index] = {}
+    virtual_lidar_overhead_point_cloud[index] = {}
+    aerial_lidar_frame_times[index] = nil
+    vehicle_lidar_point_cloud = {}
+    vehicle_lidar_frame = nil
+    computeAerialReferenceFrame()
+  end
+  if timers.virtual_lidar >= interval then
+    local pos = veh and veh.getPosition and veh:getPosition()
+    local forward = veh and veh.getDirectionVector and veh:getDirectionVector()
+    local upVec = veh and veh.getDirectionVectorUp and veh:getDirectionVectorUp()
+    if pos and forward and upVec then
+      local dir, right, up = buildVirtualLidarFrame(forward, upVec)
+      local frameIndex = virtual_lidar_phase + 1
+      if dir and right and up then
+        local upLen = upVec:length()
+        if upLen >= 1e-6 then
+          local upNorm = upVec * (1 / upLen)
+          local origin = vec3(pos.x, pos.y, pos.z) - upNorm * AERIAL_LIDAR_MOUNT_OFFSET
+          virtual_lidar_frames[frameIndex] = {
+            origin = origin,
+            dir = dir,
+            right = right,
+            up = up
+          }
+          aerial_lidar_frame_times[frameIndex] = aerial_lidar_clock
+          local hits = virtual_lidar.scan(
+            origin,
+            -upNorm,
+            dir,
+            AERIAL_LIDAR_SCAN_RANGE,
+            AERIAL_LIDAR_H_FOV,
+            AERIAL_LIDAR_V_FOV,
+            AERIAL_LIDAR_H_RES,
+            AERIAL_LIDAR_V_RES,
+            AERIAL_LIDAR_MIN_RANGE,
+            veh:getID(),
+            {
+              hStart = virtual_lidar_phase,
+              hStep = VIRTUAL_LIDAR_PHASES,
+              maxRays = AERIAL_LIDAR_MAX_RAYS,
+              includeDynamic = false
+            }
+          ) or {}
+
+          local veh_props = extra_utils.getVehicleProperties(veh)
+          local self_bb = veh_props and veh_props.bb or nil
+          local self_center = self_bb and self_bb:getCenter() or nil
+          local self_half = self_bb and self_bb:getHalfExtents() or nil
+          local self_axes
+          if self_bb then
+            self_axes = {
+              vec3(self_bb:getAxis(0)),
+              vec3(self_bb:getAxis(1)),
+              vec3(self_bb:getAxis(2))
+            }
+          end
+
+          local function insideSelf(pt)
+            if not self_bb or not self_axes then return false end
+            local rel = pt - self_center
+            return math.abs(rel:dot(self_axes[1])) <= self_half.x + AERIAL_LIDAR_SELF_MARGIN
+              and math.abs(rel:dot(self_axes[2])) <= self_half.y + AERIAL_LIDAR_SELF_MARGIN
+              and math.abs(rel:dot(self_axes[3])) <= self_half.z + AERIAL_LIDAR_SELF_MARGIN
+          end
+
+          local main_cloud = {}
+          local ground_cloud = {}
+          local overhead_cloud = {}
+
+          for i = 1, #hits do
+            local worldPoint = hits[i]
+            if worldPoint then
+              local rel = worldPoint - origin
+              local point = {
+                x = rel:dot(right),
+                y = rel:dot(dir),
+                z = rel:dot(up)
+              }
+              if insideSelf(worldPoint) then
+                overhead_cloud[#overhead_cloud + 1] = point
+              else
+                local relLen = rel:length()
+                if relLen > 1e-6 then
+                  local relNorm = rel * (1 / relLen)
+                  local downAlignment = -(relNorm:dot(up))
+                  local aboveSensor = point.z > AERIAL_LIDAR_ABOVE_SENSOR_LIMIT
+                  local upward = downAlignment <= AERIAL_LIDAR_MIN_DOWN_ALIGNMENT
+                  local tooClose = relLen <= (AERIAL_LIDAR_MIN_RANGE + 1e-3)
+                  if not (aboveSensor or upward or tooClose) then
+                    if downAlignment >= AERIAL_LIDAR_GROUND_ALIGNMENT and point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH then
+                      ground_cloud[#ground_cloud + 1] = point
+                    elseif downAlignment >= AERIAL_LIDAR_MAIN_ALIGNMENT or point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH * 0.5 then
+                      main_cloud[#main_cloud + 1] = point
+                    end
+                  end
+                elseif point.z <= -AERIAL_LIDAR_GROUND_MIN_DEPTH * 0.5 then
+                  main_cloud[#main_cloud + 1] = point
+                end
+              end
+            end
+          end
+
+          virtual_lidar_point_cloud[frameIndex] = main_cloud
+          virtual_lidar_ground_point_cloud[frameIndex] = ground_cloud
+          virtual_lidar_overhead_point_cloud[frameIndex] = overhead_cloud
+
+          computeAerialReferenceFrame()
+          virtual_lidar_phase = (virtual_lidar_phase + 1) % VIRTUAL_LIDAR_PHASES
+          if virtual_lidar_phase == 0 then
+            computeAerialReferenceFrame()
+            maybePublishVirtualLidarPcd(veh)
+          end
+        else
+          clearAerialFrame(frameIndex)
+        end
+      else
+        clearAerialFrame(frameIndex)
+      end
+    else
+      clearAerialFrame(virtual_lidar_phase + 1)
+    end
+    timers.virtual_lidar = 0
+  else
+    timers.virtual_lidar = timers.virtual_lidar + dt
+  end
+end
+
 local function updateVirtualLidar(dt, veh)
-  if not extra_utils.getPart("lidar_angelo234") then
-    resetVirtualLidarPointCloud()
+  local groundPart = extra_utils.getPart("lidar_angelo234")
+  local aerialPart = extra_utils.getPart(AERIAL_LIDAR_PART_NAME)
+
+  if aerialPart and not groundPart then
+    if last_virtual_lidar_variant ~= 'aerial' then
+      resetVirtualLidarPointCloud()
+      vehicle_lidar_point_cloud = {}
+      vehicle_lidar_frame = nil
+      virtual_lidar_phase = 0
+      timers.virtual_lidar = 0
+    end
+    last_virtual_lidar_variant = 'aerial'
+    updateAirborneVirtualLidar(dt, veh)
     return
   end
+
+  if not groundPart then
+    if last_virtual_lidar_variant ~= nil then
+      resetVirtualLidarPointCloud()
+      vehicle_lidar_point_cloud = {}
+      vehicle_lidar_frame = nil
+      virtual_lidar_phase = 0
+      timers.virtual_lidar = 0
+      last_virtual_lidar_variant = nil
+    end
+    return
+  end
+
+  if last_virtual_lidar_variant ~= 'ground' then
+    resetVirtualLidarPointCloud()
+    vehicle_lidar_point_cloud = {}
+    vehicle_lidar_frame = nil
+    virtual_lidar_phase = 0
+    timers.virtual_lidar = 0
+    last_virtual_lidar_variant = 'ground'
+  end
+
   if not aeb_params then return end
   if not veh or not veh.getPosition or not veh.getDirectionVector or not veh.getDirectionVectorUp then return end
-  if virtual_lidar_update_timer >= 1.0 / 20.0 then
+  if timers.virtual_lidar >= 1.0 / 20.0 then
     local pos = veh:getPosition()
     local forward = veh:getDirectionVector()
     local upVec = veh:getDirectionVectorUp()
@@ -1335,16 +1544,16 @@ local function updateVirtualLidar(dt, veh)
         end
       end
 
-      if front_sensor_data and front_sensor_data[2] then
-        for _, data in ipairs(front_sensor_data[2]) do
+      if sensor_state.front and sensor_state.front[2] then
+        for _, data in ipairs(sensor_state.front[2]) do
           if data.other_veh and data.other_veh_props and not extra_utils.isVehicleGhost(data.other_veh, data.other_veh_props) then
             addVehicle(data.other_veh, data.other_veh_props)
           end
         end
       end
 
-      if rear_sensor_data and rear_sensor_data[1] then
-        local vehRear = rear_sensor_data[1]
+      if sensor_state.rear and sensor_state.rear[1] then
+        local vehRear = sensor_state.rear[1]
         if vehRear then
           local propsRear = extra_utils.getVehicleProperties(vehRear)
           if not extra_utils.isVehicleGhost(vehRear, propsRear) then
@@ -1421,9 +1630,9 @@ local function updateVirtualLidar(dt, veh)
         maybePublishVirtualLidarPcd(veh)
       end
     end
-    virtual_lidar_update_timer = 0
+    timers.virtual_lidar = 0
   else
-    virtual_lidar_update_timer = virtual_lidar_update_timer + dt
+    timers.virtual_lidar = timers.virtual_lidar + dt
   end
 end
 
@@ -1469,14 +1678,14 @@ local function onUpdate(dt)
 
   if need_front_sensors or need_rear_sensors then
     --Update at 120 Hz
-    if other_systems_timer >= 1.0 / 120.0 then
+    if timers.other_systems >= 1.0 / 120.0 then
       if phase == 0 then
         --Get sensor data
         if need_front_sensors then
-          front_sensor_data = sensor_system.pollFrontSensors(other_systems_timer * 2, veh_props, system_params, aeb_params)
+          sensor_state.front = sensor_system.pollFrontSensors(timers.other_systems * 2, veh_props, system_params, aeb_params)
         end
         if need_rear_sensors then
-          rear_sensor_data = sensor_system.pollRearSensors(other_systems_timer * 2, veh_props, system_params, rev_aeb_params)
+          sensor_state.rear = sensor_system.pollRearSensors(timers.other_systems * 2, veh_props, system_params, rev_aeb_params)
         end
 
         phase = 1
@@ -1484,18 +1693,18 @@ local function onUpdate(dt)
       elseif phase == 1 then
         --Update Adaptive Cruise Control
         if extra_utils.getPart("acc_angelo234") and acc_system_on then
-          acc_system.update(other_systems_timer * 2, my_veh, system_params, aeb_params, front_sensor_data)
+          acc_system.update(timers.other_systems * 2, my_veh, system_params, aeb_params, sensor_state.front)
         end
 
           --Update Forward Collision Mitigation System
           if extra_utils.getPart("forward_collision_mitigation_angelo234") and fcm_system_on then
             fcm_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               aeb_params,
               beeper_params,
-              front_sensor_data
+              sensor_state.front
             )
           end
 
@@ -1504,32 +1713,32 @@ local function onUpdate(dt)
             and extra_utils.getPart("obstacle_aeb_angelo234")
             and obstacle_aeb_system_on then
             obstacle_aeb_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               aeb_params,
               beeper_params,
-              front_sensor_data,
-              rear_sensor_data
+              sensor_state.front,
+              sensor_state.rear
             )
           end
 
           --Update Reverse Collision Mitigation System
           if extra_utils.getPart("reverse_collision_mitigation_angelo234") and rcm_system_on then
             rcm_system.update(
-              other_systems_timer * 2,
+              timers.other_systems * 2,
               my_veh,
               system_params,
               parking_lines_params,
               rev_aeb_params,
               beeper_params,
-              rear_sensor_data
+              sensor_state.rear
             )
           end
 
           --Update Lane Centering Assist System
           lane_centering_system.update(
-            other_systems_timer * 2,
+            timers.other_systems * 2,
             my_veh,
             system_params,
             lane_centering_assist_on
@@ -1543,7 +1752,7 @@ local function onUpdate(dt)
             if not lane_centering_ai_active then
               applyLaneCenteringAiState(true, 'refresh')
             end
-            refreshLaneCenteringAiState(other_systems_timer * 2, my_veh)
+            refreshLaneCenteringAiState(timers.other_systems * 2, my_veh)
           elseif lane_centering_ai_active then
             applyLaneCenteringAiState(false, 'sync')
           end
@@ -1551,34 +1760,34 @@ local function onUpdate(dt)
         phase = 0
       end
 
-      other_systems_timer = 0
+      timers.other_systems = 0
     end
   end
 
   --Update at 10 Hz
-  if hsa_system_update_timer >= 0.1 then
+  if timers.hsa_system >= 0.1 then
     --Update Hill Start Assist System
     if extra_utils.getPart("hill_start_assist_angelo234") then
-      hsa_system.update(hsa_system_update_timer, my_veh)
+      hsa_system.update(timers.hsa_system, my_veh)
     end
 
-    hsa_system_update_timer = 0
+    timers.hsa_system = 0
 
     --p:add("hsa update")
   end
 
   --Update Auto Headlight System at 4 Hz
-  if auto_headlight_system_update_timer >= 0.25 then
+  if timers.auto_headlight >= 0.25 then
     if extra_utils.getPart("auto_headlight_angelo234") and auto_headlight_system_on then
-      if front_sensor_data ~= nil then
+      if sensor_state.front ~= nil then
         if prev_auto_headlight_system_on ~= auto_headlight_system_on then
           auto_headlight_system.systemSwitchedOn()
         end
 
-        auto_headlight_system.update(auto_headlight_system_update_timer, my_veh, front_sensor_data[2])
+        auto_headlight_system.update(timers.auto_headlight, my_veh, sensor_state.front[2])
       end
 
-      auto_headlight_system_update_timer = 0
+      timers.auto_headlight = 0
     end
 
     prev_auto_headlight_system_on = auto_headlight_system_on
@@ -1587,11 +1796,11 @@ local function onUpdate(dt)
   end
 
   --Update timers for updating systems
-  other_systems_timer = other_systems_timer + dt
-  hsa_system_update_timer = hsa_system_update_timer + dt
-  auto_headlight_system_update_timer = auto_headlight_system_update_timer + dt
+  timers.other_systems = timers.other_systems + dt
+  timers.hsa_system = timers.hsa_system + dt
+  timers.auto_headlight = timers.auto_headlight + dt
 
-  refreshAutopilotState(dt, my_veh)
+  autopilot_state.refresh(dt, my_veh)
   updateVirtualLidar(dt, my_veh)
 
   --p:finish(true)
@@ -1605,21 +1814,224 @@ local function buildCurrentFrame(veh)
   if not pos or not forward or not upVec then return nil end
   local dir, right, up = buildVirtualLidarFrame(forward, upVec)
   if not dir or not right or not up then return nil end
+  local origin = vec3(pos.x, pos.y, pos.z + 1.8)
+  local variant = last_virtual_lidar_variant
+  if not variant then
+    if extra_utils.getPart and extra_utils.getPart(AERIAL_LIDAR_PART_NAME) then
+      variant = 'aerial'
+    else
+      variant = 'ground'
+    end
+  end
+  if variant == 'aerial' then
+    local upLen = upVec:length()
+    if upLen >= 1e-6 then
+      local upNorm = upVec * (1 / upLen)
+      origin = vec3(pos.x, pos.y, pos.z) - upNorm * AERIAL_LIDAR_MOUNT_OFFSET
+    else
+      origin = vec3(pos.x, pos.y, pos.z - AERIAL_LIDAR_MOUNT_OFFSET)
+    end
+  end
   return {
-    origin = vec3(pos.x, pos.y, pos.z + 1.8),
+    origin = origin,
     dir = dir,
     right = right,
     up = up
   }
 end
 
-local function accumulateTransformedPoints(buffers, frames, curr, combined)
+local function copyVec3(value)
+  if not value then return nil end
+  return vec3(value.x, value.y, value.z)
+end
+
+local function lerpVec3(a, b, alpha)
+  if not a or not b then return nil end
+  local t = math.max(0, math.min(1, alpha or 0))
+  return vec3(
+    a.x + (b.x - a.x) * t,
+    a.y + (b.y - a.y) * t,
+    a.z + (b.z - a.z) * t
+  )
+end
+
+local function safeNormalize(v, fallback)
+  if v then
+    local len = v:length()
+    if len >= 1e-9 then
+      return v * (1 / len)
+    end
+  end
+  if fallback then
+    local copy = copyVec3(fallback)
+    if copy then
+      local len = copy:length()
+      if len >= 1e-9 then
+        return copy * (1 / len)
+      end
+    end
+  end
+  return nil
+end
+
+local function copyFrame(frame)
+  if not frame then return nil end
+  return {
+    origin = frame.origin and copyVec3(frame.origin) or nil,
+    dir = frame.dir and copyVec3(frame.dir) or nil,
+    right = frame.right and copyVec3(frame.right) or nil,
+    up = frame.up and copyVec3(frame.up) or nil
+  }
+end
+
+local function blendFrames(a, b, alpha)
+  if not a then return copyFrame(b) end
+  if not b then return copyFrame(a) end
+  local t = math.max(0, math.min(1, alpha or 0))
+  local origin = lerpVec3(a.origin, b.origin, t) or copyVec3(a.origin) or copyVec3(b.origin)
+  local dirBlend = lerpVec3(a.dir, b.dir, t)
+  local upBlend = lerpVec3(a.up, b.up, t)
+  local dir = safeNormalize(dirBlend, a.dir or b.dir)
+  local upCandidate = safeNormalize(upBlend, a.up or b.up)
+  local right = nil
+  if dir and upCandidate then
+    right = safeNormalize(dir:cross(upCandidate), a.right or b.right)
+  end
+  if not right then
+    local rightBlend = lerpVec3(a.right, b.right, t)
+    right = safeNormalize(rightBlend, a.right or b.right)
+  end
+  if not right and dir then
+    local fallback = dir:cross(vec3(0, 0, 1))
+    right = safeNormalize(fallback, nil)
+    if not right then
+      fallback = dir:cross(vec3(0, 1, 0))
+      right = safeNormalize(fallback, nil)
+    end
+  end
+  local up = nil
+  if right and dir then
+    up = safeNormalize(right:cross(dir), upCandidate or a.up or b.up)
+  else
+    up = upCandidate and copyVec3(upCandidate) or copyVec3(a.up) or copyVec3(b.up)
+    up = safeNormalize(up, a.up or b.up)
+  end
+  if dir and right then
+    dir = safeNormalize(dir, a.dir or b.dir)
+    right = safeNormalize(right, a.right or b.right)
+  end
+  if not dir then
+    dir = safeNormalize(copyVec3(a.dir) or copyVec3(b.dir), vec3(0, 1, 0)) or vec3(0, 1, 0)
+  end
+  if not right then
+    right = safeNormalize(copyVec3(a.right) or copyVec3(b.right), vec3(1, 0, 0)) or vec3(1, 0, 0)
+  end
+  if not up then
+    up = safeNormalize(copyVec3(a.up) or copyVec3(b.up), vec3(0, 0, 1)) or vec3(0, 0, 1)
+  end
+  return {
+    origin = origin,
+    dir = dir,
+    right = right,
+    up = up
+  }
+end
+
+function computeAerialReferenceFrame()
+  local entries = {}
+  for i = 1, #virtual_lidar_frames do
+    local frame = virtual_lidar_frames[i]
+    local ts = aerial_lidar_frame_times[i]
+    if frame and ts then
+      entries[#entries + 1] = {time = ts, frame = frame}
+    end
+  end
+  if #entries == 0 then
+    aerial_reference_frame = nil
+    aerial_reference_time = nil
+    return
+  end
+  table.sort(entries, function(lhs, rhs)
+    return lhs.time < rhs.time
+  end)
+  local refTime
+  if #entries == 1 then
+    refTime = entries[1].time
+  else
+    refTime = (entries[1].time + entries[#entries].time) * 0.5
+  end
+  local refFrame = nil
+  if #entries == 1 then
+    refFrame = copyFrame(entries[1].frame)
+  else
+    for i = 1, #entries - 1 do
+      local curr = entries[i]
+      local next = entries[i + 1]
+      if refTime >= curr.time and refTime <= next.time then
+        local span = next.time - curr.time
+        local alpha = span > 1e-9 and (refTime - curr.time) / span or 0
+        refFrame = blendFrames(curr.frame, next.frame, alpha)
+        break
+      end
+    end
+    if not refFrame then
+      if refTime <= entries[1].time then
+        refFrame = copyFrame(entries[1].frame)
+      else
+        refFrame = copyFrame(entries[#entries].frame)
+      end
+    end
+  end
+  if refFrame then
+    aerial_reference_frame = refFrame
+    aerial_reference_time = refTime
+  else
+    aerial_reference_frame = nil
+    aerial_reference_time = nil
+  end
+end
+
+local function shouldSkipAerialFrame(frame, curr, ts)
+  if last_virtual_lidar_variant ~= 'aerial' then return false end
+  if not frame or not curr then return false end
+
+  if aerial_reference_time and ts then
+    if math.abs(aerial_reference_time - ts) > AERIAL_LIDAR_FRAME_MAX_AGE then
+      return true
+    end
+  end
+
+  if frame.origin and curr.origin then
+    local delta = frame.origin - curr.origin
+    if delta:length() > AERIAL_LIDAR_MAX_FRAME_TRANSLATION then
+      return true
+    end
+  end
+
+  local function frameAngle(a, b)
+    if not a or not b then return 0 end
+    local dot = clampValue(a:dot(b), -1, 1)
+    return math.acos(dot)
+  end
+
+  local tilt = math.max(frameAngle(frame.up, curr.up), frameAngle(frame.dir, curr.dir))
+  if tilt > AERIAL_LIDAR_MAX_FRAME_TILT then
+    return true
+  end
+
+  return false
+end
+
+local function accumulateTransformedPoints(buffers, frames, curr, combined, times)
   for i = 1, #buffers do
     local frame = frames[i]
     if frame then
-      local bucket = buffers[i]
-      for j = 1, #bucket do
-        combined[#combined + 1] = drift_proximity.apply(bucket[j], frame, curr)
+      local skip = times and shouldSkipAerialFrame(frame, curr, times[i])
+      if not skip then
+        local bucket = buffers[i]
+        for j = 1, #bucket do
+          combined[#combined + 1] = drift_proximity.apply(bucket[j], frame, curr)
+        end
       end
     end
   end
@@ -1627,6 +2039,9 @@ end
 
 local function resolveCurrentFrame(curr, veh)
   if curr then return curr end
+  if last_virtual_lidar_variant == 'aerial' and aerial_reference_frame then
+    return aerial_reference_frame
+  end
   return buildCurrentFrame(veh or be:getPlayerVehicle(0))
 end
 
@@ -1634,7 +2049,8 @@ local function getVirtualLidarPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_point_cloud, virtual_lidar_frames, frame, combined, times)
   accumulateTransformedPoints(front_lidar_point_cloud, front_lidar_frames, frame, combined)
   if vehicle_lidar_frame then
     for i = 1, #vehicle_lidar_point_cloud do
@@ -1648,7 +2064,8 @@ local function getVirtualLidarGroundPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_ground_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_ground_point_cloud, virtual_lidar_frames, frame, combined, times)
   accumulateTransformedPoints(front_lidar_ground_point_cloud, front_lidar_frames, frame, combined)
   return combined
 end
@@ -1657,7 +2074,8 @@ local function getVirtualLidarOverheadPointCloud(curr, veh)
   local frame = resolveCurrentFrame(curr, veh)
   if not frame then return {} end
   local combined = {}
-  accumulateTransformedPoints(virtual_lidar_overhead_point_cloud, virtual_lidar_frames, frame, combined)
+  local times = last_virtual_lidar_variant == 'aerial' and aerial_lidar_frame_times or nil
+  accumulateTransformedPoints(virtual_lidar_overhead_point_cloud, virtual_lidar_frames, frame, combined, times)
   return combined
 end
 
@@ -1695,6 +2113,48 @@ local function convertPointsToWorld(points, frame, skipMap)
     end
   end
   return worldPoints
+end
+
+local function filterAerialWorldPoints(points, frame)
+  if last_virtual_lidar_variant ~= 'aerial' then return points end
+  if not points or #points == 0 then return points end
+  if not frame or not frame.origin then return points end
+  local bin = AERIAL_LIDAR_GHOST_BIN_SIZE or 0
+  if bin <= 0 then return points end
+  local inv = 1 / bin
+  local buckets = {}
+  local order = {}
+  local origin = frame.origin
+  for i = 1, #points do
+    local pt = points[i]
+    if pt then
+      local x = pt.x or 0
+      local y = pt.y or 0
+      local z = pt.z or 0
+      local key = string.format('%d:%d:%d', math.floor(x * inv + 0.5), math.floor(y * inv + 0.5), math.floor(z * inv + 0.5))
+      local dx = x - origin.x
+      local dy = y - origin.y
+      local dz = z - origin.z
+      local distSq = dx * dx + dy * dy + dz * dz
+      local bucket = buckets[key]
+      if not bucket then
+        buckets[key] = {point = pt, dist = distSq}
+        order[#order + 1] = key
+      elseif distSq < bucket.dist then
+        bucket.point = pt
+        bucket.dist = distSq
+      end
+    end
+  end
+  if #order == 0 then return points end
+  local filtered = {}
+  for i = 1, #order do
+    local bucket = buckets[order[i]]
+    if bucket and bucket.point then
+      filtered[#filtered + 1] = bucket.point
+    end
+  end
+  return filtered
 end
 
 local function gatherVehicleWorldPoints(frame)
@@ -1786,7 +2246,7 @@ function maybePublishVirtualLidarPcd(veh)
     streamReady = ok and true or false
   end
 
-  local frame = buildCurrentFrame(veh)
+  local frame = resolveCurrentFrame(nil, veh)
   if not frame then
     if exportActive then
       lidarPcdPublisher.setEnabled(false)
@@ -1798,6 +2258,12 @@ function maybePublishVirtualLidarPcd(veh)
   local mainPoints = convertPointsToWorld(getVirtualLidarPointCloud(frame, veh), frame, vehicleKeyMap)
   local groundPoints = convertPointsToWorld(getVirtualLidarGroundPointCloud(frame, veh), frame)
   local overheadPoints = convertPointsToWorld(getVirtualLidarOverheadPointCloud(frame, veh), frame)
+
+  if last_virtual_lidar_variant == 'aerial' then
+    mainPoints = filterAerialWorldPoints(mainPoints, frame)
+    groundPoints = filterAerialWorldPoints(groundPoints, frame)
+    overheadPoints = filterAerialWorldPoints(overheadPoints, frame)
+  end
 
   local payload = lidarPcdPublisher.publish(frame, {
     main = mainPoints,
@@ -1959,8 +2425,8 @@ local function onInit()
 end
 
 local function onExtensionUnloaded()
-  if autopilotDisengage then
-    autopilotDisengage()
+  if autopilot_state.disengage then
+    autopilot_state.disengage()
   end
   stopVirtualLidarStreamServer()
 end
